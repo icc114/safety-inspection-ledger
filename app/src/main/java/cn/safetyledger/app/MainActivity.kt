@@ -22,7 +22,7 @@ import java.time.*
 import java.util.UUID
 
 class MainActivity : ComponentActivity() { override fun onCreate(state:Bundle?){super.onCreate(state);val dao=AppDatabase.get(this).dao();setContent{SafetyTheme{LedgerApp(dao)}}} }
-@Composable private fun SafetyTheme(content:@Composable()->Unit)=MaterialTheme(colorScheme=lightColorScheme(primary=Color(0xFF006B4F),secondary=Color(0xFF47645A),surface=Color(0xFFF8FAF8)),content=content)
+@Composable private fun SafetyTheme(content: @Composable () -> Unit) = MaterialTheme(colorScheme=lightColorScheme(primary=Color(0xFF006B4F),secondary=Color(0xFF47645A),surface=Color(0xFFF8FAF8)),content=content)
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable fun LedgerApp(dao:LedgerDao){
@@ -46,4 +46,4 @@ class MainActivity : ComponentActivity() { override fun onCreate(state:Bundle?){
 
 @Composable fun TemplateManager(dao:LedgerDao,back:()->Unit){val scope=rememberCoroutineScope();val list by dao.templates().collectAsState(emptyList());var name by remember{mutableStateOf("")};Column(Modifier.padding(16.dp),verticalArrangement=Arrangement.spacedBy(8.dp)){Text("基础设置",style=MaterialTheme.typography.headlineSmall);OutlinedTextField(name,{name=it},label={Text("检查类型/模板名称，例如：车棚检查")},modifier=Modifier.fillMaxWidth());Button(onClick={scope.launch{dao.saveTemplate(TemplateEntity(UUID.randomUUID().toString(),name,name))};name=""},enabled=name.isNotBlank()){Text("新增检查模板")};list.forEach{Card(Modifier.fillMaxWidth()){Column(Modifier.padding(12.dp)){Text(it.name,fontWeight=FontWeight.Bold);Text("检查项目可新增、编辑、删除、上移、下移；历史记录保持不变")}}};TextButton(onClick=back){Text("返回设置")}}}
 @Composable fun TrashScreen(dao:LedgerDao,back:()->Unit){val trash by dao.trash().collectAsState(emptyList());Column(Modifier.padding(16.dp)){Text("回收站",style=MaterialTheme.typography.headlineSmall);Text("普通恢复保留同步记录；彻底删除需密码验证，并同步到手机与 PC。");trash.forEach{Text("${it.date} ${it.unit}")};TextButton(onClick=back){Text("返回")}}}
-private fun statusText(s:RecordStatus)=when(s){RecordStatus.PENDING->"待整改";RecordStatus.RECTIFYING->"整改中";RecordStatus.RECTIFIED->"已整改";RecordStatus.COMPLETE->"已完成"}
+private fun statusText(s:RecordStatus)=when(s){RecordStatus.PENDING->"PENDING";RecordStatus.RECTIFYING->"RECTIFYING";RecordStatus.RECTIFIED->"RECTIFIED";RecordStatus.COMPLETE->"COMPLETE"}
