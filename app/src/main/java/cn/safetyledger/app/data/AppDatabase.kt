@@ -9,8 +9,12 @@ import kotlinx.coroutines.flow.Flow
  @Query("SELECT * FROM template_items WHERE templateId=:id ORDER BY position") suspend fun templateItems(id:String):List<TemplateItemEntity>
  @Insert(onConflict=OnConflictStrategy.REPLACE) suspend fun saveTemplate(value:TemplateEntity)
  @Insert(onConflict=OnConflictStrategy.REPLACE) suspend fun saveTemplateItems(value:List<TemplateItemEntity>)
+ @Insert(onConflict=OnConflictStrategy.REPLACE) suspend fun saveTemplateItem(value:TemplateItemEntity)
+ @Query("DELETE FROM template_items WHERE id=:id") suspend fun deleteTemplateItem(id:String)
+ @Query("UPDATE template_items SET position=:position,updatedAt=:now WHERE id=:id") suspend fun moveTemplateItem(id:String,position:Int,now:Long=System.currentTimeMillis())
  @Query("SELECT * FROM inspections WHERE deletedAt IS NULL ORDER BY date DESC,time DESC") fun inspections():Flow<List<InspectionEntity>>
  @Query("SELECT * FROM inspection_items WHERE inspectionId=:id ORDER BY rowid") suspend fun inspectionItems(id:String):List<InspectionItemEntity>
+ @Query("SELECT * FROM inspections WHERE id=:id LIMIT 1") suspend fun inspection(id:String):InspectionEntity?
  @Query("SELECT * FROM media WHERE inspectionId=:id AND deletedAt IS NULL ORDER BY capturedAt") suspend fun media(id:String):List<MediaEntity>
  @Insert(onConflict=OnConflictStrategy.REPLACE) suspend fun saveInspection(value:InspectionEntity)
  @Insert(onConflict=OnConflictStrategy.REPLACE) suspend fun saveInspectionItems(value:List<InspectionItemEntity>)
