@@ -38,4 +38,5 @@ import kotlinx.coroutines.flow.Flow
 @Database(entities=[TemplateEntity::class,TemplateItemEntity::class,InspectionEntity::class,InspectionItemEntity::class,MediaEntity::class,TombstoneEntity::class,SyncQueueEntity::class,SettingEntity::class],version=1,exportSchema=true)
 @TypeConverters(Converters::class) abstract class AppDatabase:RoomDatabase(){ abstract fun dao():LedgerDao
  companion object { @Volatile private var instance:AppDatabase?=null; fun get(c:Context)=instance?:synchronized(this){instance?:Room.databaseBuilder(c,AppDatabase::class.java,"safety-ledger-v1.db").build().also{instance=it}};fun closeForRestore(){synchronized(this){instance?.close();instance=null}} }
+}
 class Converters { @TypeConverter fun result(v:String)=ItemResult.valueOf(v); @TypeConverter fun result(v:ItemResult)=v.name; @TypeConverter fun status(v:String)=RecordStatus.valueOf(v); @TypeConverter fun status(v:RecordStatus)=v.name; @TypeConverter fun media(v:String)=MediaKind.valueOf(v); @TypeConverter fun media(v:MediaKind)=v.name }
