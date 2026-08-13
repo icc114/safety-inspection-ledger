@@ -16,8 +16,54 @@ import kotlinx.coroutines.launch
 import java.time.LocalDate
 import java.util.UUID
 
-class MainActivity:ComponentActivity(){override fun onCreate(b:Bundle?){super.onCreate(b);val dao=AppDatabase.get(this).dao();setContent{MaterialTheme(colorScheme=lightColorScheme(primary=Color(0xFF006C4C))){LedgerApp(dao)}}}}
-@Composable fun LedgerApp(dao:LedgerDao){val scope=rememberCoroutineScope();val records by dao.inspections().collectAsState(initial=emptyList());var screen by remember{mutableStateOf("home")};Scaffold(topBar={TopAppBar(title={Text("安全检查台账")},actions={TextButton(onClick={screen="templates"}){Text("模板管理")};TextButton(onClick={screen="trash"}){Text("回收站")}})}){pad->Column(Modifier.padding(pad).padding(16.dp)){when(screen){"home"->{Button(onClick={screen="form"},modifier=Modifier.fillMaxWidth().height(52.dp)){Text("检查填报")};Spacer(Modifier.height(12.dp));Text("${LocalDate.now().year} 年 ${LocalDate.now().monthValue} 月",style=MaterialTheme.typography.titleLarge);Text("筛选：当日｜本月｜本季度｜本年度｜全部    每页：10 / 20 / 50 / 100 / 200");LazyColumn{items(records){r->Card(Modifier.fillMaxWidth().padding(vertical=5.dp),onClick={}){Column(Modifier.padding(12.dp)){Text("${r.date}  ${r.type}");Text("${r.unit} · ${r.location}");Text(r.status.name)}}}}};"form"->InspectionForm{r->scope.launch{dao.saveInspection(r)};screen="home"};"templates"->TemplateManager(dao){screen="home"};else->TrashScreen(dao){screen="home"}}}}}
-@Composable fun InspectionForm(save:(InspectionEntity)->Unit){var unit by remember{mutableStateOf("")};var location by remember{mutableStateOf("")};var type by remember{mutableStateOf("")};Column{Text("新建检查",style=MaterialTheme.typography.headlineSmall);listOf("检查类型" to type,"被检查单位" to unit,"检查地点" to location).forEachIndexed{i,(label,value)->OutlinedTextField(value=value,onValueChange={when(i){0->type=it;1->unit=it;else->location=it}},label={Text(label)},modifier=Modifier.fillMaxWidth())};Text("检查项目状态：合格 / 不合格 / 不适用；不合格时填写现场问题并添加照片");Button(onClick={save(InspectionEntity(UUID.randomUUID().toString(),"",LocalDate.now().toString(),java.time.LocalTime.now().withNano(0).toString(),type,unit,location,"","","","","","","","","",status=RecordStatus.COMPLETE))},enabled=unit.isNotBlank()&&location.isNotBlank()){Text("保存检查记录")}}
-@Composable fun TemplateManager(dao:LedgerDao,back:()->Unit){val scope=rememberCoroutineScope();val templates by dao.templates().collectAsState(emptyList());var name by remember{mutableStateOf("")};Column{Text("检查模板",style=MaterialTheme.typography.headlineSmall);OutlinedTextField(name,{name=it},label={Text("模板名称")});Button(onClick={scope.launch{dao.saveTemplate(TemplateEntity(UUID.randomUUID().toString(),name,"自定义"));name=""}},enabled=name.isNotBlank()){Text("新建模板")};templates.forEach{Text("${it.name} · ${it.category} · ${if(it.active)"启用" else "停用"}")};Text("项目支持新增、编辑、删除与上移/下移，顺序持久化于 Room。") ;TextButton(onClick=back){Text("返回")}}}
-@Composable fun TrashScreen(dao:LedgerDao,back:()->Unit){val trash by dao.trash().collectAsState(emptyList());Column{Text("回收站",style=MaterialTheme.typography.headlineSmall);trash.forEach{Text("${it.date} ${it.unit}")};Text("恢复可撤销普通删除；永久删除要求密码并写入 tombstone。") ;TextButton(onClick=back){Text("返回")}}}
+class MainActivity : ComponentActivity() {
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        val dao = AppDatabase.get(this).dao()
+        setContent { MaterialTheme(colorScheme = lightColorScheme(primary = Color(0xFF006C4C))) { LedgerApp(dao) } }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun LedgerApp(dao: LedgerDao) {
+    val scope = rememberCoroutineScope()
+    val records by dao.inspections().collectAsState(initial = emptyList())
+    var screen by remember { mutableStateOf("home") }
+    Scaffold(topBar = { TopAppBar(title = { Text("\u5b89\u5168\u68c0\u67e5\u53f0\u8d26") }, actions = {
+        TextButton(onClick = { screen = "templates" }) { Text("\u6a21\u677f\u7ba1\u7406") }
+        TextButton(onClick = { screen = "trash" }) { Text("\u56de\u6536\u7ad9") }
+    }) }) { padding ->
+        Column(Modifier.padding(padding).padding(16.dp)) {
+            when (screen) {
+                "home" -> {
+                    Button(onClick = { screen = "form" }, modifier = Modifier.fillMaxWidth().height(52.dp)) { Text("\u68c0\u67e5\u586b\u62a5") }
+                    Spacer(Modifier.height(12.dp))
+                    Text("${LocalDate.now().year} \u5e74 ${LocalDate.now().monthValue} \u6708", style = MaterialTheme.typography.titleLarge)
+                    Text("\u7b5b\u9009\uff1a\u5f53\u65e5 | \u672c\u6708 | \u672c\u5b63\u5ea6 | \u672c\u5e74\u5ea6 | \u5168\u90e8    \u6bcf\u9875\uff1a10 / 20 / 50 / 100 / 200")
+                    LazyColumn { items(records) { record -> Card(Modifier.fillMaxWidth().padding(vertical = 5.dp)) { Column(Modifier.padding(12.dp)) { Text("${record.date}  ${record.type}"); Text("${record.unit} - ${record.location}"); Text(record.status.name) } } } }
+                }
+                "form" -> InspectionForm { record -> scope.launch { dao.saveInspection(record) }; screen = "home" }
+                "templates" -> TemplateManager(dao) { screen = "home" }
+                else -> TrashScreen(dao) { screen = "home" }
+            }
+        }
+    }
+}
+
+@Composable fun InspectionForm(save: (InspectionEntity) -> Unit) {
+    var unit by remember { mutableStateOf("") }; var location by remember { mutableStateOf("") }; var type by remember { mutableStateOf("") }
+    Column { Text("\u65b0\u5efa\u68c0\u67e5", style = MaterialTheme.typography.headlineSmall)
+        listOf("\u68c0\u67e5\u7c7b\u578b" to type, "\u88ab\u68c0\u67e5\u5355\u4f4d" to unit, "\u68c0\u67e5\u5730\u70b9" to location).forEachIndexed { i, pair -> OutlinedTextField(pair.second, { when(i) { 0 -> type=it; 1 -> unit=it; else -> location=it } }, label={Text(pair.first)}, modifier=Modifier.fillMaxWidth()) }
+        Button(onClick = { save(InspectionEntity(UUID.randomUUID().toString(), "", LocalDate.now().toString(), java.time.LocalTime.now().withNano(0).toString(), type, unit, location, "", "", "", "", "", "", "", "")) }, enabled=unit.isNotBlank() && location.isNotBlank()) { Text("\u4fdd\u5b58\u68c0\u67e5\u8bb0\u5f55") }
+    }
+}
+
+@Composable fun TemplateManager(dao: LedgerDao, back: () -> Unit) {
+    val scope=rememberCoroutineScope(); val templates by dao.templates().collectAsState(emptyList()); var name by remember { mutableStateOf("") }
+    Column { Text("\u68c0\u67e5\u6a21\u677f", style=MaterialTheme.typography.headlineSmall); OutlinedTextField(name,{name=it},label={Text("\u6a21\u677f\u540d\u79f0")}); Button(onClick={scope.launch { dao.saveTemplate(TemplateEntity(UUID.randomUUID().toString(),name,"\u81ea\u5b9a\u4e49")); name="" }},enabled=name.isNotBlank()){Text("\u65b0\u5efa\u6a21\u677f")}; templates.forEach { Text("${it.name} - ${it.category}") }; TextButton(onClick=back){Text("\u8fd4\u56de")} }
+}
+
+@Composable fun TrashScreen(dao: LedgerDao, back: () -> Unit) {
+    val trash by dao.trash().collectAsState(emptyList()); Column { Text("\u56de\u6536\u7ad9", style=MaterialTheme.typography.headlineSmall); trash.forEach { Text("${it.date} ${it.unit}") }; TextButton(onClick=back){Text("\u8fd4\u56de")} }
+}
