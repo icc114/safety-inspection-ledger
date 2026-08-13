@@ -1,11 +1,10 @@
-plugins { id("com.android.application"); id("org.jetbrains.kotlin.android"); id("com.google.devtools.ksp") }
+plugins { id("com.android.application"); id("org.jetbrains.kotlin.android"); id("org.jetbrains.kotlin.plugin.compose"); id("com.google.devtools.ksp") }
 
 android {
     namespace = "cn.safetyledger.app"
     compileSdk = 35
     defaultConfig { applicationId = "cn.safetyledger.app"; minSdk = 26; targetSdk = 35; versionCode = 1; versionName = "1.0.0" }
     buildFeatures { compose = true; buildConfig = true }
-    composeOptions { kotlinCompilerExtensionVersion = "1.5.15" }
     packaging { resources.excludes += "/META-INF/{AL2.0,LGPL2.1}" }
 }
 
