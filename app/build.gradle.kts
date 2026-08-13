@@ -3,7 +3,7 @@ plugins { id("com.android.application"); id("org.jetbrains.kotlin.android"); id(
 android {
     namespace = "cn.safetyledger.app"
     compileSdk = 35
-    defaultConfig { applicationId = "cn.safetyledger.app"; minSdk = 26; targetSdk = 35; versionCode = 2; versionName = "1.1.0" }
+    defaultConfig { applicationId = "cn.safetyledger.app"; minSdk = 26; targetSdk = 35; versionCode = 3; versionName = "1.2.0" }
     buildFeatures { compose = true; buildConfig = true }
     packaging { resources.excludes += "/META-INF/{AL2.0,LGPL2.1}" }
     compileOptions { sourceCompatibility = JavaVersion.VERSION_17; targetCompatibility = JavaVersion.VERSION_17 }

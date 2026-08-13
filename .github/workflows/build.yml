@@ -48,6 +48,19 @@ jobs:
           path: 安全检查台账-*.apk
           if-no-files-found: error
 
+  source-package:
+    runs-on: ubuntu-latest
+    needs: source-tests
+    steps:
+      - uses: actions/checkout@v4
+      - name: Create complete source package
+        run: git archive --format=zip --output="安全检查台账-完整源码-${GITHUB_SHA}.zip" HEAD
+      - uses: actions/upload-artifact@v4
+        with:
+          name: 安全检查台账-完整源码
+          path: 安全检查台账-完整源码-*.zip
+          if-no-files-found: error
+
   windows-package:
     runs-on: ubuntu-latest
     needs: source-tests
