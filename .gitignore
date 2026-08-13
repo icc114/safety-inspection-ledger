@@ -1,4 +1,8 @@
 .gradle/
-**/build/
+.idea/
 local.properties
-*.jks
+**/build/
+*.iml
+*.apk
+work/
+outputs/
