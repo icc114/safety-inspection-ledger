@@ -2,6 +2,8 @@ package cn.safetyledger.app.data
 
 import android.content.Context
 import androidx.room.*
+import androidx.room.migration.Migration
+import androidx.sqlite.db.SupportSQLiteDatabase
 import kotlinx.coroutines.flow.Flow
 
 @Dao interface LedgerDao {
@@ -39,8 +41,13 @@ import kotlinx.coroutines.flow.Flow
  @Query("SELECT * FROM settings WHERE `key`=:key LIMIT 1") suspend fun setting(key:String):SettingEntity?
 }
 
-@Database(entities=[TemplateEntity::class,TemplateItemEntity::class,InspectionEntity::class,InspectionItemEntity::class,MediaEntity::class,TombstoneEntity::class,SyncQueueEntity::class,SettingEntity::class],version=1,exportSchema=true)
+@Database(entities=[TemplateEntity::class,TemplateItemEntity::class,InspectionEntity::class,InspectionItemEntity::class,MediaEntity::class,TombstoneEntity::class,SyncQueueEntity::class,SettingEntity::class],version=2,exportSchema=true)
 @TypeConverters(Converters::class) abstract class AppDatabase:RoomDatabase(){ abstract fun dao():LedgerDao
- companion object { @Volatile private var instance:AppDatabase?=null; fun get(c:Context)=instance?:synchronized(this){instance?:Room.databaseBuilder(c,AppDatabase::class.java,"safety-ledger-v1.db").build().also{instance=it}};fun closeForRestore(){synchronized(this){instance?.close();instance=null}} }
+ companion object {
+  private val MIGRATION_1_2=object:Migration(1,2){override fun migrate(db:SupportSQLiteDatabase){db.execSQL("ALTER TABLE inspections ADD COLUMN archiveOnly INTEGER NOT NULL DEFAULT 0");db.execSQL("ALTER TABLE inspections ADD COLUMN archiveBlobId TEXT");db.execSQL("ALTER TABLE inspections ADD COLUMN archivePageCount INTEGER NOT NULL DEFAULT 0")}}
+  @Volatile private var instance:AppDatabase?=null
+  fun get(c:Context)=instance?:synchronized(this){instance?:Room.databaseBuilder(c,AppDatabase::class.java,"safety-ledger-v1.db").addMigrations(MIGRATION_1_2).build().also{instance=it}}
+  fun closeForRestore(){synchronized(this){instance?.close();instance=null}}
+ }
 }
 class Converters { @TypeConverter fun result(v:String)=ItemResult.valueOf(v); @TypeConverter fun result(v:ItemResult)=v.name; @TypeConverter fun status(v:String)=RecordStatus.valueOf(v); @TypeConverter fun status(v:RecordStatus)=v.name; @TypeConverter fun media(v:String)=MediaKind.valueOf(v); @TypeConverter fun media(v:MediaKind)=v.name }

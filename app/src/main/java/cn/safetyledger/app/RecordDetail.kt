@@ -15,6 +15,7 @@ import cn.safetyledger.app.media.MediaActions
 import cn.safetyledger.app.pdf.PdfExporter
 import cn.safetyledger.app.pdf.PrintableInspection
 import cn.safetyledger.app.sync.CloudSyncScheduler
+import cn.safetyledger.app.sync.CloudSyncEngine
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -23,6 +24,19 @@ import java.io.File
 @Composable
 fun RecordDetail(record:InspectionEntity,dao:LedgerDao,back:()->Unit){
     val context=LocalContext.current;val scope=rememberCoroutineScope()
+    if(record.archiveOnly){
+        var message by remember{mutableStateOf("")};val engine=remember{CloudSyncEngine(context,dao)}
+        Column(Modifier.fillMaxSize().padding(16.dp),verticalArrangement=Arrangement.spacedBy(12.dp)){
+            Text(record.type,style=MaterialTheme.typography.headlineSmall);Text("${record.date} · 云端PDF归档")
+            Text("详细检查数据、照片和签名已合并保存在云端PDF中，本机原始照片空间已释放。")
+            Button(onClick={scope.launch{runCatching{withContext(Dispatchers.IO){
+                val file=File(context.cacheDir,"exports/${record.date}-${record.type}-归档.pdf").apply{parentFile?.mkdirs();writeBytes(engine.downloadArchive(record))};file
+            }}.onSuccess{file->val uri=FileProvider.getUriForFile(context,"${context.packageName}.files",file);context.startActivity(Intent.createChooser(Intent(Intent.ACTION_SEND).apply{type="application/pdf";putExtra(Intent.EXTRA_STREAM,uri);addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)},"查看云端归档PDF"))}.onFailure{message="下载失败：${it.message}"}}},modifier=Modifier.fillMaxWidth()){Text("下载并分享归档 PDF")}
+            if(message.isNotBlank())Text(message,color=MaterialTheme.colorScheme.error)
+            TextButton(onClick=back){Text("返回")}
+        }
+        return
+    }
     var rows by remember{mutableStateOf<List<InspectionItemEntity>>(emptyList())}
     var media by remember{mutableStateOf<List<MediaEntity>>(emptyList())}
     var detail by remember{mutableStateOf(record.rectificationDetail)};var review by remember{mutableStateOf(record.reviewResult)}

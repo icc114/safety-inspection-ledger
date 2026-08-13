@@ -76,6 +76,14 @@ fun CloudSettingsScreen(dao:LedgerDao,onBack:()->Unit){
                     busy=false
                 }
             },modifier=Modifier.fillMaxWidth()){Text("立即双向同步")}
+            if(current!=null)OutlinedButton(enabled=!busy,onClick={
+                busy=true;result="正在把六个月前记录生成PDF并上传云端…";scope.launch{
+                    runCatching{withContext(Dispatchers.IO){engine.archiveBefore()}}
+                        .onSuccess{summary->result="归档完成：${summary.archived}条，释放本机照片空间 ${"%.1f".format(summary.releasedBytes/1024.0/1024.0)} MB";refresh()}
+                        .onFailure{result="归档失败：${it.message}；未成功的本机资料不会删除";showSyncFailure(context,result)}
+                    busy=false
+                }
+            },modifier=Modifier.fillMaxWidth()){Text("归档六个月前记录并释放本机空间")}
             if(result.isNotBlank())Text(result,color=if(result.contains("失败"))MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary)
             TextButton(onClick=onBack){Text("返回设置")}
         }

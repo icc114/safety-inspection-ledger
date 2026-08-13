@@ -1,10 +1,14 @@
 package cn.safetyledger.app.sync
 
 import android.content.Context
+import android.graphics.pdf.PdfRenderer
+import android.os.ParcelFileDescriptor
 import android.util.Base64
 import androidx.security.crypto.EncryptedSharedPreferences
 import androidx.security.crypto.MasterKey
 import cn.safetyledger.app.data.*
+import cn.safetyledger.app.pdf.PdfExporter
+import cn.safetyledger.app.pdf.PrintableInspection
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.MediaType.Companion.toMediaType
@@ -17,6 +21,7 @@ import java.io.File
 import java.security.MessageDigest
 import java.security.SecureRandom
 import java.time.Instant
+import java.time.LocalDate
 import java.util.UUID
 import java.util.concurrent.TimeUnit
 import javax.crypto.Cipher
@@ -26,6 +31,7 @@ import javax.crypto.spec.PBEKeySpec
 import javax.crypto.spec.SecretKeySpec
 
 data class CloudSummary(val uploaded:Int=0,val downloaded:Int=0,val trashed:Int=0,val removed:Int=0,val conflicts:Int=0)
+data class ArchiveSummary(val archived:Int,val releasedBytes:Long)
 data class ConnectedCloud(val teamName:String,val role:String,val activeDeviceCount:Int=1)
 
 private data class CloudConfig(
@@ -102,7 +108,14 @@ class CloudSyncEngine(private val context:Context,private val dao:LedgerDao=AppD
                         if(record!=null)dao.trash(id,parseTime(meta.opt("deletedAt"))?:System.currentTimeMillis())
                         states[id]=RecordSyncState(remoteVersion,record?.updatedAt?:0,"trash");trashed++
                     }
-                    "archived"->states[id]=RecordSyncState(remoteVersion,record?.updatedAt?:state?.syncedUpdatedAt?:0,"archived")
+                    "archived"->if(state==null||remoteVersion>state.version||record?.archiveOnly!=true){
+                        if(record!=null&&state!=null&&!record.archiveOnly&&record.updatedAt>state.syncedUpdatedAt){duplicateConflict(record);conflicts++}
+                        val updated=parseTime(meta.opt("updatedAt"))?:record?.updatedAt?:System.currentTimeMillis()
+                        val placeholder=(record?:InspectionEntity(id=id,templateId=meta.optString("typeId","default"),date=meta.optString("date"),time="00:00",type=meta.optString("typeName","检查记录"),unit="",location="",dutyOfficer="",inspector1="",inspector2="",inspectee="",conclusion="",rectificationAdvice="",responsiblePerson="",deadline=""))
+                            .copy(updatedAt=updated,deletedAt=null,archiveOnly=true,archiveBlobId=meta.optString("archiveBlobId"),archivePageCount=meta.optInt("archivePageCount",1))
+                        dao.saveInspection(placeholder);dao.deleteInspectionItems(id);dao.purgeMedia(id);File(context.filesDir,"media/$id").deleteRecursively();local[id]=placeholder
+                        states[id]=RecordSyncState(remoteVersion,updated,"archived")
+                    }
                     else->if(state==null||remoteVersion>state.version||record==null){
                         if(record!=null&&state!=null&&record.updatedAt>state.syncedUpdatedAt){
                             duplicateConflict(record);conflicts++
@@ -129,7 +142,11 @@ class CloudSyncEngine(private val context:Context,private val dao:LedgerDao=AppD
                         api(config,"/api/v1/records/${record.id}/trash","POST",JSONObject().put("version",version).put("updatedAt",Instant.ofEpochMilli(record.updatedAt).toString()))
                         states[record.id]=RecordSyncState(version,record.updatedAt,"trash");trashed++
                     }
-                } else if(state==null||state.status!="active"||record.updatedAt>state.syncedUpdatedAt){
+                } else if(record.archiveOnly&&state?.status=="trash"&&record.updatedAt>state.syncedUpdatedAt){
+                    val version=state.version+1
+                    api(config,"/api/v1/records/${record.id}/restore","POST",JSONObject().put("version",version).put("updatedAt",Instant.ofEpochMilli(record.updatedAt).toString()))
+                    states[record.id]=RecordSyncState(version,record.updatedAt,"archived")
+                } else if(!record.archiveOnly&&(state==null||state.status!="active"||record.updatedAt>state.syncedUpdatedAt)){
                     val version=(state?.version?:0)+1
                     uploadRecord(config,record,version)
                     states[record.id]=RecordSyncState(version,record.updatedAt,"active");uploaded++
@@ -152,6 +169,36 @@ class CloudSyncEngine(private val context:Context,private val dao:LedgerDao=AppD
     }
 
     suspend fun summary():JSONObject?=withContext(Dispatchers.IO){dao.setting("cloud_config")?.value?.let{runCatching{JSONObject(it)}.getOrNull()}}
+
+    suspend fun archiveBefore(cutoff:LocalDate=LocalDate.now().minusMonths(6)):ArchiveSummary=withContext(Dispatchers.IO){
+        sync()
+        val config=loadConfig();val states=loadStates();var archived=0;var released=0L
+        val candidates=dao.allInspections().filter{it.deletedAt==null&&!it.archiveOnly&&runCatching{LocalDate.parse(it.date).isBefore(cutoff)}.getOrDefault(false)}
+        for(record in candidates){
+            val state=states[record.id]?:continue
+            val media=dao.media(record.id);val items=dao.inspectionItems(record.id)
+            val file=File(context.cacheDir,"archive/${record.id}.pdf").apply{parentFile?.mkdirs()}
+            file.outputStream().use{PdfExporter().export(listOf(PrintableInspection(record,items,media)),it)}
+            val bytes=file.readBytes();val pages=ParcelFileDescriptor.open(file,ParcelFileDescriptor.MODE_READ_ONLY).use{descriptor->PdfRenderer(descriptor).use{it.pageCount}}
+            val blobId="archive:${record.id}:${System.currentTimeMillis().toString(36)}:${UUID.randomUUID().toString().take(6)}"
+            uploadBlob(config,blobId,"archive",record.id,"application/pdf",bytes)
+            val now=System.currentTimeMillis();val version=state.version+1
+            api(config,"/api/v1/records/${record.id}/archive","POST",JSONObject().put("version",version).put("updatedAt",Instant.ofEpochMilli(now).toString())
+                .put("archiveBlobId",blobId).put("pageStart",0).put("pageCount",pages))
+            released+=media.mapNotNull{it.localPath?.let(::File)?.takeIf(File::exists)?.length()}.sum()
+            dao.saveInspection(record.copy(updatedAt=now,archiveOnly=true,archiveBlobId=blobId,archivePageCount=pages))
+            dao.deleteInspectionItems(record.id);dao.purgeMedia(record.id);File(context.filesDir,"media/${record.id}").deleteRecursively()
+            states[record.id]=RecordSyncState(version,now,"archived");file.delete();archived++
+        }
+        saveStates(states)
+        ArchiveSummary(archived,released)
+    }
+
+    suspend fun downloadArchive(record:InspectionEntity):ByteArray=withContext(Dispatchers.IO){
+        require(record.archiveOnly&&!record.archiveBlobId.isNullOrBlank()){"这条记录还没有云端PDF归档"}
+        val blobId=requireNotNull(record.archiveBlobId)
+        downloadBlob(loadConfig(),blobId)
+    }
 
     private suspend fun uploadRecord(config:CloudConfig,record:InspectionEntity,version:Int){
         val payload=serializeRecord(record).toString().toByteArray(Charsets.UTF_8)
@@ -235,7 +282,7 @@ class CloudSyncEngine(private val context:Context,private val dao:LedgerDao=AppD
             android?.optString("conclusion","")?:"",android?.optString("rectificationAdvice",rectification.optString("opinion"))?:rectification.optString("opinion"),
             android?.optString("responsiblePerson","")?:"",android?.optString("deadline","")?:"",android?.optString("rectificationDetail","")?:"",
             android?.optString("reviewResult","")?:"",runCatching{RecordStatus.valueOf(android?.optString("status")?:if(rectification.optBoolean("completed"))"COMPLETE" else "PENDING")}.getOrDefault(RecordStatus.PENDING),
-            updated,null)
+            updated,null,false,null,0)
         val sourceItems=android?.optJSONArray("items")?:json.optJSONArray("items")?:JSONArray()
         val items=mutableListOf<InspectionItemEntity>()
         for(index in 0 until sourceItems.length()){
