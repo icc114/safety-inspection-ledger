@@ -990,7 +990,7 @@
           sequence: index + 1,
           category: String(item.category || ('检查类别' + (index + 1))).slice(0, 30),
           standard: String(item.standard || '').slice(0, 500),
-          result: item.result === 'yes' || item.result === 'no' ? item.result : '',
+          result: item.result === 'yes' || item.result === 'no' || item.result === 'na' ? item.result : '',
           issue: String(item.issue || '').slice(0, 500)
         };
       });
@@ -1049,6 +1049,7 @@
         '<div class="item-result">' +
           '<label class="result-option yes' + (item.result === 'yes' ? ' selected' : '') + '"><input type="radio" name="result-' + index + '" value="yes" ' + (item.result === 'yes' ? 'checked' : '') + '>是</label>' +
           '<label class="result-option no' + (item.result === 'no' ? ' selected' : '') + '"><input type="radio" name="result-' + index + '" value="no" ' + (item.result === 'no' ? 'checked' : '') + '>否</label>' +
+          '<label class="result-option na' + (item.result === 'na' ? ' selected' : '') + '"><input type="radio" name="result-' + index + '" value="na" ' + (item.result === 'na' ? 'checked' : '') + '>不适用</label>' +
         '</div>' +
         (noSelected ? '<div class="issue-editor"><label>现场情况/问题</label><textarea maxlength="500" placeholder="请填写发现的问题和整改要求">' + escapeHtml(item.issue || '') + '</textarea></div>' : '') +
       '</div>';
@@ -1057,7 +1058,7 @@
       input.addEventListener('change', function () {
         const index = Number(input.closest('.inspection-item').dataset.itemIndex);
         state.formRecord.items[index].result = input.value;
-        if (input.value === 'yes') state.formRecord.items[index].issue = '';
+        if (input.value !== 'no') state.formRecord.items[index].issue = '';
         renderInspectionItems();
         updateRectificationVisibility();
       });
@@ -1068,7 +1069,7 @@
         state.formRecord.items[index].issue = textarea.value;
       });
     });
-    const completed = state.formRecord.items.filter(function (item) { return item.result === 'yes' || item.result === 'no'; }).length;
+    const completed = state.formRecord.items.filter(function (item) { return item.result === 'yes' || item.result === 'no' || item.result === 'na'; }).length;
     el.itemsProgress.textContent = completed + '/' + state.formRecord.items.length;
   }
 
@@ -1526,7 +1527,7 @@
     if (!record.inspectionTypeId) return '请选择检查类型';
     if (!record.date) return '请选择检查时间';
     if (!record.location) return '请填写检查地点';
-    const unanswered = record.items.findIndex(function (item) { return item.result !== 'yes' && item.result !== 'no'; });
+    const unanswered = record.items.findIndex(function (item) { return item.result !== 'yes' && item.result !== 'no' && item.result !== 'na'; });
     if (unanswered >= 0) return '请完成第 ' + (unanswered + 1) + ' 项检查结果';
     const missingIssue = record.items.findIndex(function (item) { return item.result === 'no' && !String(item.issue || '').trim(); });
     if (missingIssue >= 0) return '请填写第 ' + (missingIssue + 1) + ' 项现场问题';
@@ -2898,7 +2899,7 @@
     const boxSize = 9 * scale;
     const textSize = 9.2 * scale;
     const gap = Math.max(2.4, 4 * scale);
-    const blockHeight = boxSize * 2 + gap;
+    const blockHeight = boxSize * 3 + gap * 2;
     const topPadding = Math.max(1.5, (height - blockHeight) / 2);
     const textWidth = font.widthOfTextAtSize('是', textSize);
     const groupWidth = boxSize + 4 * scale + textWidth;
@@ -2906,10 +2907,13 @@
     const textX = boxX + boxSize + 4 * scale;
     const firstY = top - topPadding - boxSize;
     const secondY = firstY - gap - boxSize;
+    const thirdY = secondY - gap - boxSize;
     drawPdfCheckbox(page, boxX, firstY, boxSize, result === 'yes', colors);
     drawPdfCheckbox(page, boxX, secondY, boxSize, result === 'no', colors);
+    drawPdfCheckbox(page, boxX, thirdY, boxSize, result === 'na', colors);
     page.drawText('是', { x: textX, y: firstY - 0.8 * scale, size: textSize, font: font, color: colors.ink });
     page.drawText('否', { x: textX, y: secondY - 0.8 * scale, size: textSize, font: font, color: colors.ink });
+    page.drawText('不适用', { x: textX, y: thirdY - 0.8 * scale, size: textSize * 0.72, font: font, color: colors.ink });
   }
 
   function drawPdfCheckbox(page, x, y, size, checked, colors) {

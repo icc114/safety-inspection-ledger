@@ -532,6 +532,7 @@ button:disabled { cursor: not-allowed; opacity: 0.45; }
 .result-option input { position: absolute; opacity: 0; pointer-events: none; }
 .result-option.selected.yes { color: var(--success); border-color: #77c09b; background: var(--success-soft); }
 .result-option.selected.no { color: var(--danger); border-color: #e4a19d; background: var(--danger-soft); }
+.result-option.selected.na { color: #5a6475; border-color: #aab3c2; background: #eef1f5; }
 .issue-editor { grid-column: 1 / -1; display: grid; grid-template-columns: 92px 1fr; align-items: start; gap: 8px; padding: 10px 12px; border-top: 1px dashed #e3aaa6; background: #fff9f8; }
 .issue-editor label { color: var(--danger); font-size: 12px; font-weight: 700; padding-top: 10px; }
 .issue-editor textarea { width: 100%; min-height: 64px; resize: vertical; padding: 9px 10px; border: 1px solid #e5bbb8; border-radius: 8px; outline: none; line-height: 1.45; }

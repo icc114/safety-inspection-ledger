@@ -246,7 +246,7 @@ class CloudSyncEngine(private val context:Context,private val dao:LedgerDao=AppD
         val media=runBlockingDao{dao.media(record.id)}
         val standardItems=JSONArray()
         items.forEachIndexed{index,item->standardItems.put(JSONObject().put("sequence",index+1).put("category",item.category).put("standard",item.standard)
-            .put("result",when(item.result){ItemResult.FAIL->"no";else->"yes"}).put("androidResult",item.result.name).put("issue",item.problem))}
+            .put("result",when(item.result){ItemResult.FAIL->"no";ItemResult.NA->"na";ItemResult.PASS->"yes"}).put("androidResult",item.result.name).put("issue",item.problem))}
         fun photoJson(value:MediaEntity)=JSONObject().put("id",value.id).put("data",fileData(value.localPath)).put("capturedAt",Instant.ofEpochMilli(value.capturedAt).toString())
             .put("location",record.location).put("latitude",value.latitude).put("longitude",value.longitude)
         val inspectionPhotos=JSONArray();val rectificationPhotos=JSONArray();val signatures=JSONObject().put("inspector1","").put("inspector2","").put("inspected","")
