@@ -8,9 +8,9 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.matchParentSize
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -50,7 +50,7 @@ fun SignatureDialog(inspectionId: String, kind: MediaKind, title: String, dao: L
         title = { Text(title) },
         text = {
             Box(Modifier.fillMaxWidth().height(230.dp).background(Color.White)) {
-                Canvas(Modifier.matchParentSize().onSizeChanged { canvasSize = it }.pointerInput(Unit) {
+                Canvas(Modifier.fillMaxSize().onSizeChanged { canvasSize = it }.pointerInput(Unit) {
                     detectDragGestures(
                         onDragStart = { point -> strokes = strokes + listOf(listOf(point)) },
                         onDrag = { change, _ -> change.consume(); strokes = strokes.dropLast(1) + listOf(strokes.last() + change.position) },

@@ -40,8 +40,9 @@ fun MediaActions(inspectionId: String, kind: MediaKind, location: String, dao: L
     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         Button(onClick = {
             val file = File(context.cacheDir, "camera/${UUID.randomUUID()}.jpg").apply { parentFile?.mkdirs(); createNewFile() }
-            cameraUri = FileProvider.getUriForFile(context, "${context.packageName}.files", file)
-            camera.launch(cameraUri)
+            val uri = FileProvider.getUriForFile(context, "${context.packageName}.files", file)
+            cameraUri = uri
+            camera.launch(uri)
         }) { Text("拍照") }
         OutlinedButton(onClick = { gallery.launch("image/*") }) { Text("从相册选择") }
     }
