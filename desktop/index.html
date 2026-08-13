@@ -1,0 +1,403 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1, user-scalable=no">
+  <meta name="theme-color" content="#1559d6">
+  <title>安全检查台账</title>
+  <link rel="stylesheet" href="app.css">
+</head>
+<body>
+  <div id="app">
+    <section id="home-view" class="view active" aria-label="检查记录首页">
+      <header class="app-header">
+        <h1>安全检查台账</h1>
+        <div class="header-button-group">
+          <button id="inspection-type-settings-btn" class="header-secondary-btn" type="button">基础设置</button>
+          <button id="new-record-btn" class="primary-btn compact" type="button">＋ 检查填报</button>
+        </div>
+      </header>
+
+      <main class="home-main">
+        <section class="calendar-card" aria-label="检查记录日历">
+          <div class="calendar-date-summary">
+            <div>
+              <strong id="calendar-focus-title">8月11日 星期二</strong>
+              <span id="calendar-focus-lunar">六月廿九</span>
+            </div>
+            <button id="calendar-today-btn" class="calendar-today-btn" type="button">回到今天</button>
+          </div>
+          <div class="calendar-month-toolbar">
+            <h2 id="calendar-month-title">2026年8月</h2>
+            <div>
+              <button id="calendar-prev-btn" class="calendar-nav-btn" type="button" aria-label="上个月">上月</button>
+              <button id="calendar-next-btn" class="calendar-nav-btn" type="button" aria-label="下个月">下月</button>
+            </div>
+          </div>
+          <div class="calendar-search-row">
+            <label for="calendar-search-date">查找日期</label>
+            <input id="calendar-search-date" type="date">
+            <button id="calendar-search-btn" class="secondary-btn" type="button">查看</button>
+          </div>
+          <div class="calendar-weekdays" aria-hidden="true">
+            <span>一</span><span>二</span><span>三</span><span>四</span><span>五</span><span>六</span><span class="sunday">日</span>
+          </div>
+          <div id="calendar-grid" class="calendar-grid"></div>
+          <div class="calendar-legend" aria-label="日历标记说明">
+            <span><i class="legend-dot record"></i>蓝底日期有检查记录</span>
+            <span><i class="legend-dot holiday"></i>法定放假</span>
+            <span><i class="legend-dot workday"></i>调休上班</span>
+          </div>
+          <p class="calendar-note">联网时每日检查中国法定节假日更新；断网自动使用本机缓存及内置安排</p>
+        </section>
+
+        <section class="records-section" aria-label="检查记录列表">
+          <div class="records-toolbar">
+            <button id="selection-mode-btn" class="multi-select-btn" type="button" aria-pressed="false">多选导出</button>
+            <label class="record-range-label" for="record-range-select">
+              <span>显示范围</span>
+              <select id="record-range-select">
+                <option value="all">显示全部记录</option>
+                <option value="day">按日显示</option>
+                <option value="month">按月显示</option>
+                <option value="quarter">按季度显示</option>
+                <option value="year">按年显示</option>
+              </select>
+            </label>
+            <label class="record-type-filter-label" for="record-type-filter-select">
+              <span>检查类型筛选</span>
+              <select id="record-type-filter-select">
+                <option value="all">全部检查类型</option>
+              </select>
+            </label>
+          </div>
+
+          <div id="record-filter-controls" class="record-filter-controls">
+            <label id="record-filter-day-wrap" class="hidden"><span>日期</span><input id="record-filter-day" type="date"></label>
+            <label id="record-filter-year-wrap" class="hidden"><span>年份</span><select id="record-filter-year"></select></label>
+            <label id="record-filter-month-wrap" class="hidden"><span>月份</span><select id="record-filter-month"></select></label>
+            <label id="record-filter-quarter-wrap" class="hidden"><span>季度</span><select id="record-filter-quarter">
+              <option value="1">第一季度</option>
+              <option value="2">第二季度</option>
+              <option value="3">第三季度</option>
+              <option value="4">第四季度</option>
+            </select></label>
+          </div>
+
+          <div id="selection-actions-panel" class="selection-actions-panel hidden">
+            <div>
+              <strong id="selection-hint">已选 0 条</strong>
+              <span id="selection-scope-hint">当前显示 0 条</span>
+            </div>
+            <div class="selection-inline-actions">
+              <button id="select-filtered-btn" class="chip-btn select-all-visible-btn" type="button">全选当前显示</button>
+              <button id="clear-selection-btn" class="chip-btn ghost" type="button">取消选择</button>
+              <button id="export-selected-btn" class="primary-btn" type="button" disabled>导出 PDF</button>
+              <button id="selection-close-btn" class="chip-btn ghost" type="button">退出多选</button>
+            </div>
+          </div>
+
+          <div class="list-heading">
+            <h2>检查记录</h2>
+            <span id="list-sort-label">共 0 条 · 按日期从新到旧</span>
+          </div>
+          <div id="record-list" class="record-list"></div>
+          <div id="filtered-empty-state" class="filtered-empty-state hidden">
+            <strong id="filtered-empty-title">当前范围没有检查记录</strong>
+            <p>可以更换显示范围，或新建检查记录。</p>
+          </div>
+          <div id="empty-state" class="empty-state hidden">
+            <div class="empty-icon">▤</div>
+            <h2>还没有检查记录</h2>
+            <p>点击“检查填报”，完成第一次现场检查。</p>
+            <button id="empty-new-btn" class="primary-btn" type="button">开始检查填报</button>
+          </div>
+        </section>
+
+        <section class="sync-card cloud-sync-card" aria-label="手机与Windows云同步">
+          <div class="cloud-sync-heading">
+            <div>
+              <h2>云同步</h2>
+              <p id="cloud-sync-description">本机保存优先；可选择云服务提供商，在安卓手机与 Windows 电脑之间同步记录。</p>
+            </div>
+            <span id="cloud-status-pill" class="cloud-status-pill offline">未设置</span>
+          </div>
+          <div id="cloud-failure-banner" class="cloud-failure-banner hidden" role="alert">
+            <div><strong>云同步失败</strong><span id="cloud-failure-message">请检查网络或同步设置</span></div>
+            <div><button id="cloud-failure-retry-btn" type="button">重试</button><button id="cloud-failure-close-btn" type="button">关闭</button></div>
+          </div>
+          <div id="cloud-unit-summary" class="cloud-unit-summary hidden">
+            <strong id="cloud-unit-name">—</strong>
+            <span id="cloud-provider-summary">服务提供商：—</span>
+            <span id="cloud-last-sync">尚未同步</span>
+          </div>
+          <div class="sync-actions cloud-actions">
+            <button id="cloud-setup-btn" class="primary-btn" type="button">设置云同步</button>
+            <button id="cloud-sync-now-btn" class="secondary-btn hidden" type="button">立即同步</button>
+            <button id="cloud-devices-btn" class="secondary-btn hidden" type="button">设备管理</button>
+            <button id="cloud-recycle-btn" class="secondary-btn hidden" type="button">回收站</button>
+            <button id="holiday-update-btn" class="secondary-btn hidden" type="button">更新法定节假日</button>
+          </div>
+          <details class="manual-backup-details">
+            <summary>应急离线备份</summary>
+            <p>没有网络时仍可导出备份文件，再在另一台设备手动导入。</p>
+            <div class="sync-actions">
+              <button id="sync-export-btn" class="secondary-btn" type="button">导出备份文件</button>
+              <button id="sync-import-btn" class="secondary-btn" type="button">导入备份文件</button>
+            </div>
+          </details>
+          <input id="sync-file-input" class="visually-hidden" type="file" accept="*/*">
+        </section>
+      </main>
+    </section>
+
+    <section id="form-view" class="view" aria-label="检查填报">
+      <header class="form-header">
+        <button id="form-back-btn" class="icon-btn" type="button" aria-label="返回">‹</button>
+        <div>
+          <p class="eyebrow">本地检查表</p>
+          <h1 id="form-title">检查填报</h1>
+        </div>
+        <button id="save-top-btn" class="header-action" type="button">保存</button>
+      </header>
+
+      <main class="form-main">
+        <form id="inspection-form" novalidate>
+          <section class="sheet-card sheet-heading-card">
+            <h2 id="inspection-sheet-title">车棚检查记录表</h2>
+            <div class="meta-grid">
+              <label>
+                <span>检查类型</span>
+                <select id="inspection-type" required></select>
+              </label>
+              <label>
+                <span>检查时间</span>
+                <input id="inspection-date" type="date" required>
+              </label>
+              <label>
+                <span>检查地点</span>
+                <input id="inspection-location" type="text" maxlength="120" placeholder="请输入车棚或检查地点" required>
+              </label>
+            </div>
+          </section>
+
+          <section class="sheet-card">
+            <div class="section-title-row">
+              <div>
+                <span class="step-number">1</span>
+                <div><h2>检查事项</h2><p>逐项选择“是”或“否”</p></div>
+              </div>
+              <span id="items-progress" class="progress-pill">0/8</span>
+            </div>
+            <div class="table-header-row" aria-hidden="true">
+              <span>检查类别与标准</span><span>检查结果</span>
+            </div>
+            <div id="inspection-items" class="inspection-items"></div>
+          </section>
+
+          <section class="sheet-card">
+            <div class="section-title-row">
+              <div>
+                <span class="step-number">2</span>
+                <div><h2>检查照片</h2><p>可上传多张，自动加时间和地点水印</p></div>
+              </div>
+              <span id="inspection-photo-count" class="progress-pill">0 张</span>
+            </div>
+            <input id="inspection-photo-input" class="visually-hidden" type="file" accept="image/*" multiple>
+            <button id="inspection-photo-btn" class="upload-btn" type="button">
+              <span class="upload-icon">＋</span>
+              <span><strong>拍照或从相册选择</strong><small>支持一次选择多张照片</small></span>
+            </button>
+            <div id="inspection-photo-grid" class="photo-grid"></div>
+          </section>
+
+          <section id="rectification-section" class="sheet-card hidden">
+            <div class="section-title-row">
+              <div>
+                <span class="step-number warning">3</span>
+                <div><h2>整改记录</h2><p>后续可重新打开此记录补录</p></div>
+              </div>
+              <span id="rectification-status-pill" class="status-pill pending">待整改</span>
+            </div>
+            <label class="textarea-label">
+              <span>整改意见</span>
+              <textarea id="rectification-opinion" rows="4" maxlength="800" placeholder="填写整改要求、完成时限等"></textarea>
+            </label>
+            <input id="rectification-photo-input" class="visually-hidden" type="file" accept="image/*" multiple>
+            <button id="rectification-photo-btn" class="upload-btn warning-upload" type="button">
+              <span class="upload-icon">＋</span>
+              <span><strong>补录整改照片</strong><small>整改完成后可上传多张照片</small></span>
+            </button>
+            <div id="rectification-photo-grid" class="photo-grid"></div>
+            <label class="complete-toggle">
+              <input id="rectification-completed" type="checkbox">
+              <span class="toggle-mark"></span>
+              <span><strong>已整改完成</strong><small>确认整改照片已补录后勾选</small></span>
+            </label>
+          </section>
+
+          <section class="sheet-card">
+            <div class="section-title-row">
+              <div>
+                <span id="signature-step-number" class="step-number">3</span>
+                <div><h2>现场签名</h2><p>签名时自动切换为横屏</p></div>
+              </div>
+              <span id="signature-progress" class="progress-pill">0/3</span>
+            </div>
+            <div class="signature-list">
+              <button class="signature-slot" type="button" data-signature="inspector1">
+                <span><strong>检查人签名 1</strong><small>点击横屏签名</small></span>
+                <span class="signature-preview" id="signature-preview-inspector1">＋</span>
+              </button>
+              <button class="signature-slot" type="button" data-signature="inspector2">
+                <span><strong>检查人签名 2</strong><small>点击横屏签名</small></span>
+                <span class="signature-preview" id="signature-preview-inspector2">＋</span>
+              </button>
+              <button class="signature-slot" type="button" data-signature="inspected">
+                <span><strong>被检查人签名</strong><small>点击横屏签名</small></span>
+                <span class="signature-preview" id="signature-preview-inspected">＋</span>
+              </button>
+            </div>
+          </section>
+
+          <section class="form-actions">
+            <button id="delete-record-btn" class="danger-btn hidden" type="button">记录管理 / 删除</button>
+            <button id="save-record-btn" class="primary-btn large" type="submit">保存检查记录</button>
+          </section>
+        </form>
+      </main>
+    </section>
+  </div>
+
+  <div id="signature-modal" class="signature-landscape-backdrop hidden" role="dialog" aria-modal="true" aria-label="手写签名">
+    <div class="signature-toolbar">
+      <button id="signature-cancel-btn" class="signature-toolbar-btn" type="button">取消</button>
+      <div><strong id="signature-modal-title">检查人签名</strong><span>请横握手机，在下方完整签名</span></div>
+      <button id="signature-save-btn" class="signature-toolbar-btn primary" type="button">使用签名</button>
+    </div>
+    <div class="signature-canvas-wrap">
+      <canvas id="signature-canvas"></canvas>
+      <span class="signature-guide">请在此处签名</span>
+    </div>
+    <button id="signature-clear-btn" class="signature-clear-btn" type="button">清除重写</button>
+  </div>
+
+  <div id="progress-overlay" class="progress-overlay hidden" aria-live="polite">
+    <div class="progress-dialog">
+      <div class="spinner"></div>
+      <h2 id="progress-title">正在处理</h2>
+      <p id="progress-message">请稍候…</p>
+      <div class="progress-track"><span id="progress-fill"></span></div>
+    </div>
+  </div>
+
+  <div id="confirm-dialog" class="confirm-backdrop hidden" role="dialog" aria-modal="true">
+    <div class="confirm-card">
+      <h2 id="confirm-title">请确认</h2>
+      <p id="confirm-message"></p>
+      <div><button id="confirm-cancel-btn" class="secondary-btn" type="button">取消</button><button id="confirm-ok-btn" class="danger-btn" type="button">确定</button></div>
+    </div>
+  </div>
+
+  <div id="export-choice-dialog" class="modal-backdrop hidden" role="dialog" aria-modal="true" aria-labelledby="export-choice-title">
+    <div class="modal-card export-choice-card">
+      <h2 id="export-choice-title">选择导出方式</h2>
+      <p id="export-choice-message">已选择 0 条检查记录</p>
+      <button id="export-combined-btn" class="choice-btn primary-choice" type="button"><strong>完整导出</strong><span>把所选记录合并成一个 PDF</span></button>
+      <button id="export-individual-btn" class="choice-btn" type="button"><strong>逐条导出</strong><span>每条检查记录生成一个 PDF</span></button>
+      <button id="export-choice-cancel-btn" class="secondary-btn modal-cancel-btn" type="button">取消</button>
+    </div>
+  </div>
+
+  <div id="inspection-type-dialog" class="modal-backdrop hidden" role="dialog" aria-modal="true" aria-labelledby="inspection-type-dialog-title">
+    <div class="modal-card type-settings-card">
+      <div class="modal-title-row">
+        <div><h2 id="inspection-type-dialog-title">基础设置</h2><p>维护检查类型及每种类型的检查项目模板</p></div>
+        <button id="inspection-type-close-btn" class="icon-close-btn" type="button" aria-label="关闭">×</button>
+      </div>
+      <div id="inspection-type-list" class="inspection-type-list"></div>
+      <button id="inspection-type-add-btn" class="secondary-btn type-add-btn" type="button">＋ 新增检查类型</button>
+      <section class="template-settings-section" aria-label="检查项目模板设置">
+        <div class="template-settings-title">
+          <div><h3>检查项目模板</h3><p>支持新增或删除，每种类型保留1-12项；历史记录保持不变</p></div>
+          <label for="template-type-select"><span>检查类型</span><select id="template-type-select"></select></label>
+        </div>
+        <div class="template-table-header"><span>检查类别</span><span>检查内容及标准</span><span>操作</span></div>
+        <div id="inspection-template-list" class="inspection-template-list"></div>
+        <button id="inspection-template-add-btn" class="secondary-btn template-add-btn" type="button">＋ 新增检查项目</button>
+      </section>
+      <button id="inspection-type-save-btn" class="primary-btn large" type="button">保存基础设置</button>
+    </div>
+  </div>
+
+  <div id="cloud-setup-dialog" class="modal-backdrop hidden" role="dialog" aria-modal="true" aria-labelledby="cloud-setup-title">
+    <div class="modal-card cloud-setup-card">
+      <div class="modal-title-row">
+        <div><h2 id="cloud-setup-title">云同步</h2><p>选择用于同步的云服务提供商，测试成功后保存配置</p></div>
+        <button id="cloud-setup-close-btn" class="icon-close-btn" type="button" aria-label="关闭">×</button>
+      </div>
+      <label class="cloud-field"><span>服务提供商</span><select id="cloud-provider-select" aria-describedby="cloud-provider-help"></select><small id="cloud-provider-help">选择用于同步的云服务提供商</small></label>
+      <label class="cloud-field"><span id="cloud-endpoint-label">同步服务地址</span><input id="cloud-endpoint" type="url" inputmode="url" placeholder="https://你的地址.workers.dev"><small id="cloud-endpoint-help">填写云同步服务地址</small></label>
+      <label class="cloud-field"><span>同步空间名称</span><input id="cloud-team-name" type="text" maxlength="80" placeholder="例如：石景山安全检查台账"><small>其他手机或电脑填写相同名称和密码，即可看到同一套记录</small></label>
+      <label class="cloud-field"><span>同步密码</span><input id="cloud-password" type="password" maxlength="80" autocomplete="new-password" placeholder="至少8位"><small>密码同时用于端到端加密，服务提供商无法读取照片、签名和检查正文</small></label>
+      <label class="cloud-field"><span>本设备名称</span><input id="cloud-device-name" type="text" maxlength="80" placeholder="例如：张师傅手机 / 办公室电脑"></label>
+      <div class="cloud-test-row">
+        <button id="cloud-test-btn" class="secondary-btn" type="button">测试连接</button>
+        <span id="cloud-test-result" class="cloud-test-result idle">尚未测试</span>
+      </div>
+      <div id="cloud-existing-summary" class="cloud-existing-summary hidden"></div>
+      <button id="cloud-setup-submit-btn" class="primary-btn large" type="button">保存并启用同步</button>
+      <button id="cloud-disconnect-btn" class="danger-outline-btn hidden" type="button">断开本设备云同步</button>
+    </div>
+  </div>
+
+  <div id="cloud-devices-dialog" class="modal-backdrop hidden" role="dialog" aria-modal="true" aria-labelledby="cloud-devices-title">
+    <div class="modal-card cloud-list-card">
+      <div class="modal-title-row">
+        <div><h2 id="cloud-devices-title">已连接设备</h2><p>安卓手机和 Windows 电脑可同步查看全部检查记录</p></div>
+        <button id="cloud-devices-close-btn" class="icon-close-btn" type="button" aria-label="关闭">×</button>
+      </div>
+      <div id="cloud-devices-list" class="cloud-list"><p class="cloud-list-empty">正在读取…</p></div>
+      <div class="cloud-device-share-note">其他设备选择相同服务提供商，并填写相同的同步服务地址、同步空间名称和同步密码即可连接。</div>
+    </div>
+  </div>
+
+  <div id="cloud-recycle-dialog" class="modal-backdrop hidden" role="dialog" aria-modal="true" aria-labelledby="cloud-recycle-title">
+    <div class="modal-card cloud-list-card">
+      <div class="modal-title-row">
+        <div><h2 id="cloud-recycle-title">检查记录回收站</h2><p>云端保留30天提示；Windows 本机原始数据保留到手动彻底删除</p></div>
+        <button id="cloud-recycle-close-btn" class="icon-close-btn" type="button" aria-label="关闭">×</button>
+      </div>
+      <div id="cloud-recycle-list" class="cloud-list"><p class="cloud-list-empty">回收站为空</p></div>
+    </div>
+  </div>
+
+  <div id="delete-choice-dialog" class="modal-backdrop hidden" role="dialog" aria-modal="true" aria-labelledby="delete-choice-title">
+    <div class="modal-card export-choice-card">
+      <h2 id="delete-choice-title">记录管理</h2>
+      <p id="delete-choice-message">请选择处理方式</p>
+      <button id="delete-release-local-btn" class="choice-btn" type="button"><strong>仅释放本机空间</strong><span>保留云端PDF和其他设备原始记录；仅适用于已归档记录</span></button>
+      <button id="delete-move-trash-btn" class="choice-btn danger-choice" type="button"><strong>移入所有设备回收站</strong><span>同步隐藏本条记录，之后仍可恢复</span></button>
+      <button id="delete-choice-cancel-btn" class="secondary-btn modal-cancel-btn" type="button">取消</button>
+    </div>
+  </div>
+
+  <div id="hard-delete-dialog" class="modal-backdrop hidden" role="dialog" aria-modal="true" aria-labelledby="hard-delete-title">
+    <div class="modal-card compact-modal-card">
+      <h2 id="hard-delete-title">彻底删除所有设备数据</h2>
+      <p>此操作无法恢复。只有管理员输入单位同步密码后才能继续。</p>
+      <label class="cloud-field"><span>同步密码</span><input id="hard-delete-password" type="password" autocomplete="current-password"></label>
+      <div class="modal-inline-actions"><button id="hard-delete-cancel-btn" class="secondary-btn" type="button">取消</button><button id="hard-delete-confirm-btn" class="danger-btn" type="button">确认彻底删除</button></div>
+    </div>
+  </div>
+
+  <div id="toast" class="toast hidden" role="status"></div>
+
+  <script src="vendor/pdf-lib.min.js"></script>
+  <script src="vendor/fontkit.umd.min.js"></script>
+  <script src="vendor/lunar.js"></script>
+  <script src="font-data.js"></script>
+  <script src="cloud-sync.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

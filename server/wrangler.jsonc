@@ -1,0 +1,14 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "safety-inspection-ledger-cloud",
+  "main": "src/worker.js",
+  "compatibility_date": "2026-08-01",
+  "workers_dev": true,
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "safety-inspection-ledger",
+      "database_id": "请替换为创建D1数据库后显示的database_id"
+    }
+  ]
+}
