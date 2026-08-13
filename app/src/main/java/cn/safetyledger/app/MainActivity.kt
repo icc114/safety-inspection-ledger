@@ -52,4 +52,12 @@ class MainActivity : ComponentActivity() {
 @Composable fun Settings(go:(String)->Unit){Column(Modifier.padding(16.dp),verticalArrangement=Arrangement.spacedBy(8.dp)){Text("\u8bbe\u7f6e",style=MaterialTheme.typography.headlineSmall);Entry("\u57fa\u7840\u8bbe\u7f6e","\u68c0\u67e5\u7c7b\u578b\u548c\u6a21\u677f"){go("templates")};Entry("\u4e91\u540c\u6b65","\u670d\u52a1\u63d0\u4f9b\u5546\u53ef\u66ff\u6362"){};Entry("\u4e91\u4e0e\u4e91\u8fc1\u79fb","\u539f\u4e91\u590d\u5236\u5230\u65b0\u4e91"){};Entry("\u8bbe\u5907\u8fc1\u79fb","Android / PC"){};Entry("\u56de\u6536\u7ad9","\u6062\u590d\u6216\u5bc6\u7801\u5f7b\u5e95\u5220\u9664"){go("trash")};Entry("APP \u6570\u636e\u5907\u4efd","AES-256-GCM .safetydata"){};TextButton(onClick={go("home")}){Text("\u8fd4\u56de\u9996\u9875")}}}
 @Composable fun Entry(a:String,b:String,click:()->Unit)=Card(Modifier.fillMaxWidth().clickable(onClick=click)){Column(Modifier.padding(14.dp)){Text(a,fontWeight=FontWeight.Bold);Text(b)}}
 @Composable fun Templates(dao:LedgerDao,back:()->Unit){val scope=rememberCoroutineScope();val list by dao.templates().collectAsState(emptyList());var name by remember{mutableStateOf("")};Column(Modifier.padding(16.dp)){Text("\u57fa\u7840\u8bbe\u7f6e",style=MaterialTheme.typography.headlineSmall);OutlinedTextField(name,{name=it},label={Text("\u68c0\u67e5\u6a21\u677f\u540d\u79f0")});Button(onClick={scope.launch{dao.saveTemplate(TemplateEntity(UUID.randomUUID().toString(),name,name))};name=""},enabled=name.isNotBlank()){Text("\u65b0\u589e")};list.forEach{Text(it.name)};TextButton(onClick=back){Text("\u8fd4\u56de")}}}
-@Composable fun Trash(dao:LedgerDao,back:()->Unit){val list by dao.trash().collectAsState(emptyList());Column(Modifier.padding(16.dp)){Text("\u56de\u6536\u7ad9",style=MaterialTheme.typography.headlineSmall);Text("\u5f7b\u5e95\u5220\u9664\u9700\u8f93\u5165\u5bc6\u7801\uff0c\u5e76\u540c\u6b65 tombstone");list.forEach{Text("${it.date} ${it.unit}")};TextButton(onClick=back){Text("\u8fd4\u56de")}}}
+@Composable fun Trash(dao: LedgerDao, back: () -> Unit) {
+ val list by dao.trash().collectAsState(emptyList())
+ Column(Modifier.padding(16.dp)) {
+  Text("\u56de\u6536\u7ad9", style=MaterialTheme.typography.headlineSmall)
+  Text("\u5f7b\u5e95\u5220\u9664\u9700\u8f93\u5165\u5bc6\u7801\uff0c\u5e76\u540c\u6b65 tombstone")
+  list.forEach { Text("${it.date} ${it.unit}") }
+  TextButton(onClick=back) { Text("\u8fd4\u56de") }
+ }
+}
