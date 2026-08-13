@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
@@ -460,7 +461,7 @@ private fun FormalStaticRow(label: String, value: String) {
 }
 
 @Composable
-private fun FormalChoiceRow(label: String, content: @Composable Row.() -> Unit) {
+private fun FormalChoiceRow(label: String, content: @Composable RowScope.() -> Unit) {
     Row(Modifier.fillMaxWidth().border(1.dp, LedgerLine), verticalAlignment = Alignment.CenterVertically) {
         Text(label, Modifier.width(96.dp).background(LedgerLabel).padding(12.dp), fontWeight = FontWeight.Bold, textAlign = TextAlign.Center, fontSize = 13.sp)
         Row(Modifier.weight(1f).horizontalScroll(rememberScrollState()).padding(horizontal = 8.dp), horizontalArrangement = Arrangement.spacedBy(6.dp), content = content)
