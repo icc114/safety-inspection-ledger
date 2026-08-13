@@ -1,0 +1,11 @@
+services:
+  safety-inspection-ledger-sync:
+    build:
+      context: .
+      dockerfile: Dockerfile.fnos
+    container_name: safety-inspection-ledger-sync
+    restart: unless-stopped
+    ports:
+      - "8787:8787"
+    volumes:
+      - ./fnos-data:/data

@@ -1,0 +1,82 @@
+name: Build and test
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  source-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: server/package-lock.json
+      - name: Test Windows client source
+        working-directory: desktop
+        run: |
+          npm ci
+          npm run build
+          npm test
+      - name: Test sync server
+        working-directory: server
+        run: |
+          npm ci
+          npm run check
+
+  android:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.9'
+      - name: Unit tests and APK build
+        run: gradle :app:testDebugUnitTest :app:assembleDebug --stacktrace
+      - name: Name APK
+        run: mv app/build/outputs/apk/debug/app-debug.apk '安全检查台账-${{ github.sha }}.apk'
+      - uses: actions/upload-artifact@v4
+        with:
+          name: 安全检查台账-Android
+          path: 安全检查台账-*.apk
+          if-no-files-found: error
+
+  source-package:
+    runs-on: ubuntu-latest
+    needs: source-tests
+    steps:
+      - uses: actions/checkout@v4
+      - name: Create complete source package
+        run: git archive --format=zip --output="安全检查台账-完整源码-${GITHUB_SHA}.zip" HEAD
+      - uses: actions/upload-artifact@v4
+        with:
+          name: 安全检查台账-完整源码
+          path: 安全检查台账-完整源码-*.zip
+          if-no-files-found: error
+
+  windows-package:
+    runs-on: ubuntu-latest
+    needs: source-tests
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Create Windows offline package
+        working-directory: desktop
+        run: |
+          npm ci
+          npm run build
+          cd dist
+          zip -r '../../安全检查台账-Windows.zip' .
+      - uses: actions/upload-artifact@v4
+        with:
+          name: 安全检查台账-Windows
+          path: 安全检查台账-Windows.zip

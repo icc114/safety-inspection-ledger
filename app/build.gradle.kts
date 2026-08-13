@@ -3,7 +3,7 @@ plugins { id("com.android.application"); id("org.jetbrains.kotlin.android"); id(
 android {
     namespace = "cn.safetyledger.app"
     compileSdk = 35
-    defaultConfig { applicationId = "cn.safetyledger.app"; minSdk = 26; targetSdk = 35; versionCode = 1; versionName = "1.0.0" }
+    defaultConfig { applicationId = "cn.safetyledger.app"; minSdk = 26; targetSdk = 35; versionCode = 3; versionName = "1.2.0" }
     buildFeatures { compose = true; buildConfig = true }
     packaging { resources.excludes += "/META-INF/{AL2.0,LGPL2.1}" }
     compileOptions { sourceCompatibility = JavaVersion.VERSION_17; targetCompatibility = JavaVersion.VERSION_17 }
@@ -25,4 +25,8 @@ dependencies {
     ksp("androidx.room:room-compiler:2.6.1")
     implementation("androidx.work:work-runtime-ktx:2.10.0")
     implementation("androidx.core:core-ktx:1.15.0")
+    implementation("androidx.exifinterface:exifinterface:1.3.7")
+    implementation("com.squareup.okhttp3:okhttp:4.12.0")
+    implementation("androidx.security:security-crypto:1.1.0-alpha06")
+    testImplementation("junit:junit:4.13.2")
 }

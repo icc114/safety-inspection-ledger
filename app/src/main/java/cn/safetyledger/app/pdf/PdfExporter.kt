@@ -3,7 +3,9 @@ package cn.safetyledger.app.pdf
 import android.graphics.*
 import android.graphics.pdf.PdfDocument
 import cn.safetyledger.app.data.*
+import java.io.File
 import java.io.OutputStream
+import kotlin.math.ceil
 
 data class PrintableInspection(val record: InspectionEntity, val items: List<InspectionItemEntity>, val media: List<MediaEntity> = emptyList())
 
@@ -18,11 +20,20 @@ class PdfExporter {
 
     fun export(records: List<PrintableInspection>, output: OutputStream) {
         val document = PdfDocument()
-        records.groupBy { it.record.date }.forEach { (_, sameDate) ->
-            sameDate.forEachIndexed { index, printable -> drawRecordPage(document, printable, index + 1, sameDate.size) }
+        records.sortedWith(compareBy({ it.record.date }, { it.record.time })).groupBy { it.record.date }.forEach { (_, sameDate) ->
+            val counts = sameDate.map { pageCount(it) }
+            val dateTotal = counts.sum()
+            var datePage = 1
+            sameDate.forEachIndexed { index, printable ->
+                drawRecordPage(document, printable, datePage++, dateTotal)
+                val photos = printable.media.filterNot { it.kind.name.startsWith("SIGNATURE_") }.filter { !it.localPath.isNullOrBlank() }
+                photos.chunked(4).forEach { pagePhotos -> drawPhotoPage(document, printable, pagePhotos, datePage++, dateTotal) }
+            }
         }
         document.writeTo(output); document.close()
     }
+
+    private fun pageCount(value: PrintableInspection) = 1 + ceil(value.media.count { !it.kind.name.startsWith("SIGNATURE_") && !it.localPath.isNullOrBlank() } / 4.0).toInt()
 
     private fun drawRecordPage(doc: PdfDocument, data: PrintableInspection, pageNo: Int, pageCount: Int) {
         val page = doc.startPage(PdfDocument.PageInfo.Builder(pageWidth, pageHeight, doc.pages.size + 1).create())
@@ -46,9 +57,23 @@ class PdfExporter {
             value(c,yes,378f,y+20); value(c,no,378f,y+37); wrapped(c,item.problem,449f,y+15,116f,9f,3); y+=itemH
         }
         val detailH=125f; row(c,y,detailH,floatArrayOf(left,125f,right)); label(c,"检查情况：",35f,y+20); wrapped(c,r.conclusion,132f,y+20,430f,10f,4); label(c,"整改意见：",132f,y+62); wrapped(c,r.rectificationAdvice,205f,y+62,350f,10f,4); y+=detailH
-        val signH=65f; row(c,y,signH,floatArrayOf(left,125f,278f,376f,right)); label(c,"检查人：",45f,y+37); value(c,"1. ${r.inspector1}",132f,y+25); value(c,"2. ${r.inspector2}",132f,y+50); label(c,"被检查人：",289f,y+37); value(c,r.inspectee,390f,y+37)
+        val signH=65f; row(c,y,signH,floatArrayOf(left,125f,278f,376f,right)); label(c,"检查人：",45f,y+37); value(c,"1. ${r.inspector1}",132f,y+18); value(c,"2. ${r.inspector2}",132f,y+47); label(c,"被检查人：",289f,y+37); value(c,r.inspectee,390f,y+18)
+        drawSignature(c,data.media.firstOrNull{it.kind==MediaKind.SIGNATURE_INSPECTOR_1},198f,y+3,272f,y+31)
+        drawSignature(c,data.media.firstOrNull{it.kind==MediaKind.SIGNATURE_INSPECTOR_2},198f,y+33,272f,y+62)
+        drawSignature(c,data.media.firstOrNull{it.kind==MediaKind.SIGNATURE_INSPECTEE},390f,y+24,565f,y+62)
         value(c,"第${pageNo}页/共${pageCount}页",262f,820f); doc.finishPage(page)
     }
+
+    private fun drawPhotoPage(doc:PdfDocument,data:PrintableInspection,photos:List<MediaEntity>,pageNo:Int,pageCount:Int){
+        val page=doc.startPage(PdfDocument.PageInfo.Builder(pageWidth,pageHeight,doc.pages.size+1).create());val c=page.canvas
+        centered(c,"${dateZh(data.record.date)} ${data.record.type}照片附件",297.5f,42f,18f,true)
+        photos.forEachIndexed{i,media->val col=i%2;val rowIndex=i/2;val x=if(col==0)left else 300f;val top=65f+rowIndex*350f;val box=RectF(x,top,x+271f,top+300f);c.drawRect(box,ink);val bitmap=media.localPath?.let{path->runCatching{BitmapFactory.decodeFile(File(path).absolutePath)}.getOrNull()};bitmap?.let{drawBitmapFit(c,it,RectF(box.left+5,box.top+5,box.right-5,box.bottom-32));it.recycle()};value(c,kindLabel(media.kind),box.left+8,box.bottom-10)}
+        value(c,"第${pageNo}页/共${pageCount}页",262f,820f);doc.finishPage(page)
+    }
+
+    private fun drawSignature(c:Canvas,media:MediaEntity?,left:Float,top:Float,right:Float,bottom:Float){val path=media?.localPath?:return;val bitmap=runCatching{BitmapFactory.decodeFile(path)}.getOrNull()?:return;drawBitmapFit(c,bitmap,RectF(left,top,right,bottom));bitmap.recycle()}
+    private fun drawBitmapFit(c:Canvas,bitmap:Bitmap,box:RectF){val scale=minOf(box.width()/bitmap.width,box.height()/bitmap.height);val w=bitmap.width*scale;val h=bitmap.height*scale;val target=RectF(box.centerX()-w/2,box.centerY()-h/2,box.centerX()+w/2,box.centerY()+h/2);c.drawBitmap(bitmap,null,target,Paint(Paint.ANTI_ALIAS_FLAG))}
+    private fun kindLabel(kind:MediaKind)=when(kind){MediaKind.SITE->"现场照片";MediaKind.PROBLEM->"问题照片";MediaKind.RECTIFICATION->"整改后照片";MediaKind.REVIEW->"复查照片";else->"电子签名"}
 
     private fun titleFor(r:InspectionEntity)=when { r.type.endsWith("检查")->r.type+"记录表"; r.type.isNotBlank()->r.type+"检查记录表"; else->"安全检查记录表" }
     private fun dateZh(s:String)=s.split("-").let{if(it.size==3)"${it[0]}年${it[1].toInt()}月${it[2].toInt()}日" else s}

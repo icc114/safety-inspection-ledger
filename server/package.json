@@ -1,0 +1,19 @@
+{
+  "name": "safety-inspection-ledger-cloud",
+  "version": "3.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "db:create": "wrangler d1 create safety-inspection-ledger",
+    "db:init:local": "wrangler d1 execute safety-inspection-ledger --local --file=schema.sql",
+    "db:init:remote": "wrangler d1 execute safety-inspection-ledger --remote --file=schema.sql",
+    "check": "node --check src/worker.js && node test.mjs",
+    "nas:init": "wrangler d1 execute safety-inspection-ledger --config wrangler.fnos.jsonc --local --persist-to=/data --file=schema.sql",
+    "nas:start": "wrangler dev --config wrangler.fnos.jsonc --local --ip 0.0.0.0 --port 8787 --persist-to=/data"
+  },
+  "devDependencies": {
+    "wrangler": "^4.33.1"
+  }
+}
