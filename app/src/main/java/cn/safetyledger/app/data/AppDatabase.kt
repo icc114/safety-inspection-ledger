@@ -8,6 +8,7 @@ import kotlinx.coroutines.flow.Flow
  @Query("SELECT COUNT(*) FROM templates WHERE deletedAt IS NULL") suspend fun templateCount():Int
  @Query("SELECT * FROM templates WHERE deletedAt IS NULL ORDER BY active DESC,name") fun templates():Flow<List<TemplateEntity>>
  @Query("SELECT * FROM template_items WHERE templateId=:id ORDER BY position") suspend fun templateItems(id:String):List<TemplateItemEntity>
+ @Query("SELECT * FROM template_items ORDER BY templateId,position") suspend fun allTemplateItems():List<TemplateItemEntity>
  @Insert(onConflict=OnConflictStrategy.REPLACE) suspend fun saveTemplate(value:TemplateEntity)
  @Query("UPDATE templates SET deletedAt=:now,active=0,updatedAt=:now WHERE id=:id") suspend fun deleteTemplate(id:String,now:Long=System.currentTimeMillis())
  @Insert(onConflict=OnConflictStrategy.REPLACE) suspend fun saveTemplateItems(value:List<TemplateItemEntity>)
@@ -27,10 +28,13 @@ import kotlinx.coroutines.flow.Flow
  @Query("UPDATE inspections SET deletedAt=NULL,updatedAt=:now WHERE id=:id") suspend fun restore(id:String,now:Long)
  @Query("SELECT * FROM inspections WHERE deletedAt IS NOT NULL ORDER BY deletedAt DESC") fun trash():Flow<List<InspectionEntity>>
  @Insert suspend fun tombstone(value:TombstoneEntity)
+ @Query("SELECT * FROM tombstones ORDER BY deletedAt") suspend fun allTombstones():List<TombstoneEntity>
+ @Query("DELETE FROM inspection_items WHERE inspectionId=:id") suspend fun deleteInspectionItems(id:String)
  @Query("DELETE FROM inspections WHERE id=:id") suspend fun purgeRecord(id:String)
  @Query("DELETE FROM inspection_items WHERE inspectionId=:id") suspend fun purgeItems(id:String)
  @Query("DELETE FROM media WHERE inspectionId=:id") suspend fun purgeMedia(id:String)
  @Transaction suspend fun purge(id:String){purgeItems(id);purgeMedia(id);purgeRecord(id)}
+ @Transaction suspend fun replaceInspection(record:InspectionEntity,items:List<InspectionItemEntity>,media:List<MediaEntity>){saveInspection(record);deleteInspectionItems(record.id);purgeMedia(record.id);if(items.isNotEmpty())saveInspectionItems(items);media.forEach{saveMedia(it)}}
  @Insert(onConflict=OnConflictStrategy.REPLACE) suspend fun saveSetting(value:SettingEntity)
  @Query("SELECT * FROM settings WHERE `key`=:key LIMIT 1") suspend fun setting(key:String):SettingEntity?
 }

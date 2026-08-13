@@ -22,6 +22,7 @@ import cn.safetyledger.app.data.*
 import cn.safetyledger.app.pdf.PdfExporter
 import cn.safetyledger.app.pdf.PrintableInspection
 import cn.safetyledger.app.sync.CloudSettingsScreen
+import cn.safetyledger.app.sync.CloudSyncScheduler
 import cn.safetyledger.app.backup.BackupScreen
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -32,7 +33,7 @@ import java.time.*
 import java.util.UUID
 
 class MainActivity : ComponentActivity() {
- override fun onCreate(state: Bundle?) { super.onCreate(state); val dao=AppDatabase.get(this).dao(); lifecycleScope.launch(Dispatchers.IO){InitialData.seedIfNeeded(dao)}; setContent { MaterialTheme(colorScheme=lightColorScheme(primary=Color(0xFF006B4F))) { Ledger(dao) } } }
+ override fun onCreate(state: Bundle?) { super.onCreate(state); val dao=AppDatabase.get(this).dao(); lifecycleScope.launch(Dispatchers.IO){InitialData.seedIfNeeded(dao);if(dao.setting("cloud_config")!=null)CloudSyncScheduler.schedule(this@MainActivity)}; setContent { MaterialTheme(colorScheme=lightColorScheme(primary=Color(0xFF006B4F))) { Ledger(dao) } } }
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -75,11 +76,11 @@ class MainActivity : ComponentActivity() {
   Text("\u56de\u6536\u7ad9", style=MaterialTheme.typography.headlineSmall)
   Text("普通删除可恢复；彻底删除会生成同步墓碑，并删除本机原始照片。")
   if(configuredHash==null){OutlinedTextField(password,{password=it},label={Text("设置彻底删除密码（至少8位）")},visualTransformation=androidx.compose.ui.text.input.PasswordVisualTransformation(),modifier=Modifier.fillMaxWidth());Button(enabled=password.length>=8,onClick={scope.launch{val hash=hashText(password);dao.saveSetting(SettingEntity("delete_password_hash",hash));configuredHash=hash;password="";message="彻底删除密码已设置"}}){Text("保存密码")}}
-  list.forEach { record->Card(Modifier.fillMaxWidth().padding(vertical=4.dp)){Row(Modifier.fillMaxWidth().padding(8.dp),verticalAlignment=Alignment.CenterVertically){Column(Modifier.weight(1f)){Text("${record.date} ${record.type}",fontWeight=FontWeight.Bold);Text(record.unit)};TextButton(onClick={scope.launch{dao.restore(record.id,System.currentTimeMillis());message="已恢复"}}){Text("恢复")};TextButton(enabled=configuredHash!=null,onClick={target=record;password=""}){Text("彻底删除",color=MaterialTheme.colorScheme.error)}}} }
+  list.forEach { record->Card(Modifier.fillMaxWidth().padding(vertical=4.dp)){Row(Modifier.fillMaxWidth().padding(8.dp),verticalAlignment=Alignment.CenterVertically){Column(Modifier.weight(1f)){Text("${record.date} ${record.type}",fontWeight=FontWeight.Bold);Text(record.unit)};TextButton(onClick={scope.launch{dao.restore(record.id,System.currentTimeMillis());CloudSyncScheduler.enqueue(context);message="已恢复"}}){Text("恢复")};TextButton(enabled=configuredHash!=null,onClick={target=record;password=""}){Text("彻底删除",color=MaterialTheme.colorScheme.error)}}} }
   if(list.isEmpty())Text("回收站为空")
   if(message.isNotBlank())Text(message)
   TextButton(onClick=back) { Text("\u8fd4\u56de") }
  }
- target?.let{record->AlertDialog(onDismissRequest={target=null},title={Text("彻底删除所有设备数据")},text={Column{Text("此操作不可恢复。请输入彻底删除密码确认删除：");OutlinedTextField(password,{password=it},visualTransformation=androidx.compose.ui.text.input.PasswordVisualTransformation())}},confirmButton={TextButton(onClick={if(hashText(password)==configuredHash){scope.launch{dao.tombstone(TombstoneEntity(UUID.randomUUID().toString(),"inspection",record.id,System.currentTimeMillis(),"android"));dao.purge(record.id);File(context.filesDir,"media/${record.id}").deleteRecursively();message="已彻底删除"};target=null;password=""}else message="密码错误"}){Text("确认彻底删除")}},dismissButton={TextButton(onClick={target=null;password=""}){Text("取消")}})}
+ target?.let{record->AlertDialog(onDismissRequest={target=null},title={Text("彻底删除所有设备数据")},text={Column{Text("此操作不可恢复。请输入彻底删除密码确认删除：");OutlinedTextField(password,{password=it},visualTransformation=androidx.compose.ui.text.input.PasswordVisualTransformation())}},confirmButton={TextButton(onClick={if(hashText(password)==configuredHash){scope.launch{dao.tombstone(TombstoneEntity(UUID.randomUUID().toString(),"inspection",record.id,System.currentTimeMillis(),"android"));dao.purge(record.id);File(context.filesDir,"media/${record.id}").deleteRecursively();CloudSyncScheduler.enqueue(context);message="已彻底删除"};target=null;password=""}else message="密码错误"}){Text("确认彻底删除")}},dismissButton={TextButton(onClick={target=null;password=""}){Text("取消")}})}
 }
 private fun hashText(value:String)=MessageDigest.getInstance("SHA-256").digest(value.toByteArray()).joinToString(""){"%02x".format(it)}
