@@ -10,6 +10,8 @@ import kotlinx.coroutines.flow.Flow
  @Insert(onConflict=OnConflictStrategy.REPLACE) suspend fun saveTemplate(value:TemplateEntity)
  @Insert(onConflict=OnConflictStrategy.REPLACE) suspend fun saveTemplateItems(value:List<TemplateItemEntity>)
  @Query("SELECT * FROM inspections WHERE deletedAt IS NULL ORDER BY date DESC,time DESC") fun inspections():Flow<List<InspectionEntity>>
+ @Query("SELECT * FROM inspection_items WHERE inspectionId=:id ORDER BY rowid") suspend fun inspectionItems(id:String):List<InspectionItemEntity>
+ @Query("SELECT * FROM media WHERE inspectionId=:id AND deletedAt IS NULL ORDER BY capturedAt") suspend fun media(id:String):List<MediaEntity>
  @Insert(onConflict=OnConflictStrategy.REPLACE) suspend fun saveInspection(value:InspectionEntity)
  @Insert(onConflict=OnConflictStrategy.REPLACE) suspend fun saveInspectionItems(value:List<InspectionItemEntity>)
  @Insert(onConflict=OnConflictStrategy.REPLACE) suspend fun saveMedia(value:MediaEntity)
