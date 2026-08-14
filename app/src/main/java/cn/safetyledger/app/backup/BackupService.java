@@ -3,11 +3,84 @@ package cn.safetyledger.app.backup;
 import android.content.*;import android.database.Cursor;import android.database.sqlite.SQLiteDatabase;import android.os.*;import cn.safetyledger.app.SafetyLedgerApp;import cn.safetyledger.app.data.LedgerDatabase;import java.io.*;import java.nio.charset.StandardCharsets;import java.nio.file.*;import java.security.*;import java.util.*;import java.util.zip.*;import javax.crypto.*;import javax.crypto.spec.*;
 
 public final class BackupService{
-    private static final byte[] MAGIC="SAFETYDATA".getBytes(StandardCharsets.US_ASCII);private static final int FORMAT=1,ITERATIONS=310000;
+    private static final byte[] MAGIC="SAFETYDATA".getBytes(StandardCharsets.US_ASCII);
+    private static final byte[] PORTABLE_MAGIC="SAFETYLOCAL2".getBytes(StandardCharsets.US_ASCII);
+    private static final char[] PORTABLE_KEY="safety-ledger-portable-backup-v2".toCharArray();
+    private static final int FORMAT=1,ITERATIONS=310000;
     private final Context context;public BackupService(Context c){context=c.getApplicationContext();}
-    public void exportData(OutputStream destination,char[]password)throws Exception{if(password.length<8)throw new IllegalArgumentException("密码至少 8 位");File tmp=File.createTempFile("safety-backup-",".zip",context.getCacheDir());try{LedgerDatabase h=((SafetyLedgerApp)context).db();SQLiteDatabase db=h.getWritableDatabase();db.rawQuery("PRAGMA wal_checkpoint(FULL)",null).close();File dbFile=context.getDatabasePath(LedgerDatabase.NAME);Properties manifest=new Properties();manifest.setProperty("format","safetydata");manifest.setProperty("formatVersion","1");manifest.setProperty("schemaVersion",String.valueOf(LedgerDatabase.VERSION));manifest.setProperty("createdAt",String.valueOf(System.currentTimeMillis()));manifest.setProperty("databaseSha256",sha(dbFile));try(ZipOutputStream z=new ZipOutputStream(new FileOutputStream(tmp))){entry(z,"manifest.properties",properties(manifest));file(z,"database.sqlite",dbFile);File media=new File(context.getFilesDir(),"business_media");zipDir(z,media,"business_media/");}encrypt(tmp,destination,password);}finally{tmp.delete();Arrays.fill(password,'\0');}}
-    public RestorePackage decryptAndValidate(InputStream source,char[]password)throws Exception{File zip=File.createTempFile("safety-restore-",".zip",context.getCacheDir());File dir=new File(context.getCacheDir(),"restore-"+UUID.randomUUID());if(!dir.mkdirs())throw new IOException("无法创建恢复目录");try{decrypt(source,zip,password);unzip(zip,dir);File manifestFile=new File(dir,"manifest.properties"),dbFile=new File(dir,"database.sqlite");if(!manifestFile.isFile()||!dbFile.isFile())throw new IOException("备份内容不完整");Properties m=new Properties();try(InputStream in=new FileInputStream(manifestFile)){m.load(in);}if(!"safetydata".equals(m.getProperty("format")))throw new IOException("不是 APP 数据备份");if(Integer.parseInt(m.getProperty("formatVersion","0"))>FORMAT)throw new IOException("备份格式版本过新");if(Integer.parseInt(m.getProperty("schemaVersion","0"))>LedgerDatabase.VERSION)throw new IOException("数据库版本过新，请先升级 APP");if(!sha(dbFile).equals(m.getProperty("databaseSha256")))throw new IOException("数据库完整性校验失败");SQLiteDatabase test=SQLiteDatabase.openDatabase(dbFile.getAbsolutePath(),null,SQLiteDatabase.OPEN_READONLY);try(Cursor c=test.rawQuery("SELECT max(version) FROM schema_migrations",null)){if(!c.moveToFirst()||c.getInt(0)<1)throw new IOException("数据库迁移元数据无效");}finally{test.close();}return new RestorePackage(dir,dbFile);}catch(Exception e){deleteTree(dir);throw e;}finally{zip.delete();Arrays.fill(password,'\0');}}
-    public void fullRestore(RestorePackage p)throws Exception{SafetyLedgerApp app=(SafetyLedgerApp)context;app.db().close();File target=context.getDatabasePath(LedgerDatabase.NAME);File recovery=new File(target.getParentFile(),LedgerDatabase.NAME+".before-restore");if(target.exists())Files.copy(target.toPath(),recovery.toPath(),StandardCopyOption.REPLACE_EXISTING);Files.copy(p.database.toPath(),target.toPath(),StandardCopyOption.REPLACE_EXISTING);new File(target+"-wal").delete();new File(target+"-shm").delete();File mediaRoot=new File(context.getFilesDir(),"business_media");deleteTree(mediaRoot);copyMedia(new File(p.root,"business_media"),mediaRoot);try(SQLiteDatabase restored=SQLiteDatabase.openDatabase(target.getAbsolutePath(),null,SQLiteDatabase.OPEN_READWRITE)){normalizeMediaPaths(restored);}p.close();}
+    public void exportData(OutputStream destination,char[]password)throws Exception{
+        if(password.length<8)throw new IllegalArgumentException("密码至少 8 位");
+        exportInternal(destination,password,MAGIC);
+    }
+    public void exportPortable(OutputStream destination)throws Exception{
+        exportInternal(destination,PORTABLE_KEY.clone(),PORTABLE_MAGIC);
+    }
+    private void exportInternal(OutputStream destination,char[]password,byte[]magic)throws Exception{
+        File tmp=File.createTempFile("safety-backup-",".zip",context.getCacheDir());
+        try{
+            LedgerDatabase h=((SafetyLedgerApp)context).db();
+            SQLiteDatabase db=h.getWritableDatabase();
+            db.rawQuery("PRAGMA wal_checkpoint(FULL)",null).close();
+            File dbFile=context.getDatabasePath(LedgerDatabase.NAME);
+            Properties manifest=new Properties();
+            manifest.setProperty("format","safetydata");
+            manifest.setProperty("formatVersion","1");
+            manifest.setProperty("schemaVersion",String.valueOf(LedgerDatabase.VERSION));
+            manifest.setProperty("createdAt",String.valueOf(System.currentTimeMillis()));
+            manifest.setProperty("databaseSha256",sha(dbFile));
+            try(ZipOutputStream z=new ZipOutputStream(new FileOutputStream(tmp))){
+                entry(z,"manifest.properties",properties(manifest));
+                file(z,"database.sqlite",dbFile);
+                File media=new File(context.getFilesDir(),"business_media");
+                zipDir(z,media,"business_media/");
+            }
+            encrypt(tmp,destination,password,magic);
+        }finally{
+            tmp.delete();
+            Arrays.fill(password,'\0');
+        }
+    }
+    public boolean isPortable(InputStream source)throws IOException{
+        return Arrays.equals(readExactly(source,PORTABLE_MAGIC.length),PORTABLE_MAGIC);
+    }
+    public boolean isLegacyEncrypted(InputStream source)throws IOException{
+        return Arrays.equals(readExactly(source,MAGIC.length),MAGIC);
+    }
+    public RestorePackage decryptAndValidatePortable(InputStream source)throws Exception{
+        return decryptAndValidateInternal(source,PORTABLE_KEY.clone(),PORTABLE_MAGIC);
+    }
+    public RestorePackage decryptAndValidate(InputStream source,char[]password)throws Exception{
+        return decryptAndValidateInternal(source,password,MAGIC);
+    }
+    private RestorePackage decryptAndValidateInternal(InputStream source,char[]password,byte[]magic)throws Exception{
+        File zip=File.createTempFile("safety-restore-",".zip",context.getCacheDir());
+        File dir=new File(context.getCacheDir(),"restore-"+UUID.randomUUID());
+        if(!dir.mkdirs())throw new IOException("无法创建恢复目录");
+        try{
+            decrypt(source,zip,password,magic);
+            unzip(zip,dir);
+            File manifestFile=new File(dir,"manifest.properties"),dbFile=new File(dir,"database.sqlite");
+            if(!manifestFile.isFile()||!dbFile.isFile())throw new IOException("备份内容不完整");
+            Properties m=new Properties();
+            try(InputStream in=new FileInputStream(manifestFile)){m.load(in);}
+            if(!"safetydata".equals(m.getProperty("format")))throw new IOException("不是 APP 数据备份");
+            if(Integer.parseInt(m.getProperty("formatVersion","0"))>FORMAT)throw new IOException("备份格式版本过新");
+            if(Integer.parseInt(m.getProperty("schemaVersion","0"))>LedgerDatabase.VERSION)throw new IOException("数据库版本过新，请先升级 APP");
+            if(!sha(dbFile).equals(m.getProperty("databaseSha256")))throw new IOException("数据库完整性校验失败");
+            SQLiteDatabase test=SQLiteDatabase.openDatabase(dbFile.getAbsolutePath(),null,SQLiteDatabase.OPEN_READONLY);
+            try(Cursor c=test.rawQuery("SELECT max(version) FROM schema_migrations",null)){
+                if(!c.moveToFirst()||c.getInt(0)<1)throw new IOException("数据库迁移元数据无效");
+            }finally{test.close();}
+            return new RestorePackage(dir,dbFile);
+        }catch(Exception e){
+            deleteTree(dir);
+            throw e;
+        }finally{
+            zip.delete();
+            Arrays.fill(password,'\0');
+        }
+    }
+    public void fullRestore(RestorePackage p)throws Exception{SafetyLedgerApp app=(SafetyLedgerApp)context;app.db().close();File target=context.getDatabasePath(LedgerDatabase.NAME);File recovery=new File(target.getParentFile(),LedgerDatabase.NAME+".before-restore");if(target.exists())Files.copy(target.toPath(),recovery.toPath(),StandardCopyOption.REPLACE_EXISTING);Files.copy(p.database.toPath(),target.toPath(),StandardCopyOption.REPLACE_EXISTING);new File(target+"-wal").delete();new File(target+"-shm").delete();File mediaRoot=new File(context.getFilesDir(),"business_media");deleteTree(mediaRoot);copyMedia(new File(p.root,"business_media"),mediaRoot);try(SQLiteDatabase restored=SQLiteDatabase.openDatabase(target.getAbsolutePath(),null,SQLiteDatabase.OPEN_READWRITE)){normalizeMediaPaths(restored);scrubDeviceSpecificState(restored);}p.close();}
     public int mergeRestore(RestorePackage p)throws Exception{
         LedgerDatabase h=((SafetyLedgerApp)context).db();
         SQLiteDatabase d=h.getWritableDatabase();
@@ -68,8 +141,16 @@ public final class BackupService{
     private void normalizeMediaPaths(SQLiteDatabase d){File root=new File(context.getFilesDir(),"business_media");try(Cursor c=d.rawQuery("SELECT id,inspection_id FROM media WHERE deleted_at IS NULL",null)){while(c.moveToNext()){File f=new File(new File(root,c.getString(1)),c.getString(0)+".jpg");if(f.isFile())d.execSQL("UPDATE media SET local_path=? WHERE id=?",new Object[]{f.getAbsolutePath(),c.getString(0)});}}try(Cursor c=d.rawQuery("SELECT id,inspection_id,role,local_path FROM signatures WHERE deleted_at IS NULL",null)){while(c.moveToNext()){String stored=c.getString(3);String name=stored==null||stored.isBlank()?"signature-"+c.getString(2)+".png":new File(stored).getName();File f=new File(new File(root,c.getString(1)),name);if(f.isFile())d.execSQL("UPDATE signatures SET local_path=? WHERE id=?",new Object[]{f.getAbsolutePath(),c.getString(0)});}}}
     private boolean tableExists(SQLiteDatabase d,String schema,String table){try(Cursor c=d.rawQuery("SELECT 1 FROM "+schema+".sqlite_master WHERE type='table' AND name=?",new String[]{table})){return c.moveToFirst();}}
     private Set<String> columns(SQLiteDatabase d,String schema,String t){Set<String>s=new LinkedHashSet<>();try(Cursor c=d.rawQuery("PRAGMA "+schema+".table_info("+t+")",null)){while(c.moveToNext())s.add(c.getString(1));}return s;}
-    private void encrypt(File plain,OutputStream out,char[]pw)throws Exception{byte[]salt=random(16),iv=random(12);SecretKey key=derive(pw,salt);Cipher c=Cipher.getInstance("AES/GCM/NoPadding");c.init(Cipher.ENCRYPT_MODE,key,new GCMParameterSpec(128,iv));out.write(MAGIC);out.write(FORMAT);out.write(salt);out.write(iv);try(CipherOutputStream co=new CipherOutputStream(out,c)){Files.copy(plain.toPath(),co);}}
-    private void decrypt(InputStream in,File out,char[]pw)throws Exception{byte[]magic=readExactly(in,MAGIC.length);if(!Arrays.equals(magic,MAGIC))throw new IOException("文件不是 .safetydata APP 数据备份（PDF 不可导入）");int version=in.read();if(version<1||version>FORMAT)throw new IOException("不支持的备份格式版本");byte[]salt=readExactly(in,16),iv=readExactly(in,12);Cipher c=Cipher.getInstance("AES/GCM/NoPadding");c.init(Cipher.DECRYPT_MODE,derive(pw,salt),new GCMParameterSpec(128,iv));try(CipherInputStream ci=new CipherInputStream(in,c);OutputStream o=new FileOutputStream(out)){copy(ci,o);}catch(IOException e){throw new SecurityException("密码错误或备份完整性校验失败",e);}}
+    private void scrubDeviceSpecificState(SQLiteDatabase d){
+        if(tableExists(d,"main","sync_providers")){
+            d.execSQL("UPDATE sync_providers SET enabled=0,encrypted_secret='',token_ciphertext='',encryption_secret=''");
+        }
+        if(tableExists(d,"main","app_settings")){
+            d.delete("app_settings","key IN ('device_id','cloud_role','device_role','last_sync_at','last_sync_error')",null);
+        }
+    }
+    private void encrypt(File plain,OutputStream out,char[]pw,byte[]magic)throws Exception{byte[]salt=random(16),iv=random(12);SecretKey key=derive(pw,salt);Cipher c=Cipher.getInstance("AES/GCM/NoPadding");c.init(Cipher.ENCRYPT_MODE,key,new GCMParameterSpec(128,iv));out.write(magic);out.write(FORMAT);out.write(salt);out.write(iv);try(CipherOutputStream co=new CipherOutputStream(out,c)){Files.copy(plain.toPath(),co);}}
+    private void decrypt(InputStream in,File out,char[]pw,byte[]expectedMagic)throws Exception{byte[]magic=readExactly(in,expectedMagic.length);if(!Arrays.equals(magic,expectedMagic))throw new IOException("文件不是 .safetydata APP 数据备份（PDF 不可导入）");int version=in.read();if(version<1||version>FORMAT)throw new IOException("不支持的备份格式版本");byte[]salt=readExactly(in,16),iv=readExactly(in,12);Cipher c=Cipher.getInstance("AES/GCM/NoPadding");c.init(Cipher.DECRYPT_MODE,derive(pw,salt),new GCMParameterSpec(128,iv));try(CipherInputStream ci=new CipherInputStream(in,c);OutputStream o=new FileOutputStream(out)){copy(ci,o);}catch(IOException e){throw new SecurityException("密码错误或备份完整性校验失败",e);}}
     private SecretKey derive(char[]pw,byte[]salt)throws Exception{PBEKeySpec s=new PBEKeySpec(pw,salt,ITERATIONS,256);byte[]k=SecretKeyFactory.getInstance("PBKDF2WithHmacSHA256").generateSecret(s).getEncoded();s.clearPassword();return new SecretKeySpec(k,"AES");}
     private byte[]random(int n){byte[]b=new byte[n];new SecureRandom().nextBytes(b);return b;}private byte[]properties(Properties p)throws IOException{ByteArrayOutputStream b=new ByteArrayOutputStream();p.store(b,"Safety Ledger portable backup");return b.toByteArray();}
     private void entry(ZipOutputStream z,String name,byte[]b)throws IOException{z.putNextEntry(new ZipEntry(name));z.write(b);z.closeEntry();}private void file(ZipOutputStream z,String name,File f)throws IOException{z.putNextEntry(new ZipEntry(name));Files.copy(f.toPath(),z);z.closeEntry();}private void zipDir(ZipOutputStream z,File dir,String prefix)throws IOException{if(!dir.isDirectory())return;File[]fs=dir.listFiles();if(fs==null)return;for(File f:fs)if(f.isDirectory())zipDir(z,f,prefix+f.getName()+"/");else file(z,prefix+f.getName(),f);}

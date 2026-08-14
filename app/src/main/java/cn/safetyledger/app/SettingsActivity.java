@@ -13,9 +13,10 @@ import android.graphics.Color;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
-import android.os.Handler;
-import android.os.Looper;
+import android.text.InputType;
+import android.text.method.PasswordTransformationMethod;
 import android.view.Gravity;
+import android.view.View;
 import android.view.ViewGroup;
 import android.widget.ArrayAdapter;
 import android.widget.Button;
@@ -46,7 +47,6 @@ public final class SettingsActivity extends Activity {
     private static final int EXPORT = 801;
     private static final int IMPORT = 802;
     private LedgerRepository repo;
-    private char[] pendingPassword;
     private BackupService.RestorePackage restore;
     private Spinner provider;
     private Spinner deviceRole;
@@ -57,6 +57,8 @@ public final class SettingsActivity extends Activity {
     private EditText token;
     private EditText space;
     private EditText encryption;
+    private LinearLayout advancedAuthBox;
+    private Button advancedAuthButton;
     private TextView syncStatus;
     private String savedServerPassword = "";
     private String savedToken = "";
@@ -109,15 +111,15 @@ public final class SettingsActivity extends Activity {
         LinearLayout card = Ui.card(this);
         card.addView(Ui.sectionTitle(this, "2", "APP 数据备份与恢复", "类似手机系统备份，可离线复制到另一设备"));
         TextView note = Ui.text(this,
-                "备份文件为加密的 .safetydata，包含模板、记录、照片、签名和整改状态。可复制到另一台手机或电脑，再选择该文件恢复。PDF 不能作为数据备份导入。",
+                "备份文件为 .safetydata，包含模板、记录、照片、签名和整改状态。无需另设密码，可直接复制到另一台手机或电脑后导入；文件仍带有 AES-256-GCM 完整性保护。PDF 不能作为数据备份导入。",
                 13, false);
         note.setTextColor(Ui.MUTED);
         card.addView(note);
         Button backup = Ui.button(this, "备份到手机文件夹");
         Button restoreButton = Ui.secondaryButton(this, "从备份文件恢复");
         Button migration = Ui.compactButton(this, "查看设备迁移说明", false);
-        backup.setOnClickListener(view -> askPassword(true));
-        restoreButton.setOnClickListener(view -> askPassword(false));
+        backup.setOnClickListener(view -> chooseBackupDestination());
+        restoreButton.setOnClickListener(view -> chooseBackupFile());
         migration.setOnClickListener(view -> new AlertDialog.Builder(this)
                 .setTitle("设备迁移")
                 .setMessage("1. 旧设备点击“备份到手机文件夹”。\n2. 将 .safetydata 复制到新手机或电脑。\n3. 新设备安装同包名 APP，点击“从备份文件恢复”。\n4. 选择完整恢复后，模板、检查记录、照片、签名和整改状态会一起恢复。")
@@ -132,31 +134,31 @@ public final class SettingsActivity extends Activity {
 
     private LinearLayout deviceCard() {
         LinearLayout card = Ui.card(this);
-        card.addView(Ui.sectionTitle(this, "3", "多设备角色", "首台设备自动成为所有者，后加入设备自动识别"));
-        deviceName = Ui.input(this, "设备名称，例如：我的主手机");
+        card.addView(Ui.sectionTitle(this, "3", "多设备角色", "首台设备自动成为管理员，后加入设备默认为工作人员"));
+        deviceName = Ui.input(this, "设备名称，例如：管理员手机");
         deviceName.setSingleLine(true);
         deviceName.setText(repo.setting("device_name", Build.MANUFACTURER + " " + Build.MODEL));
-        deviceRole = spinner(new String[]{"主设备（管理员，保留完整数据）", "现场采集设备（拍照填报）"});
+        deviceRole = spinner(new String[]{"管理员（管理全部资料）", "工作人员（现场检查填报）"});
         deviceRole.setSelection("FIELD".equals(repo.setting("device_role", "PRIMARY")) ? 1 : 0);
+        deviceRole.setEnabled(false);
         card.addView(fieldLabel("设备名称"));
         card.addView(deviceName);
         card.addView(Ui.gap(this, 6));
         card.addView(fieldLabel("本机角色"));
         card.addView(deviceRole, new LinearLayout.LayoutParams(-1, Ui.dp(this, 48)));
         TextView note = Ui.text(this,
-                "首次创建同步空间的设备自动成为所有者；使用相同同步空间名称和密码加入的手机自动成为现场设备。所有者或管理员可在下方管理已配对设备。Windows 客户端仍需后续交付。",
+                "首次创建同步空间的设备自动成为管理员；使用相同同步空间名称和密码加入的手机默认为工作人员。管理员可接收全部设备记录并管理已配对设备。Windows 客户端仍需后续交付。",
                 13, false);
         note.setTextColor(Ui.MUTED);
         card.addView(note);
-        Button save = Ui.compactButton(this, "保存设备角色", true);
+        Button save = Ui.compactButton(this, "保存设备名称", true);
         save.setOnClickListener(view -> {
             repo.putSetting("device_name", deviceName.getText().toString().trim());
-            repo.putSetting("device_role", deviceRole.getSelectedItemPosition() == 0 ? "PRIMARY" : "FIELD");
-            Ui.toast(this, "设备角色已保存");
+            Ui.toast(this, "设备名称已保存；角色由云端配对结果自动识别");
         });
         card.addView(save);
         card.addView(Ui.gap(this, 6));
-        Button manage = Ui.secondaryButton(this, "管理已配对设备 / 设置管理员");
+        Button manage = Ui.secondaryButton(this, "管理已配对设备 / 设置角色");
         manage.setOnClickListener(view -> manageDevices());
         card.addView(manage);
         return card;
@@ -168,15 +170,15 @@ public final class SettingsActivity extends Activity {
         provider = spinner(new String[]{"WebDAV", "Cloudflare", "飞牛 NAS / WebDAV",
                 "Google Drive", "OneDrive", "自定义 HTTP 服务器"});
         endpoint = Ui.input(this, "服务地址 / 账号授权地址");
-        user = Ui.input(this, "用户名");
-        secret = Ui.input(this, "WebDAV / NAS 登录密码");
-        token = Ui.input(this, "Token（可选）");
         space = Ui.input(this, "同步空间名称");
         space.setText("safety-ledger");
-        encryption = Ui.input(this, "同步空间密码（配对、加密和永久删除）");
-        secret.setInputType(0x81);
-        token.setInputType(0x81);
-        encryption.setInputType(0x81);
+        encryption = Ui.input(this, "同步密码（配对、加密和永久删除）");
+        user = Ui.input(this, "WebDAV / NAS 用户名");
+        secret = Ui.input(this, "WebDAV / NAS 登录密码");
+        token = Ui.input(this, "Cloudflare 设备 Token / Bearer Token");
+        maskPassword(secret);
+        maskPassword(token);
+        maskPassword(encryption);
         for (EditText input : new EditText[]{endpoint, user, secret, token, space, encryption}) {
             input.setSingleLine(true);
         }
@@ -184,21 +186,32 @@ public final class SettingsActivity extends Activity {
         card.addView(Ui.gap(this, 5));
         card.addView(endpoint);
         card.addView(Ui.gap(this, 5));
+        card.addView(space);
+        card.addView(Ui.gap(this, 5));
+        card.addView(encryption);
+        card.addView(Ui.gap(this, 5));
+        advancedAuthButton = Ui.compactButton(this, "高级服务器认证（WebDAV / 设备 Token）", false);
+        advancedAuthButton.setOnClickListener(view ->
+                setAdvancedAuthVisible(advancedAuthBox.getVisibility() != View.VISIBLE));
+        card.addView(advancedAuthButton);
+        advancedAuthBox = Ui.column(this);
+        advancedAuthBox.setPadding(0, Ui.dp(this, 5), 0, 0);
         LinearLayout account = Ui.row(this);
         account.addView(user, Ui.weight(1));
         account.addView(Ui.horizontalGap(this, 5));
         account.addView(secret, Ui.weight(1));
-        card.addView(account);
-        card.addView(Ui.gap(this, 5));
-        card.addView(token);
-        card.addView(Ui.gap(this, 5));
-        LinearLayout namespace = Ui.row(this);
-        namespace.addView(space, Ui.weight(1));
-        namespace.addView(Ui.horizontalGap(this, 5));
-        namespace.addView(encryption, Ui.weight(1));
-        card.addView(namespace);
+        advancedAuthBox.addView(account);
+        advancedAuthBox.addView(Ui.gap(this, 5));
+        advancedAuthBox.addView(token);
+        TextView advancedNote = Ui.text(this,
+                "只有 WebDAV/NAS 服务器账号或 Cloudflare 提示“需要设备授权”时才填写。设备 Token 由云端生成，不等于同步密码。",
+                12, false);
+        advancedNote.setTextColor(Ui.MUTED);
+        advancedAuthBox.addView(advancedNote);
+        advancedAuthBox.setVisibility(View.GONE);
+        card.addView(advancedAuthBox);
         TextView explanation = Ui.text(this,
-                "用户名和登录密码用于登录 WebDAV/NAS；同步空间名称相当于共享资料夹名称，不是用户名。同步空间密码在多台设备上必须一致，保存配对后自动隐藏，并同时作为回收站永久删除密码。",
+                "日常只需填写同步空间名称和一个同步密码。多台设备必须完全一致；保存成功后密码立即清空并以圆点提示已保存，同时作为回收站永久删除密码。",
                 12, false);
         explanation.setTextColor(Ui.MUTED);
         card.addView(explanation);
@@ -279,10 +292,12 @@ public final class SettingsActivity extends Activity {
             secret.setText("");
             token.setText("");
             encryption.setText("");
-            secret.setHint(savedServerPassword.isBlank() ? "WebDAV / NAS 登录密码" : "登录密码已保存，留空则沿用");
-            token.setHint(savedToken.isBlank() ? "Token（可选）" : "Token 已保存，留空则沿用");
+            secret.setHint(savedServerPassword.isBlank() ? "WebDAV / NAS 登录密码" : "••••••••（登录密码已保存）");
+            token.setHint(savedToken.isBlank() ? "Cloudflare 设备 Token / Bearer Token" : "••••••••（设备 Token 已保存）");
             encryption.setHint(savedSpacePassword.isBlank()
-                    ? "同步空间密码（至少 8 位）" : "同步空间密码已保存并隐藏，留空则沿用");
+                    ? "同步密码（至少 8 位）" : "••••••••（同步密码已保存）");
+            if (!cursor.getString(2).isBlank() || !savedServerPassword.isBlank()
+                    || !savedToken.isBlank()) setAdvancedAuthVisible(true);
             space.setText(cursor.getString(5));
             String error = repo.setting("last_sync_error", "");
             String last = repo.setting("last_sync_at", "");
@@ -297,90 +312,121 @@ public final class SettingsActivity extends Activity {
         }
     }
 
-    private void askPassword(boolean export) {
-        EditText password = Ui.input(this, export ? "设置备份密码（至少 8 位）" : "输入备份密码");
-        password.setInputType(0x81);
-        new AlertDialog.Builder(this)
-                .setTitle(export ? "备份到手机文件夹" : "从备份文件恢复")
-                .setMessage(export ? "下一步可在手机文件选择器中指定保存文件夹。密码无法找回，请妥善保管。"
-                        : "下一步请选择 .safetydata 文件；PDF 不能导入。")
-                .setView(password)
-                .setPositiveButton("选择文件位置", (dialog, which) -> {
-                    pendingPassword = password.getText().toString().toCharArray();
-                    if (pendingPassword.length < 8) {
-                        Ui.toast(this, "密码至少 8 位");
-                        pendingPassword = null;
-                        return;
-                    }
-                    Intent intent = export
-                            ? new Intent(Intent.ACTION_CREATE_DOCUMENT)
-                                    .setType("application/octet-stream")
-                                    .putExtra(Intent.EXTRA_TITLE,
-                                            "安全检查台账-" + System.currentTimeMillis() + ".safetydata")
-                            : new Intent(Intent.ACTION_OPEN_DOCUMENT)
-                                    .setType("*/*")
-                                    .addCategory(Intent.CATEGORY_OPENABLE);
-                    startActivityForResult(intent, export ? EXPORT : IMPORT);
-                })
-                .setNegativeButton("取消", null)
-                .show();
+    private void chooseBackupDestination() {
+        Intent intent = new Intent(Intent.ACTION_CREATE_DOCUMENT)
+                .setType("application/octet-stream")
+                .putExtra(Intent.EXTRA_TITLE,
+                        "安全检查台账-" + System.currentTimeMillis() + ".safetydata")
+                .addCategory(Intent.CATEGORY_OPENABLE);
+        startActivityForResult(intent, EXPORT);
+    }
+
+    private void chooseBackupFile() {
+        Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT)
+                .setType("*/*")
+                .addCategory(Intent.CATEGORY_OPENABLE);
+        startActivityForResult(intent, IMPORT);
     }
 
     @Override
     protected void onActivityResult(int request, int result, Intent data) {
         super.onActivityResult(request, result, data);
-        if (result != RESULT_OK || data == null || pendingPassword == null) return;
+        if (result != RESULT_OK || data == null || data.getData() == null) return;
         if (request == EXPORT) exportData(data.getData());
         else if (request == IMPORT) importData(data.getData());
     }
 
     private void exportData(Uri uri) {
         try (OutputStream output = getContentResolver().openOutputStream(uri)) {
-            new BackupService(this).exportData(output, pendingPassword);
-            Ui.toast(this, "APP 数据已加密备份到所选文件夹");
+            new BackupService(this).exportPortable(output);
+            Ui.toast(this, "APP 数据已备份到所选文件夹，无需另设密码");
         } catch (Exception error) {
             Ui.toast(this, "备份失败：" + error.getMessage());
-        } finally {
-            pendingPassword = null;
         }
     }
 
     private void importData(Uri uri) {
-        try (InputStream input = getContentResolver().openInputStream(uri)) {
-            restore = new BackupService(this).decryptAndValidate(input, pendingPassword);
-            new AlertDialog.Builder(this)
-                    .setTitle("选择恢复方式")
-                    .setItems(new String[]{"合并恢复（保留本机数据，不覆盖冲突）",
-                            "完整恢复（替换本机数据）"}, (dialog, which) -> {
-                        try {
-                            BackupService service = new BackupService(this);
-                            if (which == 0) {
-                                int count = service.mergeRestore(restore);
-                                Ui.toast(this, "合并恢复完成，新增 " + count + " 条；冲突已保留副本");
-                            } else {
-                                service.fullRestore(restore);
-                                Ui.toast(this, "完整恢复完成，APP 将重新启动");
-                                new Handler(Looper.getMainLooper()).postDelayed(() -> {
-                                    finishAffinity();
-                                    System.exit(0);
-                                }, 1000);
-                            }
-                        } catch (Exception error) {
-                            Ui.toast(this, "恢复失败：" + error.getMessage());
-                        }
-                    })
-                    .setOnCancelListener(dialog -> { if (restore != null) restore.close(); })
-                    .show();
+        BackupService service = new BackupService(this);
+        try (InputStream probe = getContentResolver().openInputStream(uri)) {
+            if (service.isPortable(probe)) {
+                try (InputStream input = getContentResolver().openInputStream(uri)) {
+                    showRestoreChoice(service.decryptAndValidatePortable(input));
+                }
+                return;
+            }
         } catch (Exception error) {
-            Ui.toast(this, "导入失败：" + error.getMessage());
-        } finally {
-            pendingPassword = null;
+            Ui.toast(this, "导入失败：" + readableError(error));
+            return;
         }
+        try (InputStream probe = getContentResolver().openInputStream(uri)) {
+            if (service.isLegacyEncrypted(probe)) {
+                askLegacyBackupPassword(uri);
+            } else {
+                Ui.toast(this, "该文件不是 APP 数据备份，PDF 不能导入");
+            }
+        } catch (Exception error) {
+            Ui.toast(this, "导入失败：" + readableError(error));
+        }
+    }
+
+    private void askLegacyBackupPassword(Uri uri) {
+        EditText password = Ui.input(this, "旧版备份密码");
+        maskPassword(password);
+        new AlertDialog.Builder(this)
+                .setTitle("兼容旧版加密备份")
+                .setMessage("这是 1.2.3 或更早版本创建的密码备份，请输入创建该文件时设置的旧密码。新版本备份不再询问密码。")
+                .setView(password)
+                .setPositiveButton("验证并导入", (dialog, which) -> {
+                    try (InputStream input = getContentResolver().openInputStream(uri)) {
+                        BackupService service = new BackupService(this);
+                        showRestoreChoice(service.decryptAndValidate(input,
+                                password.getText().toString().toCharArray()));
+                    } catch (Exception error) {
+                        Ui.toast(this, "导入失败：" + readableError(error));
+                    }
+                })
+                .setNegativeButton("取消", null)
+                .show();
+    }
+
+    private void showRestoreChoice(BackupService.RestorePackage restorePackage) {
+        restore = restorePackage;
+        new AlertDialog.Builder(this)
+                .setTitle("选择恢复方式")
+                .setItems(new String[]{"合并恢复（保留本机较新数据与冲突副本）",
+                        "完整恢复（替换本机业务数据）"}, (dialog, which) -> {
+                    try {
+                        BackupService service = new BackupService(this);
+                        if (which == 0) {
+                            int count = service.mergeRestore(restore);
+                            restore = null;
+                            Ui.toast(this, "合并恢复完成，处理 " + count + " 项；较新数据不会被静默覆盖");
+                        } else {
+                            service.fullRestore(restore);
+                            restore = null;
+                            Intent restart = getPackageManager().getLaunchIntentForPackage(getPackageName());
+                            if (restart == null) restart = new Intent(this, LedgerActivity.class);
+                            restart.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK
+                                    | Intent.FLAG_ACTIVITY_CLEAR_TASK);
+                            startActivity(restart);
+                            finishAffinity();
+                        }
+                        } catch (Exception error) {
+                            if (restore != null) restore.close();
+                            restore = null;
+                            Ui.toast(this, "恢复失败：" + readableError(error));
+                        }
+                })
+                .setOnCancelListener(dialog -> {
+                    if (restore != null) restore.close();
+                    restore = null;
+                })
+                .show();
     }
 
     private void setDeletePassword() {
         EditText password = Ui.input(this, "新密码（至少 6 位）");
-        password.setInputType(0x81);
+        maskPassword(password);
         new AlertDialog.Builder(this)
                 .setTitle("本机永久删除密码")
                 .setView(password)
@@ -428,9 +474,15 @@ public final class SettingsActivity extends Activity {
                 result = new WebDavClient(url, username, password, tokenValue)
                         .testReadWrite(spaceName);
                 if (!result.success() && "Cloudflare".equals(type)) {
-                    result = new SyncProvider.ConnectionResult(false,
-                            "Cloudflare 地址可能可访问，但未通过安全台账 WebDAV/Worker 读写协议："
-                                    + result.message());
+                    String detail = result.message();
+                    if (detail.contains("需要设备授权") || detail.contains("HTTP 401")) {
+                        detail = "云端要求设备授权。请展开“高级服务器认证”，填写该 Cloudflare 服务生成的设备 Token 后重试。设备 Token 不等于同步密码；若云端没有 Token 管理入口，需要部署项目 cloudflare-worker 中的兼容网关。\n\n原始响应："
+                                + detail;
+                    } else {
+                        detail = "Cloudflare 地址可访问，但未通过安全台账兼容网关的读写校验："
+                                + detail;
+                    }
+                    result = new SyncProvider.ConnectionResult(false, detail);
                 }
             } else {
                 result = new SyncProvider.ConnectionResult(false,
@@ -481,9 +533,10 @@ public final class SettingsActivity extends Activity {
             savedSpacePassword = spacePassword;
             secret.setText(""); token.setText(""); encryption.setText("");
             secret.setHint(password.isBlank() ? "WebDAV / NAS 登录密码"
-                    : "登录密码已保存，留空则沿用");
-            token.setHint(tokenValue.isBlank() ? "Token（可选）" : "Token 已保存，留空则沿用");
-            encryption.setHint("同步空间密码已保存并隐藏，留空则沿用");
+                    : "••••••••（登录密码已保存）");
+            token.setHint(tokenValue.isBlank() ? "Cloudflare 设备 Token / Bearer Token"
+                    : "••••••••（设备 Token 已保存）");
+            encryption.setHint("••••••••（同步密码已保存）");
             CloudSyncScheduler.schedule(this);
             return true;
         } catch (Exception error) {
@@ -499,8 +552,7 @@ public final class SettingsActivity extends Activity {
             try {
                 CloudSyncService.Result result = new CloudSyncService(this).syncNow();
                 runOnUiThread(() -> {
-                    String role = "OWNER".equals(result.role()) ? "所有者"
-                            : "ADMIN".equals(result.role()) ? "管理员" : "现场设备";
+                    String role = "FIELD".equals(result.role()) ? "工作人员" : "管理员";
                     syncStatus.setText("同步状态：已同步 · 本机角色 " + role);
                     Ui.toast(this, "同步完成：接收 " + result.peerDevices()
                             + " 台设备，合并 " + result.changedRows() + " 项数据");
@@ -544,15 +596,15 @@ public final class SettingsActivity extends Activity {
         boolean finalCanManage = canManage;
         new AlertDialog.Builder(this)
                 .setTitle("已配对设备")
-                .setMessage(canManage ? "点击设备可设置管理员或现场设备。角色修改会在下次同步后传到其他手机。"
-                        : "本机不是所有者或管理员，只能查看设备列表。")
+                .setMessage(canManage ? "点击设备可设置为管理员或工作人员。角色修改会在下次同步后传到其他手机。"
+                        : "本机是工作人员，只能查看设备列表。")
                 .setItems(labels.toArray(new String[0]), (dialog, which) -> {
                     if (!finalCanManage) {
-                        Ui.toast(this, "只有所有者或管理员可以修改设备角色");
+                        Ui.toast(this, "只有管理员可以修改设备角色");
                         return;
                     }
                     if ("OWNER".equals(roles.get(which))) {
-                        Ui.toast(this, "同步空间所有者不能降级");
+                        Ui.toast(this, "首位管理员不能降级");
                         return;
                     }
                     chooseDeviceRole(ids.get(which), labels.get(which));
@@ -564,7 +616,7 @@ public final class SettingsActivity extends Activity {
     private void chooseDeviceRole(String deviceId, String label) {
         new AlertDialog.Builder(this)
                 .setTitle(label.replace("\n", " · "))
-                .setItems(new String[]{"设为管理员", "设为现场采集设备"}, (dialog, which) -> {
+                .setItems(new String[]{"设为管理员", "设为工作人员"}, (dialog, which) -> {
                     String role = which == 0 ? "ADMIN" : "FIELD";
                     repo.raw().execSQL("UPDATE sync_devices SET role=?,updated_at=? WHERE device_id=?",
                             new Object[]{role, System.currentTimeMillis(), deviceId});
@@ -576,8 +628,30 @@ public final class SettingsActivity extends Activity {
     }
 
     private String roleName(String role) {
-        return "OWNER".equals(role) ? "同步空间所有者"
-                : "ADMIN".equals(role) ? "管理员" : "现场采集设备";
+        return "FIELD".equals(role) ? "工作人员" : "管理员";
+    }
+
+    private void setAdvancedAuthVisible(boolean visible) {
+        if (advancedAuthBox == null || advancedAuthButton == null) return;
+        advancedAuthBox.setVisibility(visible ? View.VISIBLE : View.GONE);
+        advancedAuthButton.setText(visible ? "收起高级服务器认证" : "高级服务器认证（WebDAV / 设备 Token）");
+    }
+
+    private void maskPassword(EditText input) {
+        input.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_PASSWORD);
+        input.setTransformationMethod(PasswordTransformationMethod.getInstance());
+    }
+
+    private String readableError(Throwable error) {
+        Throwable current = error;
+        String message = null;
+        while (current != null) {
+            if (current.getMessage() != null && !current.getMessage().isBlank()) {
+                message = current.getMessage();
+            }
+            current = current.getCause();
+        }
+        return message == null ? error.getClass().getSimpleName() : message;
     }
 
     private void syncNotification(String message) {

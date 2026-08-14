@@ -3,6 +3,8 @@ package cn.safetyledger.app;
 import android.app.Activity;
 import android.app.AlertDialog;
 import android.os.Bundle;
+import android.text.InputType;
+import android.text.method.PasswordTransformationMethod;
 import android.widget.Button;
 import android.widget.EditText;
 import android.widget.LinearLayout;
@@ -78,7 +80,8 @@ public final class TrashActivity extends Activity {
             return;
         }
         EditText password = Ui.input(this, "同步空间密码 / 永久删除密码");
-        password.setInputType(0x81);
+        password.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_PASSWORD);
+        password.setTransformationMethod(PasswordTransformationMethod.getInstance());
         new AlertDialog.Builder(this)
                 .setTitle("不可恢复的永久删除")
                 .setMessage("将删除数据库记录和对应本地媒体，并建立 tombstone。此操作不可撤销。")

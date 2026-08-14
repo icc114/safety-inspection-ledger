@@ -44,7 +44,15 @@ public final class CloudSyncService {
         WebDavClient client = new WebDavClient(config.endpoint, config.username,
                 config.serverPassword, config.token);
         SyncProvider.ConnectionResult probe = client.testReadWrite(config.space);
-        if (!probe.success()) throw new java.io.IOException(probe.message());
+        if (!probe.success()) {
+            String message = probe.message();
+            if ("Cloudflare".equals(config.type)
+                    && (message.contains("需要设备授权") || message.contains("HTTP 401"))) {
+                message = "Cloudflare 要求设备授权：请在云同步的高级服务器认证中填写云端生成的设备 Token；同步密码不能代替设备 Token。原始响应："
+                        + message;
+            }
+            throw new java.io.IOException(message);
+        }
 
         String deviceId = repo.setting("device_id", "");
         if (deviceId.isBlank()) {
