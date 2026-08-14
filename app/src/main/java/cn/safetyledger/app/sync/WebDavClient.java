@@ -9,6 +9,7 @@ import java.io.InputStream;
 import java.net.URLDecoder;
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
 import java.util.ArrayList;
 import java.util.Base64;
 import java.util.List;
@@ -39,8 +40,14 @@ public final class WebDavClient {
             .build();
     private final String endpoint;
     private final String authorization;
+    private final String pairingSpace;
 
     public WebDavClient(String endpoint, String username, String password, String token) {
+        this(endpoint, username, password, token, "", "");
+    }
+
+    public WebDavClient(String endpoint, String username, String password, String token,
+                        String syncSpace, String syncPassword) {
         String value = endpoint == null ? "" : endpoint.trim();
         if (!value.endsWith("/")) value += "/";
         this.endpoint = value;
@@ -48,7 +55,12 @@ public final class WebDavClient {
         else if (username != null && !username.isBlank()) authorization = "Basic "
                 + Base64.getEncoder().encodeToString((username + ":" + password)
                 .getBytes(StandardCharsets.UTF_8));
+        else if (syncSpace != null && !syncSpace.isBlank()
+                && syncPassword != null && !syncPassword.isBlank()) {
+            authorization = "SafetyLedger " + pairingProof(syncSpace, syncPassword);
+        }
         else authorization = "";
+        pairingSpace = syncSpace == null ? "" : syncSpace;
     }
 
     public SyncProvider.ConnectionResult testReadWrite(String space) {
@@ -64,7 +76,7 @@ public final class WebDavClient {
                 return new SyncProvider.ConnectionResult(false, "服务器读写校验内容不一致");
             }
             return new SyncProvider.ConnectionResult(true,
-                    "WebDAV 建目录、上传、下载和删除校验全部成功");
+                    "同步空间建目录、上传、下载和删除校验全部成功");
         } catch (Exception error) {
             return new SyncProvider.ConnectionResult(false, readable(error));
         }
@@ -158,9 +170,21 @@ public final class WebDavClient {
 
     private Request.Builder request(String url) {
         Request.Builder builder = new Request.Builder().url(url)
-                .header("User-Agent", "SafetyLedger-Android/1");
+                .header("User-Agent", "SafetyLedger-Android/2");
         if (!authorization.isBlank()) builder.header("Authorization", authorization);
+        if (!pairingSpace.isBlank()) builder.header("X-Safety-Ledger-Space", pairingSpace);
         return builder;
+    }
+
+    static String pairingProof(String space, String password) {
+        try {
+            byte[] digest = MessageDigest.getInstance("SHA-256").digest(
+                    ("safety-ledger-auth-v1\n" + space + "\n" + password)
+                            .getBytes(StandardCharsets.UTF_8));
+            return Base64.getUrlEncoder().withoutPadding().encodeToString(digest);
+        } catch (java.security.NoSuchAlgorithmException impossible) {
+            throw new IllegalStateException(impossible);
+        }
     }
 
     private String spaceUrl(String space) { return endpoint + segment(space) + "/"; }

@@ -1,19 +1,22 @@
 /**
  * Safety Ledger WebDAV-compatible Cloudflare Worker.
- * Bind an R2 bucket as SAFETY_LEDGER_BUCKET and configure either SYNC_TOKEN,
- * or SYNC_USERNAME + SYNC_PASSWORD as encrypted Worker secrets.
+ * Bind an R2 bucket as SAFETY_LEDGER_BUCKET. By default sync spaces self-provision
+ * from an app-derived proof; optional SYNC_TOKEN or Basic secrets can lock it down.
  */
 export default {
   async fetch(request, env) {
-    if (!authorized(request, env)) {
-      return new Response('Unauthorized', {
+    const url = new URL(request.url);
+    const key = decodeURIComponent(url.pathname.replace(/^\/+/, ''));
+    if (!(await authorized(request, env, key))) {
+      return new Response(JSON.stringify({ ok: false, error: '需要设备授权' }), {
         status: 401,
-        headers: { 'WWW-Authenticate': 'Basic realm="Safety Ledger"' },
+        headers: {
+          'Content-Type': 'application/json; charset=utf-8',
+          'WWW-Authenticate': 'SafetyLedger realm="Safety Ledger"',
+        },
       });
     }
 
-    const url = new URL(request.url);
-    const key = decodeURIComponent(url.pathname.replace(/^\/+/, ''));
     const method = request.method.toUpperCase();
     const common = { 'DAV': '1', 'Cache-Control': 'no-store' };
 
@@ -71,14 +74,52 @@ export default {
   },
 };
 
-function authorized(request, env) {
+async function authorized(request, env, key) {
   const header = request.headers.get('authorization') || '';
   if (env.SYNC_TOKEN && header === `Bearer ${env.SYNC_TOKEN}`) return true;
   if (env.SYNC_USERNAME && env.SYNC_PASSWORD) {
     const expected = btoa(`${env.SYNC_USERNAME}:${env.SYNC_PASSWORD}`);
-    return header === `Basic ${expected}`;
+    if (header === `Basic ${expected}`) return true;
   }
-  return false;
+
+  // Passwordless-looking app pairing: the password itself never leaves the device.
+  // The Android app sends a SHA-256 proof scoped to the sync-space name. On first
+  // use the proof claims that namespace; later devices must present the same proof.
+  if (env.DISABLE_SELF_PROVISION === 'true') return false;
+  const space = request.headers.get('x-safety-ledger-space') || '';
+  const prefix = 'SafetyLedger ';
+  if (!space || space === '_safety_auth' || !header.startsWith(prefix)) return false;
+  const proof = header.slice(prefix.length);
+  if (!/^[A-Za-z0-9_-]{43}$/.test(proof)) return false;
+  const firstPathSegment = key.split('/').filter(Boolean)[0] || '';
+  if (firstPathSegment && firstPathSegment !== space) return false;
+
+  const authKey = `_safety_auth/${await sha256Url(space)}.txt`;
+  const existing = await env.SAFETY_LEDGER_BUCKET.get(authKey);
+  if (!existing) {
+    await env.SAFETY_LEDGER_BUCKET.put(authKey, proof, {
+      httpMetadata: { contentType: 'text/plain; charset=utf-8' },
+      customMetadata: { protocol: 'safety-ledger-auth-v1' },
+    });
+    return true;
+  }
+  return constantTimeEqual((await existing.text()).trim(), proof);
+}
+
+async function sha256Url(value) {
+  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(value));
+  let binary = '';
+  for (const byte of new Uint8Array(digest)) binary += String.fromCharCode(byte);
+  return btoa(binary).replaceAll('+', '-').replaceAll('/', '_').replaceAll('=', '');
+}
+
+function constantTimeEqual(left, right) {
+  if (left.length !== right.length) return false;
+  let difference = 0;
+  for (let index = 0; index < left.length; index += 1) {
+    difference |= left.charCodeAt(index) ^ right.charCodeAt(index);
+  }
+  return difference === 0;
 }
 
 function responseXml(url, entry) {

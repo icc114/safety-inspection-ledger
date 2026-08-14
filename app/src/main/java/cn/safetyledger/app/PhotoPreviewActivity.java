@@ -106,6 +106,10 @@ public final class PhotoPreviewActivity extends Activity {
                     });
             gestureDetector = new GestureDetector(PhotoPreviewActivity.this,
                     new GestureDetector.SimpleOnGestureListener() {
+                        @Override public boolean onDown(MotionEvent event) {
+                            return true;
+                        }
+
                         @Override public boolean onDoubleTap(MotionEvent event) {
                             if (relativeScale > 1.05f) resetImage();
                             else {
@@ -152,7 +156,15 @@ public final class PhotoPreviewActivity extends Activity {
                 setImageMatrix(transform);
                 lastX = event.getX();
                 lastY = event.getY();
+            } else if (event.getActionMasked() == MotionEvent.ACTION_UP) {
+                performClick();
             }
+            return true;
+        }
+
+        @Override
+        public boolean performClick() {
+            super.performClick();
             return true;
         }
     }

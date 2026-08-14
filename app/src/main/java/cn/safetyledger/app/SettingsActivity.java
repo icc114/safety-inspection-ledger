@@ -115,15 +115,23 @@ public final class SettingsActivity extends Activity {
                 13, false);
         note.setTextColor(Ui.MUTED);
         card.addView(note);
-        Button backup = Ui.button(this, "备份到手机文件夹");
-        Button restoreButton = Ui.secondaryButton(this, "从备份文件恢复");
-        Button migration = Ui.compactButton(this, "查看设备迁移说明", false);
+        Button backup = Ui.button(this, "导出数据");
+        Button restoreButton = Ui.secondaryButton(this, "导入数据");
+        Button migration = Ui.compactButton(this, "设备迁移", false);
         backup.setOnClickListener(view -> chooseBackupDestination());
         restoreButton.setOnClickListener(view -> chooseBackupFile());
         migration.setOnClickListener(view -> new AlertDialog.Builder(this)
                 .setTitle("设备迁移")
-                .setMessage("1. 旧设备点击“备份到手机文件夹”。\n2. 将 .safetydata 复制到新手机或电脑。\n3. 新设备安装同包名 APP，点击“从备份文件恢复”。\n4. 选择完整恢复后，模板、检查记录、照片、签名和整改状态会一起恢复。")
-                .setPositiveButton("知道了", null).show());
+                .setItems(new String[]{"从本机导出迁移数据", "导入另一设备的数据", "查看迁移说明"},
+                        (dialog, which) -> {
+                            if (which == 0) chooseBackupDestination();
+                            else if (which == 1) chooseBackupFile();
+                            else new AlertDialog.Builder(this)
+                                    .setTitle("离线设备迁移")
+                                    .setMessage("1. 旧设备点击“导出数据”并选择手机文件夹。\n2. 将 .safetydata 文件复制到新手机或电脑。\n3. 新设备安装本 APP，点击“导入数据”。\n4. 选择合并恢复或完整恢复。\n\n同一数据包包含数据库、模板、记录、照片、签名和整改状态；仓库 tools/SafetyDataTool.java 可在 Windows、macOS 和 Linux 上校验、查看与解包。")
+                                    .setPositiveButton("知道了", null).show();
+                        })
+                .setNegativeButton("取消", null).show());
         card.addView(backup);
         card.addView(Ui.gap(this, 7));
         card.addView(restoreButton);
@@ -337,36 +345,63 @@ public final class SettingsActivity extends Activity {
     }
 
     private void exportData(Uri uri) {
-        try (OutputStream output = getContentResolver().openOutputStream(uri)) {
-            new BackupService(this).exportPortable(output);
-            Ui.toast(this, "APP 数据已备份到所选文件夹，无需另设密码");
-        } catch (Exception error) {
-            Ui.toast(this, "备份失败：" + error.getMessage());
-        }
+        AlertDialog busy = busyDialog("正在导出数据库、照片和签名…");
+        new Thread(() -> {
+            String failure = null;
+            try (OutputStream output = getContentResolver().openOutputStream(uri)) {
+                if (output == null) throw new java.io.IOException("无法写入所选文件");
+                new BackupService(this).exportPortable(output);
+            } catch (Exception error) {
+                failure = readableError(error);
+            }
+            String finalFailure = failure;
+            runOnUiThread(() -> {
+                busy.dismiss();
+                Ui.toast(this, finalFailure == null
+                        ? "数据已导出，可复制到另一手机或电脑"
+                        : "导出失败：" + finalFailure);
+            });
+        }, "safetydata-export").start();
     }
 
     private void importData(Uri uri) {
-        BackupService service = new BackupService(this);
-        try (InputStream probe = getContentResolver().openInputStream(uri)) {
-            if (service.isPortable(probe)) {
-                try (InputStream input = getContentResolver().openInputStream(uri)) {
-                    showRestoreChoice(service.decryptAndValidatePortable(input));
+        AlertDialog busy = busyDialog("正在校验数据包和全部文件…");
+        new Thread(() -> {
+            BackupService.RestorePackage restorePackage = null;
+            boolean legacy = false;
+            String failure = null;
+            try {
+                BackupService service = new BackupService(this);
+                boolean portable;
+                try (InputStream probe = getContentResolver().openInputStream(uri)) {
+                    if (probe == null) throw new java.io.IOException("无法读取所选文件");
+                    portable = service.isPortable(probe);
                 }
-                return;
+                if (portable) {
+                    try (InputStream input = getContentResolver().openInputStream(uri)) {
+                        if (input == null) throw new java.io.IOException("无法读取所选文件");
+                        restorePackage = service.decryptAndValidatePortable(input);
+                    }
+                } else {
+                    try (InputStream probe = getContentResolver().openInputStream(uri)) {
+                        if (probe == null) throw new java.io.IOException("无法读取所选文件");
+                        legacy = service.isLegacyEncrypted(probe);
+                    }
+                    if (!legacy) failure = "该文件不是 APP 数据备份，PDF 不能导入";
+                }
+            } catch (Exception error) {
+                failure = readableError(error);
             }
-        } catch (Exception error) {
-            Ui.toast(this, "导入失败：" + readableError(error));
-            return;
-        }
-        try (InputStream probe = getContentResolver().openInputStream(uri)) {
-            if (service.isLegacyEncrypted(probe)) {
-                askLegacyBackupPassword(uri);
-            } else {
-                Ui.toast(this, "该文件不是 APP 数据备份，PDF 不能导入");
-            }
-        } catch (Exception error) {
-            Ui.toast(this, "导入失败：" + readableError(error));
-        }
+            BackupService.RestorePackage finalPackage = restorePackage;
+            boolean finalLegacy = legacy;
+            String finalFailure = failure;
+            runOnUiThread(() -> {
+                busy.dismiss();
+                if (finalPackage != null) showRestoreChoice(finalPackage);
+                else if (finalLegacy) askLegacyBackupPassword(uri);
+                else Ui.toast(this, "导入失败：" + finalFailure);
+            });
+        }, "safetydata-import-check").start();
     }
 
     private void askLegacyBackupPassword(Uri uri) {
@@ -377,13 +412,26 @@ public final class SettingsActivity extends Activity {
                 .setMessage("这是 1.2.3 或更早版本创建的密码备份，请输入创建该文件时设置的旧密码。新版本备份不再询问密码。")
                 .setView(password)
                 .setPositiveButton("验证并导入", (dialog, which) -> {
-                    try (InputStream input = getContentResolver().openInputStream(uri)) {
-                        BackupService service = new BackupService(this);
-                        showRestoreChoice(service.decryptAndValidate(input,
-                                password.getText().toString().toCharArray()));
-                    } catch (Exception error) {
-                        Ui.toast(this, "导入失败：" + readableError(error));
-                    }
+                    char[] value = password.getText().toString().toCharArray();
+                    AlertDialog busy = busyDialog("正在验证旧版备份密码…");
+                    new Thread(() -> {
+                        BackupService.RestorePackage restorePackage = null;
+                        String failure = null;
+                        try (InputStream input = getContentResolver().openInputStream(uri)) {
+                            if (input == null) throw new java.io.IOException("无法读取所选文件");
+                            restorePackage = new BackupService(this)
+                                    .decryptAndValidate(input, value);
+                        } catch (Exception error) {
+                            failure = readableError(error);
+                        }
+                        BackupService.RestorePackage finalPackage = restorePackage;
+                        String finalFailure = failure;
+                        runOnUiThread(() -> {
+                            busy.dismiss();
+                            if (finalPackage != null) showRestoreChoice(finalPackage);
+                            else Ui.toast(this, "导入失败：" + finalFailure);
+                        });
+                    }, "safetydata-legacy-import").start();
                 })
                 .setNegativeButton("取消", null)
                 .show();
@@ -395,27 +443,41 @@ public final class SettingsActivity extends Activity {
                 .setTitle("选择恢复方式")
                 .setItems(new String[]{"合并恢复（保留本机较新数据与冲突副本）",
                         "完整恢复（替换本机业务数据）"}, (dialog, which) -> {
-                    try {
-                        BackupService service = new BackupService(this);
-                        if (which == 0) {
-                            int count = service.mergeRestore(restore);
-                            restore = null;
-                            Ui.toast(this, "合并恢复完成，处理 " + count + " 项；较新数据不会被静默覆盖");
-                        } else {
-                            service.fullRestore(restore);
-                            restore = null;
-                            Intent restart = getPackageManager().getLaunchIntentForPackage(getPackageName());
-                            if (restart == null) restart = new Intent(this, LedgerActivity.class);
-                            restart.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK
-                                    | Intent.FLAG_ACTIVITY_CLEAR_TASK);
-                            startActivity(restart);
-                            finishAffinity();
-                        }
+                    BackupService.RestorePackage selected = restore;
+                    restore = null;
+                    AlertDialog busy = busyDialog(which == 0
+                            ? "正在合并记录和照片…" : "正在完整恢复 APP 数据…");
+                    new Thread(() -> {
+                        int count = 0;
+                        String failure = null;
+                        try {
+                            BackupService service = new BackupService(this);
+                            if (which == 0) count = service.mergeRestore(selected);
+                            else service.fullRestore(selected);
                         } catch (Exception error) {
-                            if (restore != null) restore.close();
-                            restore = null;
-                            Ui.toast(this, "恢复失败：" + readableError(error));
+                            selected.close();
+                            failure = readableError(error);
                         }
+                        int finalCount = count;
+                        String finalFailure = failure;
+                        runOnUiThread(() -> {
+                            busy.dismiss();
+                            if (finalFailure != null) {
+                                Ui.toast(this, "恢复失败：" + finalFailure);
+                            } else if (which == 0) {
+                                Ui.toast(this, "合并恢复完成，处理 " + finalCount
+                                        + " 项；较新数据不会被静默覆盖");
+                            } else {
+                                Intent restart = getPackageManager()
+                                        .getLaunchIntentForPackage(getPackageName());
+                                if (restart == null) restart = new Intent(this, LedgerActivity.class);
+                                restart.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK
+                                        | Intent.FLAG_ACTIVITY_CLEAR_TASK);
+                                startActivity(restart);
+                                finishAffinity();
+                            }
+                        });
+                    }, "safetydata-restore").start();
                 })
                 .setOnCancelListener(dialog -> {
                     if (restore != null) restore.close();
@@ -462,6 +524,11 @@ public final class SettingsActivity extends Activity {
             Ui.toast(this, "请填写同步空间名称");
             return;
         }
+        if ("Cloudflare".equals(type) && spacePassword.length() < 8
+                && tokenValue.isBlank() && username.isBlank()) {
+            Ui.toast(this, "Cloudflare 自动配对需要至少 8 位同步密码");
+            return;
+        }
         if (saveOnSuccess && spacePassword.length() < 8) {
             Ui.toast(this, "同步空间密码至少 8 位");
             return;
@@ -471,12 +538,14 @@ public final class SettingsActivity extends Activity {
             SyncProvider.ConnectionResult result;
             if (type.contains("WebDAV") || "Cloudflare".equals(type)
                     || "自定义 HTTP 服务器".equals(type)) {
-                result = new WebDavClient(url, username, password, tokenValue)
+                result = new WebDavClient(url, username, password, tokenValue,
+                        "Cloudflare".equals(type) ? spaceName : "",
+                        "Cloudflare".equals(type) ? spacePassword : "")
                         .testReadWrite(spaceName);
                 if (!result.success() && "Cloudflare".equals(type)) {
                     String detail = result.message();
                     if (detail.contains("需要设备授权") || detail.contains("HTTP 401")) {
-                        detail = "云端要求设备授权。请展开“高级服务器认证”，填写该 Cloudflare 服务生成的设备 Token 后重试。设备 Token 不等于同步密码；若云端没有 Token 管理入口，需要部署项目 cloudflare-worker 中的兼容网关。\n\n原始响应："
+                        detail = "已使用同步空间名称和同步密码自动发起设备配对，但这个地址仍拒绝授权。它不是本版兼容网关，或仍使用旧私有授权协议。请重新部署仓库 cloudflare-worker；如果云端另外生成了设备 Token，也可在高级认证中填写。\n\n原始响应："
                                 + detail;
                     } else {
                         detail = "Cloudflare 地址可访问，但未通过安全台账兼容网关的读写校验："
@@ -640,6 +709,17 @@ public final class SettingsActivity extends Activity {
     private void maskPassword(EditText input) {
         input.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_PASSWORD);
         input.setTransformationMethod(PasswordTransformationMethod.getInstance());
+    }
+
+    private AlertDialog busyDialog(String message) {
+        AlertDialog dialog = new AlertDialog.Builder(this)
+                .setTitle("请稍候")
+                .setMessage(message)
+                .setCancelable(false)
+                .create();
+        dialog.setCanceledOnTouchOutside(false);
+        dialog.show();
+        return dialog;
     }
 
     private String readableError(Throwable error) {

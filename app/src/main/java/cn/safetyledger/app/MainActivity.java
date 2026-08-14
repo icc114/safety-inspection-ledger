@@ -512,10 +512,16 @@ public class MainActivity extends Activity {
             image.setScaleType(ImageView.ScaleType.CENTER_CROP);
             image.setImageBitmap(MediaService.decodeThumbnail(item.localPath, 320));
             image.setContentDescription("点击放大检查照片");
-            image.setOnClickListener(view -> Ui.previewPhoto(this, item.localPath));
+            View.OnClickListener preview = view -> Ui.previewPhoto(this, item.localPath);
+            image.setOnClickListener(preview);
             row.addView(image, new LinearLayout.LayoutParams(Ui.dp(this, 76), Ui.dp(this, 64)));
-            row.addView(Ui.text(this, "检查照片 · 点击放大\n" + new File(item.localPath).getName(), 13, false),
-                    Ui.weight(1));
+            TextView label = Ui.text(this, "检查照片 · 点击任意位置查看大图\n"
+                    + new File(item.localPath).getName(), 13, false);
+            label.setOnClickListener(preview);
+            row.addView(label, Ui.weight(1));
+            row.setClickable(true);
+            row.setFocusable(true);
+            row.setOnClickListener(preview);
             mediaBox.addView(row);
         }
     }

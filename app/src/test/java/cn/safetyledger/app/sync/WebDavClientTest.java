@@ -6,6 +6,7 @@ import org.junit.Test;
 
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicReference;
 
 import okhttp3.mockwebserver.Dispatcher;
 import okhttp3.mockwebserver.MockResponse;
@@ -13,15 +14,20 @@ import okhttp3.mockwebserver.MockWebServer;
 import okhttp3.mockwebserver.RecordedRequest;
 
 import static org.junit.Assert.assertTrue;
+import static org.junit.Assert.assertEquals;
 
 public final class WebDavClientTest {
     private MockWebServer server;
     private final Map<String, byte[]> objects = new ConcurrentHashMap<>();
+    private final AtomicReference<String> authorization = new AtomicReference<>();
+    private final AtomicReference<String> syncSpace = new AtomicReference<>();
 
     @Before public void start() throws Exception {
         server = new MockWebServer();
         server.setDispatcher(new Dispatcher() {
             @Override public MockResponse dispatch(RecordedRequest request) {
+                authorization.set(request.getHeader("Authorization"));
+                syncSpace.set(request.getHeader("X-Safety-Ledger-Space"));
                 String path = request.getPath();
                 return switch (request.getMethod()) {
                     case "PROPFIND" -> new MockResponse().setResponseCode(207)
@@ -57,5 +63,16 @@ public final class WebDavClientTest {
         SyncProvider.ConnectionResult result = client.testReadWrite("team-space");
         assertTrue(result.message(), result.success());
         assertTrue("probe must be deleted after verification", objects.isEmpty());
+    }
+
+    @Test public void cloudflarePairingUsesDerivedProofWithoutSendingRawPassword() {
+        WebDavClient client = new WebDavClient(server.url("/dav/").toString(),
+                "", "", "", "team-space", "very-secret-password");
+        SyncProvider.ConnectionResult result = client.testReadWrite("team-space");
+        assertTrue(result.message(), result.success());
+        assertEquals("team-space", syncSpace.get());
+        assertEquals("SafetyLedger 9W5bftuNmfoJekwtzSrqWV1eAKDdGD5_HbMhtGrzj-k",
+                authorization.get());
+        assertTrue(!authorization.get().contains("very-secret-password"));
     }
 }

@@ -20,6 +20,8 @@ import android.widget.Space;
 import android.widget.TextView;
 import android.widget.Toast;
 
+import java.io.File;
+
 public final class Ui {
     public static final int BLUE = Color.rgb(30, 91, 216);
     public static final int BLUE_DARK = Color.rgb(21, 75, 183);
@@ -250,6 +252,10 @@ public final class Ui {
     }
 
     public static void previewPhoto(Activity activity, String path) {
+        if (path == null || !new File(path).isFile()) {
+            toast(activity, "照片文件不存在；如果这是云端历史照片，请先完成媒体下载");
+            return;
+        }
         activity.startActivity(new Intent(activity, PhotoPreviewActivity.class)
                 .putExtra("photo_path", path));
     }

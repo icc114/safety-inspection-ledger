@@ -12,6 +12,7 @@ import android.net.Uri;
 import android.os.Bundle;
 import android.provider.MediaStore;
 import android.view.Gravity;
+import android.view.View;
 import android.view.ViewGroup;
 import android.widget.Button;
 import android.widget.EditText;
@@ -390,11 +391,16 @@ public final class RecordDetailActivity extends Activity {
             image.setImageBitmap(MediaService.decodeThumbnail(media.localPath, 360));
             image.setScaleType(ImageView.ScaleType.CENTER_CROP);
             image.setContentDescription("点击放大照片");
-            image.setOnClickListener(view -> Ui.previewPhoto(this, media.localPath));
+            View.OnClickListener preview = view -> Ui.previewPhoto(this, media.localPath);
+            image.setOnClickListener(preview);
             row.addView(image, new LinearLayout.LayoutParams(Ui.dp(this, 82), Ui.dp(this, 66)));
-            TextView label = Ui.text(this, category(media.category) + " · 点击照片放大", 14, true);
+            TextView label = Ui.text(this, category(media.category) + " · 点击任意位置查看大图", 14, true);
             if ("RECTIFICATION".equals(media.category)) label.setTextColor(Ui.BLUE_DARK);
+            label.setOnClickListener(preview);
             row.addView(label, Ui.weight(1));
+            row.setClickable(true);
+            row.setFocusable(true);
+            row.setOnClickListener(preview);
             mediaBox.addView(row);
             mediaBox.addView(Ui.divider(this));
         }
