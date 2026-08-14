@@ -7,7 +7,7 @@ import java.util.*;
 
 public final class LedgerDatabase extends SQLiteOpenHelper {
     public static final String NAME = "safety_ledger_native_v1.db";
-    public static final int VERSION = 1;
+    public static final int VERSION = 2;
 
     public LedgerDatabase(Context context) { super(context, NAME, null, VERSION); setWriteAheadLoggingEnabled(true); }
 
@@ -29,6 +29,7 @@ public final class LedgerDatabase extends SQLiteOpenHelper {
         db.execSQL("CREATE TABLE signatures(id TEXT PRIMARY KEY,inspection_id TEXT NOT NULL REFERENCES inspections(id) ON DELETE CASCADE,role TEXT NOT NULL,local_path TEXT NOT NULL,sha256 TEXT NOT NULL,created_at INTEGER NOT NULL,updated_at INTEGER NOT NULL,revision INTEGER NOT NULL DEFAULT 1,deleted_at INTEGER,UNIQUE(inspection_id,role))");
         db.execSQL("CREATE TABLE app_settings(setting_key TEXT PRIMARY KEY,setting_value TEXT NOT NULL,updated_at INTEGER NOT NULL)");
         db.execSQL("CREATE TABLE sync_providers(id TEXT PRIMARY KEY,provider_type TEXT NOT NULL,display_name TEXT NOT NULL,endpoint TEXT NOT NULL DEFAULT '',username TEXT NOT NULL DEFAULT '',encrypted_secret TEXT NOT NULL DEFAULT '',token_ciphertext TEXT NOT NULL DEFAULT '',sync_space TEXT NOT NULL DEFAULT 'safety-ledger',encryption_secret TEXT NOT NULL DEFAULT '',config_json TEXT NOT NULL DEFAULT '{}',enabled INTEGER NOT NULL DEFAULT 0,created_at INTEGER NOT NULL,updated_at INTEGER NOT NULL)");
+        createSyncDevices(db);
         db.execSQL("CREATE TABLE sync_queue(id TEXT PRIMARY KEY,entity_type TEXT NOT NULL,entity_id TEXT NOT NULL,operation TEXT NOT NULL,payload_hash TEXT,attempts INTEGER NOT NULL DEFAULT 0,next_attempt_at INTEGER NOT NULL,created_at INTEGER NOT NULL,last_error TEXT,UNIQUE(entity_type,entity_id,operation))");
         db.execSQL("CREATE TABLE tombstones(id TEXT PRIMARY KEY,entity_type TEXT NOT NULL,entity_id TEXT NOT NULL,deleted_at INTEGER NOT NULL,revision INTEGER NOT NULL,device_id TEXT,synced_at INTEGER,UNIQUE(entity_type,entity_id))");
         db.execSQL("CREATE TABLE conflict_copies(id TEXT PRIMARY KEY,entity_type TEXT NOT NULL,entity_id TEXT NOT NULL,local_revision INTEGER NOT NULL,remote_revision INTEGER NOT NULL,payload_json TEXT NOT NULL,created_at INTEGER NOT NULL,resolved_at INTEGER)");
@@ -42,6 +43,15 @@ public final class LedgerDatabase extends SQLiteOpenHelper {
     @Override public void onUpgrade(SQLiteDatabase db, int oldVersion, int newVersion) {
         // Every future version is applied sequentially here and recorded in schema_migrations.
         if (oldVersion < 1) throw new IllegalStateException("Unsupported pre-v1 database");
+        if (oldVersion < 2) {
+            createSyncDevices(db);
+            db.execSQL("INSERT INTO schema_migrations VALUES(2,?,?)",
+                    new Object[]{System.currentTimeMillis(), "Add paired-device roles for snapshot sync"});
+        }
+    }
+
+    private static void createSyncDevices(SQLiteDatabase db) {
+        db.execSQL("CREATE TABLE IF NOT EXISTS sync_devices(device_id TEXT PRIMARY KEY,display_name TEXT NOT NULL,role TEXT NOT NULL DEFAULT 'FIELD',first_seen_at INTEGER NOT NULL,last_seen_at INTEGER NOT NULL,updated_at INTEGER NOT NULL)");
     }
 
     private void seedInitialTemplate(SQLiteDatabase db) {

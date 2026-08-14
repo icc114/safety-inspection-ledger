@@ -37,7 +37,7 @@ public final class TrashActivity extends Activity {
 
     private void load() {
         list.removeAllViews();
-        TextView note = Ui.text(this, "普通删除的记录会保留在这里，可恢复。永久删除需要管理密码并且无法撤销。", 13, false);
+        TextView note = Ui.text(this, "普通删除的记录会保留在这里，可恢复。永久删除需要同步空间密码（未配置云同步时使用本机永久删除密码），并会建立 tombstone。", 13, false);
         note.setTextColor(Ui.MUTED);
         list.addView(note);
         int count = 0;
@@ -74,10 +74,10 @@ public final class TrashActivity extends Activity {
     private void confirm(Inspection inspection) {
         String hash = repo.setting("delete_password_hash", "");
         if (hash.isBlank()) {
-            Ui.toast(this, "请先在基础设置中设置永久删除密码");
+            Ui.toast(this, "请先保存云同步空间密码，或在基础设置中设置本机永久删除密码");
             return;
         }
-        EditText password = Ui.input(this, "永久删除密码");
+        EditText password = Ui.input(this, "同步空间密码 / 永久删除密码");
         password.setInputType(0x81);
         new AlertDialog.Builder(this)
                 .setTitle("不可恢复的永久删除")

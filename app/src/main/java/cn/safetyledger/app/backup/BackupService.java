@@ -8,9 +8,66 @@ public final class BackupService{
     public void exportData(OutputStream destination,char[]password)throws Exception{if(password.length<8)throw new IllegalArgumentException("密码至少 8 位");File tmp=File.createTempFile("safety-backup-",".zip",context.getCacheDir());try{LedgerDatabase h=((SafetyLedgerApp)context).db();SQLiteDatabase db=h.getWritableDatabase();db.rawQuery("PRAGMA wal_checkpoint(FULL)",null).close();File dbFile=context.getDatabasePath(LedgerDatabase.NAME);Properties manifest=new Properties();manifest.setProperty("format","safetydata");manifest.setProperty("formatVersion","1");manifest.setProperty("schemaVersion",String.valueOf(LedgerDatabase.VERSION));manifest.setProperty("createdAt",String.valueOf(System.currentTimeMillis()));manifest.setProperty("databaseSha256",sha(dbFile));try(ZipOutputStream z=new ZipOutputStream(new FileOutputStream(tmp))){entry(z,"manifest.properties",properties(manifest));file(z,"database.sqlite",dbFile);File media=new File(context.getFilesDir(),"business_media");zipDir(z,media,"business_media/");}encrypt(tmp,destination,password);}finally{tmp.delete();Arrays.fill(password,'\0');}}
     public RestorePackage decryptAndValidate(InputStream source,char[]password)throws Exception{File zip=File.createTempFile("safety-restore-",".zip",context.getCacheDir());File dir=new File(context.getCacheDir(),"restore-"+UUID.randomUUID());if(!dir.mkdirs())throw new IOException("无法创建恢复目录");try{decrypt(source,zip,password);unzip(zip,dir);File manifestFile=new File(dir,"manifest.properties"),dbFile=new File(dir,"database.sqlite");if(!manifestFile.isFile()||!dbFile.isFile())throw new IOException("备份内容不完整");Properties m=new Properties();try(InputStream in=new FileInputStream(manifestFile)){m.load(in);}if(!"safetydata".equals(m.getProperty("format")))throw new IOException("不是 APP 数据备份");if(Integer.parseInt(m.getProperty("formatVersion","0"))>FORMAT)throw new IOException("备份格式版本过新");if(Integer.parseInt(m.getProperty("schemaVersion","0"))>LedgerDatabase.VERSION)throw new IOException("数据库版本过新，请先升级 APP");if(!sha(dbFile).equals(m.getProperty("databaseSha256")))throw new IOException("数据库完整性校验失败");SQLiteDatabase test=SQLiteDatabase.openDatabase(dbFile.getAbsolutePath(),null,SQLiteDatabase.OPEN_READONLY);try(Cursor c=test.rawQuery("SELECT max(version) FROM schema_migrations",null)){if(!c.moveToFirst()||c.getInt(0)<1)throw new IOException("数据库迁移元数据无效");}finally{test.close();}return new RestorePackage(dir,dbFile);}catch(Exception e){deleteTree(dir);throw e;}finally{zip.delete();Arrays.fill(password,'\0');}}
     public void fullRestore(RestorePackage p)throws Exception{SafetyLedgerApp app=(SafetyLedgerApp)context;app.db().close();File target=context.getDatabasePath(LedgerDatabase.NAME);File recovery=new File(target.getParentFile(),LedgerDatabase.NAME+".before-restore");if(target.exists())Files.copy(target.toPath(),recovery.toPath(),StandardCopyOption.REPLACE_EXISTING);Files.copy(p.database.toPath(),target.toPath(),StandardCopyOption.REPLACE_EXISTING);new File(target+"-wal").delete();new File(target+"-shm").delete();File mediaRoot=new File(context.getFilesDir(),"business_media");deleteTree(mediaRoot);copyMedia(new File(p.root,"business_media"),mediaRoot);try(SQLiteDatabase restored=SQLiteDatabase.openDatabase(target.getAbsolutePath(),null,SQLiteDatabase.OPEN_READWRITE)){normalizeMediaPaths(restored);}p.close();}
-    public int mergeRestore(RestorePackage p)throws Exception{LedgerDatabase h=((SafetyLedgerApp)context).db();SQLiteDatabase d=h.getWritableDatabase();String path=p.database.getAbsolutePath().replace("'","''");int inserted=0;String[] tables={"templates","template_items","inspections","inspection_items","media","signatures","app_settings","sync_providers","tombstones","archive_index","holiday_cache"};d.execSQL("ATTACH DATABASE '"+path+"' AS incoming");d.beginTransaction();try{for(String table:tables){Set<String>cols=columns(d,table);String names=String.join(",",cols);d.execSQL("INSERT OR IGNORE INTO main."+table+"("+names+") SELECT "+names+" FROM incoming."+table);try(Cursor c=d.rawQuery("SELECT changes()",null)){if(c.moveToFirst())inserted+=c.getInt(0);}if(!"app_settings".equals(table)&&cols.contains("updated_at")&&cols.contains("revision")){d.execSQL("INSERT OR IGNORE INTO conflict_copies(id,entity_type,entity_id,local_revision,remote_revision,payload_json,created_at) SELECT lower(hex(randomblob(16))),?,m.id,COALESCE(m.revision,1),COALESCE(i.revision,1),'{}',? FROM main."+table+" m JOIN incoming."+table+" i ON m.id=i.id WHERE COALESCE(m.updated_at,0)<>COALESCE(i.updated_at,0)",new Object[]{table,System.currentTimeMillis()});}}d.setTransactionSuccessful();}finally{d.endTransaction();d.execSQL("DETACH DATABASE incoming");}copyMedia(new File(p.root,"business_media"),new File(context.getFilesDir(),"business_media"));normalizeMediaPaths(d);p.close();return inserted;}
-    private void normalizeMediaPaths(SQLiteDatabase d){File root=new File(context.getFilesDir(),"business_media");try(Cursor c=d.rawQuery("SELECT id,inspection_id FROM media WHERE deleted_at IS NULL",null)){while(c.moveToNext()){File f=new File(new File(root,c.getString(1)),c.getString(0)+".jpg");if(f.isFile())d.execSQL("UPDATE media SET local_path=? WHERE id=?",new Object[]{f.getAbsolutePath(),c.getString(0)});}}try(Cursor c=d.rawQuery("SELECT id,inspection_id,role FROM signatures WHERE deleted_at IS NULL",null)){while(c.moveToNext()){File f=new File(new File(root,c.getString(1)),"signature-"+c.getString(2)+".png");if(f.isFile())d.execSQL("UPDATE signatures SET local_path=? WHERE id=?",new Object[]{f.getAbsolutePath(),c.getString(0)});}}}
-    private Set<String> columns(SQLiteDatabase d,String t){Set<String>s=new LinkedHashSet<>();try(Cursor c=d.rawQuery("PRAGMA main.table_info("+t+")",null)){while(c.moveToNext())s.add(c.getString(1));}return s;}
+    public int mergeRestore(RestorePackage p)throws Exception{
+        LedgerDatabase h=((SafetyLedgerApp)context).db();
+        SQLiteDatabase d=h.getWritableDatabase();
+        String path=p.database.getAbsolutePath().replace("'","''");
+        int changed=0;
+        String[] tables={"templates","template_items","inspections","inspection_items","media",
+                "signatures","app_settings","sync_providers","sync_devices","tombstones",
+                "archive_index","holiday_cache"};
+        d.execSQL("ATTACH DATABASE '"+path+"' AS incoming");
+        d.beginTransaction();
+        try{
+            for(String table:tables){
+                if(!tableExists(d,"incoming",table))continue; // Accept older schema backups.
+                Set<String>mainCols=columns(d,"main",table);
+                Set<String>incomingCols=columns(d,"incoming",table);
+                mainCols.retainAll(incomingCols);
+                if(mainCols.isEmpty())continue;
+                String names=String.join(",",mainCols);
+                d.execSQL("INSERT OR IGNORE INTO main."+table+"("+names+") SELECT "+names
+                        +" FROM incoming."+table);
+                try(Cursor c=d.rawQuery("SELECT changes()",null)){if(c.moveToFirst())changed+=c.getInt(0);}
+
+                // Provider credentials and per-device app settings are always kept local.
+                if("sync_providers".equals(table)||"app_settings".equals(table))continue;
+                String primary=mainCols.contains("id")?"id":mainCols.contains("device_id")?"device_id":null;
+                if(primary==null||!mainCols.contains("updated_at"))continue;
+                if(mainCols.contains("revision")){
+                    d.execSQL("INSERT OR IGNORE INTO conflict_copies(id,entity_type,entity_id,local_revision,remote_revision,payload_json,created_at) "
+                                    +"SELECT lower(hex(randomblob(16))),?,m."+primary+",COALESCE(m.revision,1),COALESCE(i.revision,1),'{}',? "
+                                    +"FROM main."+table+" m JOIN incoming."+table+" i ON m."+primary+"=i."+primary
+                                    +" WHERE COALESCE(m.updated_at,0)<>COALESCE(i.updated_at,0)",
+                            new Object[]{table,System.currentTimeMillis()});
+                }
+                List<String>assignments=new ArrayList<>();
+                for(String column:mainCols){
+                    if(column.equals(primary))continue;
+                    assignments.add(column+"=(SELECT i."+column+" FROM incoming."+table
+                            +" i WHERE i."+primary+"=main."+table+"."+primary+")");
+                }
+                if(!assignments.isEmpty()){
+                    d.execSQL("UPDATE main."+table+" SET "+String.join(",",assignments)
+                            +" WHERE EXISTS(SELECT 1 FROM incoming."+table+" i WHERE i."+primary
+                            +"=main."+table+"."+primary+" AND COALESCE(i.updated_at,0)>COALESCE(main."
+                            +table+".updated_at,0))");
+                    try(Cursor c=d.rawQuery("SELECT changes()",null)){if(c.moveToFirst())changed+=c.getInt(0);}
+                }
+            }
+            d.setTransactionSuccessful();
+        }finally{
+            d.endTransaction();
+            d.execSQL("DETACH DATABASE incoming");
+        }
+        copyMedia(new File(p.root,"business_media"),new File(context.getFilesDir(),"business_media"));
+        normalizeMediaPaths(d);
+        p.close();
+        return changed;
+    }
+    private void normalizeMediaPaths(SQLiteDatabase d){File root=new File(context.getFilesDir(),"business_media");try(Cursor c=d.rawQuery("SELECT id,inspection_id FROM media WHERE deleted_at IS NULL",null)){while(c.moveToNext()){File f=new File(new File(root,c.getString(1)),c.getString(0)+".jpg");if(f.isFile())d.execSQL("UPDATE media SET local_path=? WHERE id=?",new Object[]{f.getAbsolutePath(),c.getString(0)});}}try(Cursor c=d.rawQuery("SELECT id,inspection_id,role,local_path FROM signatures WHERE deleted_at IS NULL",null)){while(c.moveToNext()){String stored=c.getString(3);String name=stored==null||stored.isBlank()?"signature-"+c.getString(2)+".png":new File(stored).getName();File f=new File(new File(root,c.getString(1)),name);if(f.isFile())d.execSQL("UPDATE signatures SET local_path=? WHERE id=?",new Object[]{f.getAbsolutePath(),c.getString(0)});}}}
+    private boolean tableExists(SQLiteDatabase d,String schema,String table){try(Cursor c=d.rawQuery("SELECT 1 FROM "+schema+".sqlite_master WHERE type='table' AND name=?",new String[]{table})){return c.moveToFirst();}}
+    private Set<String> columns(SQLiteDatabase d,String schema,String t){Set<String>s=new LinkedHashSet<>();try(Cursor c=d.rawQuery("PRAGMA "+schema+".table_info("+t+")",null)){while(c.moveToNext())s.add(c.getString(1));}return s;}
     private void encrypt(File plain,OutputStream out,char[]pw)throws Exception{byte[]salt=random(16),iv=random(12);SecretKey key=derive(pw,salt);Cipher c=Cipher.getInstance("AES/GCM/NoPadding");c.init(Cipher.ENCRYPT_MODE,key,new GCMParameterSpec(128,iv));out.write(MAGIC);out.write(FORMAT);out.write(salt);out.write(iv);try(CipherOutputStream co=new CipherOutputStream(out,c)){Files.copy(plain.toPath(),co);}}
     private void decrypt(InputStream in,File out,char[]pw)throws Exception{byte[]magic=readExactly(in,MAGIC.length);if(!Arrays.equals(magic,MAGIC))throw new IOException("文件不是 .safetydata APP 数据备份（PDF 不可导入）");int version=in.read();if(version<1||version>FORMAT)throw new IOException("不支持的备份格式版本");byte[]salt=readExactly(in,16),iv=readExactly(in,12);Cipher c=Cipher.getInstance("AES/GCM/NoPadding");c.init(Cipher.DECRYPT_MODE,derive(pw,salt),new GCMParameterSpec(128,iv));try(CipherInputStream ci=new CipherInputStream(in,c);OutputStream o=new FileOutputStream(out)){copy(ci,o);}catch(IOException e){throw new SecurityException("密码错误或备份完整性校验失败",e);}}
     private SecretKey derive(char[]pw,byte[]salt)throws Exception{PBEKeySpec s=new PBEKeySpec(pw,salt,ITERATIONS,256);byte[]k=SecretKeyFactory.getInstance("PBKDF2WithHmacSHA256").generateSecret(s).getEncoded();s.clearPassword();return new SecretKeySpec(k,"AES");}

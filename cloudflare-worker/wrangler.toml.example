@@ -1,0 +1,11 @@
+name = "safety-ledger-sync"
+main = "worker.js"
+compatibility_date = "2026-08-01"
+
+[[r2_buckets]]
+binding = "SAFETY_LEDGER_BUCKET"
+bucket_name = "safety-ledger-sync"
+
+# Do not put passwords in this file. Configure one of:
+# wrangler secret put SYNC_TOKEN
+# or both SYNC_USERNAME and SYNC_PASSWORD

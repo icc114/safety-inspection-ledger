@@ -43,7 +43,8 @@ public final class SignatureActivity extends Activity {
         LinearLayout root = Ui.column(this);
         root.setBackgroundColor(Ui.BG);
         LinearLayout controls = Ui.row(this);
-        controls.setPadding(Ui.dp(this, 5), Ui.dp(this, 2), Ui.dp(this, 5), Ui.dp(this, 2));
+        // Keep toolbar controls away from waterfall/curved screen edges in landscape.
+        controls.setPadding(Ui.dp(this, 26), Ui.dp(this, 2), Ui.dp(this, 26), Ui.dp(this, 2));
         controls.setBackgroundColor(Ui.BLUE);
         TextView title = Ui.text(this, "‹  " + roleName(role) + "（下方签名）", 14, true);
         title.setTextColor(Color.WHITE);
@@ -103,7 +104,9 @@ public final class SignatureActivity extends Activity {
         try {
             File directory = new File(getFilesDir(), "business_media/" + inspectionId);
             if (!directory.exists() && !directory.mkdirs()) throw new IllegalStateException("无法创建签名目录");
-            File file = new File(directory, "signature-" + role + ".png");
+            // A new immutable file avoids an older peer snapshot overwriting a newer signature.
+            File file = new File(directory, "signature-" + role + "-"
+                    + System.currentTimeMillis() + ".png");
             Bitmap bitmap = pad.bitmap();
             try (OutputStream output = new FileOutputStream(file)) {
                 bitmap.compress(Bitmap.CompressFormat.PNG, 100, output);
