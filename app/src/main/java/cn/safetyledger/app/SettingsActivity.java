@@ -303,7 +303,12 @@ public final class SettingsActivity extends Activity {
         new AlertDialog.Builder(this)
                 .setTitle(export ? "备份到手机文件夹" : "从备份文件恢复")
                 .setMessage(export ? "下一步可在手机文件选择器中指定保存文件夹。密码无法找回，请妥善保管。"
-                        : "下一步��_m�G����ƭy� 位");
+                        : "下一步请选择 .safetydata 文件；PDF 不能导入。")
+                .setView(password)
+                .setPositiveButton("选择文件位置", (dialog, which) -> {
+                    pendingPassword = password.getText().toString().toCharArray();
+                    if (pendingPassword.length < 8) {
+                        Ui.toast(this, "密码至少 8 位");
                         pendingPassword = null;
                         return;
                     }
