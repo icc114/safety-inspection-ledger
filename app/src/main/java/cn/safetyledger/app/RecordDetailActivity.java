@@ -5,7 +5,6 @@ import android.app.Activity;
 import android.content.ContentValues;
 import android.content.Intent;
 import android.content.pm.PackageManager;
-import android.graphics.BitmapFactory;
 import android.graphics.Color;
 import android.location.Location;
 import android.location.LocationManager;
@@ -38,14 +37,17 @@ public final class RecordDetailActivity extends Activity {
     private static final int PDF = 611;
     private static final int CAMERA = 612;
     private static final int PERMISSION = 613;
+    private static final int SIGN = 614;
 
     private LedgerRepository repo;
     private Inspection model;
     private LinearLayout mediaBox;
+    private LinearLayout signaturesBox;
     private EditText rectification;
     private EditText recheck;
     private Switch confirmed;
     private Uri cameraUri;
+    private String pendingCategory = "RECTIFICATION";
 
     @Override
     protected void onCreate(Bundle state) {
@@ -169,7 +171,17 @@ public final class RecordDetailActivity extends Activity {
 
     private LinearLayout photoCard() {
         LinearLayout card = Ui.card(this);
-        card.addView(Ui.sectionTitle(this, "2", "检查照片", "带时间与地点水印"));
+        card.addView(Ui.sectionTitle(this, "2", "检查照片", "保存记录后仍可补拍、补传和预览"));
+        LinearLayout actions = Ui.row(this);
+        Button camera = Ui.button(this, "+ 补拍检查照片");
+        Button gallery = Ui.secondaryButton(this, "从相册补传");
+        camera.setOnClickListener(view -> capture("SCENE"));
+        gallery.setOnClickListener(view -> pick("SCENE"));
+        actions.addView(camera, Ui.weight(1));
+        actions.addView(Ui.horizontalGap(this, 7));
+        actions.addView(gallery, Ui.weight(1));
+        card.addView(actions);
+        card.addView(Ui.gap(this, 7));
         mediaBox = Ui.column(this);
         card.addView(mediaBox);
         showMedia();
@@ -178,7 +190,16 @@ public final class RecordDetailActivity extends Activity {
 
     private LinearLayout signatureCard() {
         LinearLayout card = Ui.card(this);
-        card.addView(Ui.sectionTitle(this, "3", "现场签名", null));
+        card.addView(Ui.sectionTitle(this, "3", "现场签名", "漏签可补签，已有签名可重新签写"));
+        signaturesBox = Ui.column(this);
+        card.addView(signaturesBox);
+        showSignatures();
+        return card;
+    }
+
+    private void showSignatures() {
+        if (signaturesBox == null) return;
+        signaturesBox.removeAllViews();
         List<Signature> signatures = repo.signatures(model.id);
         String[][] roles = {
                 {"INSPECTOR1", "检查人签名1"},
@@ -193,17 +214,17 @@ public final class RecordDetailActivity extends Activity {
             if (found != null) {
                 ImageView image = new ImageView(this);
                 image.setScaleType(ImageView.ScaleType.FIT_CENTER);
-                image.setImageBitmap(BitmapFactory.decodeFile(found.path));
-                row.addView(image, new LinearLayout.LayoutParams(Ui.dp(this, 140), Ui.dp(this, 62)));
-            } else {
-                TextView empty = Ui.text(this, "未签名", 14, false);
-                empty.setTextColor(Ui.MUTED);
-                row.addView(empty);
+                image.setImageBitmap(MediaService.decodeThumbnail(found.path, 500));
+                row.addView(image, new LinearLayout.LayoutParams(Ui.dp(this, 104), Ui.dp(this, 58)));
             }
-            card.addView(row);
-            card.addView(Ui.divider(this));
+            boolean signed = found != null;
+            Button action = Ui.secondaryButton(this, signed ? "重签" : "+ 补签");
+            action.setOnClickListener(view -> sign(role[0]));
+            row.addView(Ui.horizontalGap(this, 5));
+            row.addView(action, new LinearLayout.LayoutParams(Ui.dp(this, 68), Ui.dp(this, 40)));
+            signaturesBox.addView(row);
+            signaturesBox.addView(Ui.divider(this));
         }
-        return card;
     }
 
     private LinearLayout rectificationCard() {
@@ -218,8 +239,8 @@ public final class RecordDetailActivity extends Activity {
         LinearLayout actions = Ui.row(this);
         Button camera = Ui.button(this, "+ 拍摄整改照片");
         Button gallery = Ui.secondaryButton(this, "选择整改照片");
-        camera.setOnClickListener(view -> capture());
-        gallery.setOnClickListener(view -> pick());
+        camera.setOnClickListener(view -> capture("RECTIFICATION"));
+        gallery.setOnClickListener(view -> pick("RECTIFICATION"));
         actions.addView(camera, Ui.weight(1));
         actions.addView(Ui.horizontalGap(this, 7));
         actions.addView(gallery, Ui.weight(1));
@@ -272,11 +293,13 @@ public final class RecordDetailActivity extends Activity {
         return false;
     }
 
-    private void pick() {
+    private void pick(String category) {
+        pendingCategory = category;
         startActivityForResult(Ui.photoPickerIntent(), PICK);
     }
 
-    private void capture() {
+    private void capture(String category) {
+        pendingCategory = category;
         if (checkSelfPermission(Manifest.permission.CAMERA) != PackageManager.PERMISSION_GRANTED) {
             requestPermissions(new String[]{Manifest.permission.CAMERA,
                     Manifest.permission.ACCESS_FINE_LOCATION}, PERMISSION);
@@ -284,7 +307,8 @@ public final class RecordDetailActivity extends Activity {
         }
         ContentValues values = new ContentValues();
         values.put(MediaStore.Images.Media.DISPLAY_NAME,
-                "rectification-" + System.currentTimeMillis() + ".jpg");
+                ("SCENE".equals(pendingCategory) ? "inspection-" : "rectification-")
+                        + System.currentTimeMillis() + ".jpg");
         values.put(MediaStore.Images.Media.MIME_TYPE, "image/jpeg");
         cameraUri = getContentResolver().insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values);
         startActivityForResult(new Intent(MediaStore.ACTION_IMAGE_CAPTURE)
@@ -295,7 +319,13 @@ public final class RecordDetailActivity extends Activity {
     public void onRequestPermissionsResult(int request, String[] permissions, int[] grants) {
         super.onRequestPermissionsResult(request, permissions, grants);
         if (request == PERMISSION && grants.length > 0
-                && grants[0] == PackageManager.PERMISSION_GRANTED) capture();
+                && grants[0] == PackageManager.PERMISSION_GRANTED) capture(pendingCategory);
+    }
+
+    private void sign(String role) {
+        startActivityForResult(new Intent(this, SignatureActivity.class)
+                .putExtra("inspection_id", model.id)
+                .putExtra("role", role), SIGN);
     }
 
     @Override
@@ -314,6 +344,9 @@ public final class RecordDetailActivity extends Activity {
             } else if (request == CAMERA && cameraUri != null) {
                 importPhoto(cameraUri, true);
                 getContentResolver().delete(cameraUri, null, null);
+            } else if (request == SIGN) {
+                showSignatures();
+                Ui.toast(this, "签名已保存");
             } else if (request == PDF && data != null) {
                 try (OutputStream output = getContentResolver().openOutputStream(data.getData())) {
                     new PdfExporter(this).export(List.of(repo.inspection(model.id)), output);
@@ -339,10 +372,11 @@ public final class RecordDetailActivity extends Activity {
 
     private void importPhoto(Uri uri, boolean capturedNow) throws Exception {
         Media media = new MediaService(this).importAndWatermark(uri, model.id, null,
-                "RECTIFICATION", model.location, capturedNow ? lastLocation() : null, capturedNow);
+                pendingCategory, model.location, capturedNow ? lastLocation() : null, capturedNow);
         repo.addMedia(media);
         showMedia();
-        Ui.toast(this, "整改照片已保存；可读取的原始时间和 GPS 已写入水印");
+        Ui.toast(this, ("SCENE".equals(pendingCategory) ? "检查照片" : "整改照片")
+                + "已保存；可读取的原始时间和 GPS 已写入水印");
     }
 
     private void showMedia() {
