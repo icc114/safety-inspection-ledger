@@ -1,19 +1,397 @@
 package cn.safetyledger.app;
 
-import android.Manifest;import android.app.*;import android.content.*;import android.content.pm.PackageManager;import android.graphics.BitmapFactory;import android.net.Uri;import android.os.Bundle;import android.provider.MediaStore;import android.view.*;import android.widget.*;import cn.safetyledger.app.data.Entities.*;import cn.safetyledger.app.data.LedgerRepository;import cn.safetyledger.app.media.MediaService;import cn.safetyledger.app.pdf.PdfExporter;import java.io.*;import java.util.*;
+import android.Manifest;
+import android.app.Activity;
+import android.content.ContentValues;
+import android.content.Intent;
+import android.content.pm.PackageManager;
+import android.graphics.BitmapFactory;
+import android.graphics.Color;
+import android.location.Location;
+import android.location.LocationManager;
+import android.net.Uri;
+import android.os.Bundle;
+import android.provider.MediaStore;
+import android.view.Gravity;
+import android.view.ViewGroup;
+import android.widget.Button;
+import android.widget.EditText;
+import android.widget.ImageView;
+import android.widget.LinearLayout;
+import android.widget.ScrollView;
+import android.widget.Switch;
+import android.widget.TextView;
 
-public final class RecordDetailActivity extends Activity{
-    private static final int PICK=610,PDF=611,CAMERA=612,PERMISSION=613;private LedgerRepository repo;private Inspection model;private LinearLayout media;private EditText rectification,recheck;private String photoCategory="RECTIFICATION";private Uri cameraUri;
-    @Override protected void onCreate(Bundle b){super.onCreate(b);repo=new LedgerRepository(this);model=repo.inspection(getIntent().getStringExtra("inspection_id"));if(model==null){finish();return;}render();}
-    private void render(){ScrollView sv=new ScrollView(this);LinearLayout root=Ui.column(this);root.setPadding(Ui.dp(this,12),0,Ui.dp(this,12),Ui.dp(this,30));LinearLayout bar=Ui.row(this);TextView back=Ui.text(this,"‹",34,true);back.setOnClickListener(v->finish());TextView title=Ui.text(this,"检查记录详情",21,true);bar.setBackgroundColor(Ui.DARK);back.setTextColor(0xffffffff);title.setTextColor(0xffffffff);bar.addView(back,new LinearLayout.LayoutParams(Ui.dp(this,52),Ui.dp(this,56)));bar.addView(title,Ui.weight(1));root.addView(bar);root.addView(Ui.text(this,model.templateName+"\n"+model.date+" "+model.time+"  "+model.location,20,true));root.addView(Ui.text(this,"状态："+status(model.status),17,true));for(InspectionItem x:model.items){TextView v=Ui.text(this,x.order+". "+x.category+" · "+result(x.result)+"\n"+x.content+(x.problem.isBlank()?"":"\n问题："+x.problem),15,false);v.setBackground(Ui.border(this,0xffcbd5e1));root.addView(v);root.addView(Ui.gap(this,5));}root.addView(Ui.text(this,"检查结论："+model.conclusion+"\n整改意见："+model.advice+"\n责任人："+model.responsible+"  期限："+model.deadline,15,false));rectification=Ui.input(this,"填写整改情况");rectification.setText(model.rectification);root.addView(Ui.text(this,"整改情况",17,true));root.addView(rectification);root.addView(photoButtons("整改照片","RECTIFICATION"));recheck=Ui.input(this,"填写复查结果");recheck.setText(model.recheck);root.addView(Ui.text(this,"复查结果",17,true));root.addView(recheck);root.addView(photoButtons("复查照片","RECHECK"));media=Ui.column(this);root.addView(media);showMedia();
-        LinearLayout st=Ui.row(this);for(String[]x:new String[][]{{"整改中","RECTIFYING"},{"已整改完成","RECTIFIED"},{"复查完成","COMPLETED"}}){Button bt=Ui.button(this,x[0]);bt.setOnClickListener(v->saveStatus(x[1]));st.addView(bt,Ui.weight(1));}root.addView(st);Button pdf=Ui.button(this,"导出本条 A4 PDF");pdf.setOnClickListener(v->startActivityForResult(new Intent(Intent.ACTION_CREATE_DOCUMENT).setType("application/pdf").putExtra(Intent.EXTRA_TITLE,"安全检查记录-"+model.date+".pdf"),PDF));root.addView(pdf);Button del=Ui.button(this,"移入回收站");del.setOnClickListener(v->{repo.softDelete(model.id);Ui.toast(this,"已移入回收站");finish();});root.addView(del);sv.addView(root);setContentView(sv);}
-    private LinearLayout photoButtons(String label,String category){LinearLayout row=Ui.row(this);Button camera=Ui.button(this,"拍摄"+label),gallery=Ui.button(this,"选择"+label);camera.setOnClickListener(v->capture(category));gallery.setOnClickListener(v->pick(category));row.addView(camera,Ui.weight(1));row.addView(gallery,Ui.weight(1));return row;}
-    private void saveStatus(String s){model.rectification=rectification.getText().toString().trim();model.recheck=recheck.getText().toString().trim();if(("RECTIFIED".equals(s)||"COMPLETED".equals(s))&&model.rectification.isBlank()){Ui.toast(this,"请先填写整改情况");return;}if("COMPLETED".equals(s)&&model.recheck.isBlank()){Ui.toast(this,"请先填写复查结果");return;}model.status=s;repo.saveInspection(model);Ui.toast(this,"状态已更新为："+status(s));render();}
-    private void pick(String c){photoCategory=c;startActivityForResult(new Intent(Intent.ACTION_OPEN_DOCUMENT).setType("image/*").addCategory(Intent.CATEGORY_OPENABLE),PICK);}
-    private void capture(String c){photoCategory=c;if(checkSelfPermission(Manifest.permission.CAMERA)!=PackageManager.PERMISSION_GRANTED){requestPermissions(new String[]{Manifest.permission.CAMERA},PERMISSION);return;}ContentValues v=new ContentValues();v.put(MediaStore.Images.Media.DISPLAY_NAME,"rectification-"+System.currentTimeMillis()+".jpg");v.put(MediaStore.Images.Media.MIME_TYPE,"image/jpeg");cameraUri=getContentResolver().insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI,v);startActivityForResult(new Intent(MediaStore.ACTION_IMAGE_CAPTURE).putExtra(MediaStore.EXTRA_OUTPUT,cameraUri),CAMERA);}
-    @Override public void onRequestPermissionsResult(int r,String[]p,int[]g){super.onRequestPermissionsResult(r,p,g);if(r==PERMISSION&&g.length>0&&g[0]==PackageManager.PERMISSION_GRANTED)capture(photoCategory);}
-    @Override protected void onActivityResult(int r,int ok,Intent d){super.onActivityResult(r,ok,d);if(ok!=RESULT_OK)return;try{if(r==PICK&&d!=null)importPhoto(d.getData());else if(r==CAMERA&&cameraUri!=null){importPhoto(cameraUri);getContentResolver().delete(cameraUri,null,null);}else if(r==PDF&&d!=null){try(OutputStream o=getContentResolver().openOutputStream(d.getData())){new PdfExporter(this).export(List.of(repo.inspection(model.id)),o);}Ui.toast(this,"PDF 已导出");}}catch(Exception e){Ui.toast(this,"操作失败："+e.getMessage());}}
-    private void importPhoto(Uri uri)throws Exception{Media m=new MediaService(this).importAndWatermark(uri,model.id,null,photoCategory,model.location,null);repo.addMedia(m);showMedia();Ui.toast(this,"照片已保存并加水印");}
-    private void showMedia(){media.removeAllViews();model.media.clear();model.media.addAll(repo.media(model.id));for(Media m:model.media){LinearLayout r=Ui.row(this);ImageView i=new ImageView(this);i.setImageBitmap(BitmapFactory.decodeFile(m.localPath));i.setScaleType(ImageView.ScaleType.CENTER_CROP);r.addView(i,new LinearLayout.LayoutParams(Ui.dp(this,90),Ui.dp(this,72)));r.addView(Ui.text(this,category(m.category),14,false),Ui.weight(1));media.addView(r);}}
-    private String status(String s){return switch(s){case"PENDING_RECTIFICATION"->"待整改";case"RECTIFYING"->"整改中";case"RECTIFIED"->"已整改完成";case"COMPLETED"->"已完成";default->"草稿";};}private String result(String s){return"PASS".equals(s)?"合格":"FAIL".equals(s)?"不合格":"不适用";}private String category(String s){return switch(s){case"PROBLEM"->"问题照片";case"RECTIFICATION"->"整改照片";case"RECHECK"->"复查照片";default->"现场照片";};}
+import cn.safetyledger.app.data.Entities.Inspection;
+import cn.safetyledger.app.data.Entities.InspectionItem;
+import cn.safetyledger.app.data.Entities.Media;
+import cn.safetyledger.app.data.Entities.Signature;
+import cn.safetyledger.app.data.LedgerRepository;
+import cn.safetyledger.app.media.MediaService;
+import cn.safetyledger.app.pdf.PdfExporter;
+
+import java.io.OutputStream;
+import java.util.List;
+
+public final class RecordDetailActivity extends Activity {
+    private static final int PICK = 610;
+    private static final int PDF = 611;
+    private static final int CAMERA = 612;
+    private static final int PERMISSION = 613;
+
+    private LedgerRepository repo;
+    private Inspection model;
+    private LinearLayout mediaBox;
+    private EditText rectification;
+    private EditText recheck;
+    private Switch confirmed;
+    private Uri cameraUri;
+
+    @Override
+    protected void onCreate(Bundle state) {
+        super.onCreate(state);
+        Ui.setupWindow(this);
+        repo = new LedgerRepository(this);
+        model = repo.inspection(getIntent().getStringExtra("inspection_id"));
+        if (model == null) {
+            finish();
+            return;
+        }
+        render();
+    }
+
+    private void render() {
+        model = repo.inspection(model.id);
+        ScrollView scroll = new ScrollView(this);
+        LinearLayout root = Ui.column(this);
+        root.setBackgroundColor(Ui.BG);
+        root.addView(topBar());
+        LinearLayout content = Ui.column(this);
+        content.setPadding(Ui.dp(this, 12), Ui.dp(this, 12), Ui.dp(this, 12), Ui.dp(this, 28));
+        content.addView(summaryCard());
+        content.addView(Ui.gap(this, 12));
+        content.addView(itemsCard());
+        content.addView(Ui.gap(this, 12));
+        content.addView(photoCard());
+        content.addView(Ui.gap(this, 12));
+        content.addView(signatureCard());
+        if (hasProblem()) {
+            content.addView(Ui.gap(this, 12));
+            content.addView(rectificationCard());
+        }
+        content.addView(Ui.gap(this, 14));
+        Button pdf = Ui.button(this, "导出本条 A4 PDF");
+        pdf.setOnClickListener(view -> startActivityForResult(new Intent(Intent.ACTION_CREATE_DOCUMENT)
+                .setType("application/pdf")
+                .putExtra(Intent.EXTRA_TITLE, "安全检查记录-" + model.date + ".pdf"), PDF));
+        content.addView(pdf);
+        content.addView(Ui.gap(this, 8));
+        Button delete = Ui.secondaryButton(this, "移入回收站");
+        delete.setTextColor(Ui.DANGER);
+        delete.setOnClickListener(view -> {
+            repo.softDelete(model.id);
+            Ui.toast(this, "已移入回收站");
+            finish();
+        });
+        content.addView(delete);
+        root.addView(content);
+        scroll.addView(root);
+        setContentView(scroll);
+    }
+
+    private LinearLayout topBar() {
+        LinearLayout bar = Ui.row(this);
+        bar.setPadding(Ui.dp(this, 10), Ui.dp(this, 6), Ui.dp(this, 10), Ui.dp(this, 6));
+        bar.setBackgroundColor(Ui.BLUE);
+        Button back = Ui.secondaryButton(this, "‹");
+        back.setTextSize(28);
+        back.setOnClickListener(view -> finish());
+        TextView title = Ui.text(this, "检查记录详情", 20, true);
+        title.setTextColor(Color.WHITE);
+        TextView status = Ui.text(this, status(model.status), 14, true);
+        status.setTextColor(Ui.BLUE_DARK);
+        status.setBackground(Ui.shape(this, Color.WHITE, Color.TRANSPARENT, 18));
+        bar.addView(back, new LinearLayout.LayoutParams(Ui.dp(this, 46), Ui.dp(this, 46)));
+        bar.addView(title, Ui.weight(1));
+        bar.addView(status);
+        return bar;
+    }
+
+    private LinearLayout summaryCard() {
+        LinearLayout card = Ui.card(this);
+        TextView title = Ui.text(this, model.templateName + "记录表", 22, true);
+        title.setGravity(Gravity.CENTER);
+        card.addView(title);
+        card.addView(Ui.gap(this, 7));
+        card.addView(infoRow("检查日期", model.date));
+        card.addView(Ui.divider(this));
+        card.addView(infoRow("检查地点", model.location));
+        return card;
+    }
+
+    private LinearLayout infoRow(String label, String value) {
+        LinearLayout row = Ui.row(this);
+        TextView caption = Ui.text(this, label, 15, true);
+        caption.setTextColor(Ui.MUTED);
+        row.addView(caption, new LinearLayout.LayoutParams(Ui.dp(this, 92),
+                ViewGroup.LayoutParams.WRAP_CONTENT));
+        row.addView(Ui.text(this, value, 16, true), Ui.weight(1));
+        return row;
+    }
+
+    private LinearLayout itemsCard() {
+        LinearLayout card = Ui.card(this);
+        card.addView(Ui.sectionTitle(this, "1", "检查事项", "“否”项包含现场问题和整改要求"));
+        card.addView(Ui.gap(this, 6));
+        for (InspectionItem item : model.items) {
+            LinearLayout row = Ui.row(this);
+            TextView description = Ui.text(this, item.order + ". " + item.category + "\n" + item.content, 14, false);
+            TextView result = Ui.text(this, result(item.result), 15, true);
+            result.setGravity(Gravity.CENTER);
+            result.setTextColor("FAIL".equals(item.result) ? Ui.DANGER : Ui.BLUE_DARK);
+            result.setBackground(Ui.shape(this,
+                    "FAIL".equals(item.result) ? Color.rgb(255, 239, 239) : Ui.BLUE_PALE,
+                    Color.TRANSPARENT, 12));
+            row.addView(description, Ui.weight(1));
+            row.addView(result, new LinearLayout.LayoutParams(Ui.dp(this, 58), Ui.dp(this, 40)));
+            card.addView(row);
+            if ("FAIL".equals(item.result)) {
+                TextView problem = Ui.text(this, "现场情况、问题及整改要求：\n" + item.problem, 14, false);
+                problem.setTextColor(Color.rgb(145, 74, 18));
+                problem.setBackground(Ui.shape(this, Color.rgb(255, 249, 240),
+                        Color.rgb(244, 190, 110), 8));
+                card.addView(problem);
+            }
+            card.addView(Ui.divider(this));
+        }
+        return card;
+    }
+
+    private LinearLayout photoCard() {
+        LinearLayout card = Ui.card(this);
+        card.addView(Ui.sectionTitle(this, "2", "检查照片", "带时间与地点水印"));
+        mediaBox = Ui.column(this);
+        card.addView(mediaBox);
+        showMedia();
+        return card;
+    }
+
+    private LinearLayout signatureCard() {
+        LinearLayout card = Ui.card(this);
+        card.addView(Ui.sectionTitle(this, "3", "现场签名", null));
+        List<Signature> signatures = repo.signatures(model.id);
+        String[][] roles = {
+                {"INSPECTOR1", "检查人签名1"},
+                {"INSPECTOR2", "检查人签名2"},
+                {"INSPECTEE", "被检查人签名"}
+        };
+        for (String[] role : roles) {
+            Signature found = null;
+            for (Signature signature : signatures) if (role[0].equals(signature.role)) found = signature;
+            LinearLayout row = Ui.row(this);
+            row.addView(Ui.text(this, role[1], 14, true), Ui.weight(1));
+            if (found != null) {
+                ImageView image = new ImageView(this);
+                image.setScaleType(ImageView.ScaleType.FIT_CENTER);
+                image.setImageBitmap(BitmapFactory.decodeFile(found.path));
+                row.addView(image, new LinearLayout.LayoutParams(Ui.dp(this, 140), Ui.dp(this, 62)));
+            } else {
+                TextView empty = Ui.text(this, "未签名", 14, false);
+                empty.setTextColor(Ui.MUTED);
+                row.addView(empty);
+            }
+            card.addView(row);
+            card.addView(Ui.divider(this));
+        }
+        return card;
+    }
+
+    private LinearLayout rectificationCard() {
+        LinearLayout card = Ui.card(this);
+        card.addView(Ui.sectionTitle(this, "4", "整改记录", "整改完成后补录照片并确认"));
+        rectification = Ui.input(this, "填写具体整改情况");
+        rectification.setText(model.rectification);
+        rectification.setMinLines(3);
+        rectification.setGravity(Gravity.TOP);
+        card.addView(rectification);
+        card.addView(Ui.gap(this, 8));
+        LinearLayout actions = Ui.row(this);
+        Button camera = Ui.button(this, "+ 拍摄整改照片");
+        Button gallery = Ui.secondaryButton(this, "选择整改照片");
+        camera.setOnClickListener(view -> capture());
+        gallery.setOnClickListener(view -> pick());
+        actions.addView(camera, Ui.weight(1));
+        actions.addView(Ui.horizontalGap(this, 7));
+        actions.addView(gallery, Ui.weight(1));
+        card.addView(actions);
+
+        recheck = Ui.input(this, "复查说明（可选）");
+        recheck.setText(model.recheck);
+        recheck.setMinLines(2);
+        card.addView(Ui.gap(this, 8));
+        card.addView(recheck);
+        confirmed = new Switch(this);
+        confirmed.setText("整改确认：已整改完成");
+        confirmed.setTextSize(16);
+        confirmed.setTextColor(Ui.TEXT);
+        confirmed.setChecked("RECTIFIED".equals(model.status) || "COMPLETED".equals(model.status));
+        confirmed.setPadding(Ui.dp(this, 6), Ui.dp(this, 8), Ui.dp(this, 6), Ui.dp(this, 8));
+        card.addView(confirmed);
+        Button save = Ui.button(this, "保存整改记录");
+        save.setOnClickListener(view -> saveRectification());
+        card.addView(save);
+        return card;
+    }
+
+    private boolean hasProblem() {
+        for (InspectionItem item : model.items) if ("FAIL".equals(item.result)) return true;
+        return false;
+    }
+
+    private void saveRectification() {
+        model.rectification = rectification.getText().toString().trim();
+        model.recheck = recheck.getText().toString().trim();
+        if (model.rectification.isBlank()) {
+            Ui.toast(this, "请填写整改情况");
+            return;
+        }
+        if (confirmed.isChecked() && !hasRectificationPhoto()) {
+            Ui.toast(this, "整改确认前请至少补录一张整改照片");
+            return;
+        }
+        model.status = confirmed.isChecked() ? "RECTIFIED" : "RECTIFYING";
+        repo.saveInspection(model);
+        Ui.toast(this, confirmed.isChecked() ? "整改已确认完成" : "整改记录已保存");
+        render();
+    }
+
+    private boolean hasRectificationPhoto() {
+        for (Media media : repo.media(model.id)) {
+            if ("RECTIFICATION".equals(media.category)) return true;
+        }
+        return false;
+    }
+
+    private void pick() {
+        startActivityForResult(new Intent(Intent.ACTION_OPEN_DOCUMENT)
+                .setType("image/*")
+                .addCategory(Intent.CATEGORY_OPENABLE)
+                .putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true), PICK);
+    }
+
+    private void capture() {
+        if (checkSelfPermission(Manifest.permission.CAMERA) != PackageManager.PERMISSION_GRANTED) {
+            requestPermissions(new String[]{Manifest.permission.CAMERA,
+                    Manifest.permission.ACCESS_FINE_LOCATION}, PERMISSION);
+            return;
+        }
+        ContentValues values = new ContentValues();
+        values.put(MediaStore.Images.Media.DISPLAY_NAME,
+                "rectification-" + System.currentTimeMillis() + ".jpg");
+        values.put(MediaStore.Images.Media.MIME_TYPE, "image/jpeg");
+        cameraUri = getContentResolver().insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values);
+        startActivityForResult(new Intent(MediaStore.ACTION_IMAGE_CAPTURE)
+                .putExtra(MediaStore.EXTRA_OUTPUT, cameraUri), CAMERA);
+    }
+
+    @Override
+    public void onRequestPermissionsResult(int request, String[] permissions, int[] grants) {
+        super.onRequestPermissionsResult(request, permissions, grants);
+        if (request == PERMISSION && grants.length > 0
+                && grants[0] == PackageManager.PERMISSION_GRANTED) capture();
+    }
+
+    @Override
+    protected void onActivityResult(int request, int result, Intent data) {
+        super.onActivityResult(request, result, data);
+        if (result != RESULT_OK) return;
+        try {
+            if (request == PICK && data != null) {
+                if (data.getClipData() != null) {
+                    for (int i = 0; i < data.getClipData().getItemCount(); i++) {
+                        importPhoto(data.getClipData().getItemAt(i).getUri());
+                    }
+                } else if (data.getData() != null) {
+                    importPhoto(data.getData());
+                }
+            } else if (request == CAMERA && cameraUri != null) {
+                importPhoto(cameraUri);
+                getContentResolver().delete(cameraUri, null, null);
+            } else if (request == PDF && data != null) {
+                try (OutputStream output = getContentResolver().openOutputStream(data.getData())) {
+                    new PdfExporter(this).export(List.of(repo.inspection(model.id)), output);
+                }
+                Ui.toast(this, "PDF 已导出");
+            }
+        } catch (Exception error) {
+            Ui.toast(this, "操作失败：" + error.getMessage());
+        }
+    }
+
+    private Location lastLocation() {
+        if (checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION)
+                != PackageManager.PERMISSION_GRANTED) return null;
+        LocationManager manager = getSystemService(LocationManager.class);
+        Location best = null;
+        for (String provider : manager.getProviders(true)) {
+            Location value = manager.getLastKnownLocation(provider);
+            if (value != null && (best == null || value.getAccuracy() < best.getAccuracy())) best = value;
+        }
+        return best;
+    }
+
+    private void importPhoto(Uri uri) throws Exception {
+        Media media = new MediaService(this).importAndWatermark(uri, model.id, null,
+                "RECTIFICATION", model.location, lastLocation());
+        repo.addMedia(media);
+        showMedia();
+        Ui.toast(this, "整改照片已保存并添加水印");
+    }
+
+    private void showMedia() {
+        if (mediaBox == null) return;
+        mediaBox.removeAllViews();
+        model.media.clear();
+        model.media.addAll(repo.media(model.id));
+        for (Media media : model.media) {
+            LinearLayout row = Ui.row(this);
+            ImageView image = new ImageView(this);
+            image.setImageBitmap(BitmapFactory.decodeFile(media.localPath));
+            image.setScaleType(ImageView.ScaleType.CENTER_CROP);
+            row.addView(image, new LinearLayout.LayoutParams(Ui.dp(this, 82), Ui.dp(this, 66)));
+            TextView label = Ui.text(this, category(media.category), 14, true);
+            if ("RECTIFICATION".equals(media.category)) label.setTextColor(Ui.BLUE_DARK);
+            row.addView(label, Ui.weight(1));
+            mediaBox.addView(row);
+            mediaBox.addView(Ui.divider(this));
+        }
+        if (model.media.isEmpty()) {
+            TextView empty = Ui.text(this, "尚未上传检查照片", 14, false);
+            empty.setTextColor(Ui.MUTED);
+            mediaBox.addView(empty);
+        }
+    }
+
+    private String status(String status) {
+        return switch (status) {
+            case "PENDING_RECTIFICATION" -> "待整改";
+            case "RECTIFYING" -> "整改中";
+            case "RECTIFIED" -> "已整改完成";
+            case "COMPLETED" -> "检查完成";
+            default -> "草稿";
+        };
+    }
+
+    private String result(String result) {
+        return "PASS".equals(result) ? "是" : "FAIL".equals(result) ? "否" : "未选择";
+    }
+
+    private String category(String category) {
+        return switch (category) {
+            case "RECTIFICATION" -> "整改照片";
+            case "RECHECK" -> "复查照片";
+            default -> "检查照片";
+        };
+    }
 }
+

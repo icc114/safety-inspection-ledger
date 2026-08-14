@@ -1,27 +1,483 @@
 package cn.safetyledger.app;
 
-import android.app.*;import android.content.*;import android.graphics.Color;import android.os.Bundle;import android.view.*;import android.widget.*;import cn.safetyledger.app.data.Entities.*;import cn.safetyledger.app.data.LedgerRepository;import cn.safetyledger.app.pdf.PdfExporter;import java.io.*;import java.time.*;import java.time.temporal.TemporalAdjusters;import java.util.*;
+import android.app.Activity;
+import android.content.Intent;
+import android.graphics.Color;
+import android.os.Bundle;
+import android.view.Gravity;
+import android.view.View;
+import android.view.ViewGroup;
+import android.widget.AdapterView;
+import android.widget.ArrayAdapter;
+import android.widget.Button;
+import android.widget.CheckBox;
+import android.widget.GridLayout;
+import android.widget.LinearLayout;
+import android.widget.ScrollView;
+import android.widget.Spinner;
+import android.widget.TextView;
 
-public final class LedgerActivity extends Activity{
-    private static final int EXPORT=701;private LedgerRepository repo;private LinearLayout records,calendarBox,selectionActions;private TextView monthTitle,pageTitle;private Spinner range,type,statusFilter,pageSize;private Button multiToggle;private boolean multiMode=false;private YearMonth month=YearMonth.now();private String selectedDate;private int page=1,total=0,size=10;private final Set<String>selected=new LinkedHashSet<>();private List<Inspection>current=new ArrayList<>(),exportRecords;
-    @Override protected void onCreate(Bundle b){super.onCreate(b);repo=new LedgerRepository(this);render();load();}
-    private void render(){LinearLayout root=Ui.column(this);root.setBackgroundColor(Ui.BG);LinearLayout bar=Ui.row(this);bar.setBackgroundColor(Ui.DARK);TextView back=Ui.text(this,"‹",34,true);back.setTextColor(Color.WHITE);back.setOnClickListener(v->finish());TextView title=Ui.text(this,"安全检查台账",21,true);title.setTextColor(Color.WHITE);Button form=Ui.button(this,"检查填报");form.setOnClickListener(v->startActivity(new Intent(this,MainActivity.class)));Button settings=Ui.button(this,"设置");settings.setOnClickListener(v->Ui.start(this,SettingsActivity.class));bar.addView(back,new LinearLayout.LayoutParams(Ui.dp(this,48),Ui.dp(this,56)));bar.addView(title,Ui.weight(1));bar.addView(settings);bar.addView(form);root.addView(bar);
-        LinearLayout mr=Ui.row(this);Button prev=Ui.button(this,"上个月"),next=Ui.button(this,"下个月");monthTitle=Ui.text(this,"",19,true);monthTitle.setGravity(Gravity.CENTER);prev.setOnClickListener(v->{month=month.minusMonths(1);selectedDate=null;syncCalendar();load();});next.setOnClickListener(v->{month=month.plusMonths(1);selectedDate=null;syncCalendar();load();});mr.addView(prev);mr.addView(monthTitle,Ui.weight(1));mr.addView(next);root.addView(mr);calendarBox=Ui.column(this);root.addView(calendarBox);syncCalendar();
-        LinearLayout filters=Ui.row(this);range=spinner(new String[]{"当日","本月","本季度","本年度","全部"});type=spinner(types());statusFilter=spinner(new String[]{"全部状态","待整改","整改中","已整改完成","已完成"});pageSize=spinner(new String[]{"10条/页","20条/页","50条/页","100条/页","200条/页"});range.setSelection(1);AdapterView.OnItemSelectedListener l=new SimpleSelect(){void selected(){page=1;load();}};range.setOnItemSelectedListener(l);type.setOnItemSelectedListener(l);statusFilter.setOnItemSelectedListener(l);pageSize.setOnItemSelectedListener(new SimpleSelect(){void selected(){int[]s={10,20,50,100,200};size=s[pageSize.getSelectedItemPosition()];page=1;load();}});filters.addView(range,Ui.weight(1));filters.addView(type,Ui.weight(1));filters.addView(statusFilter,Ui.weight(1));filters.addView(pageSize,Ui.weight(1));root.addView(filters);
-        multiToggle=Ui.button(this,"多选导出");multiToggle.setOnClickListener(v->{multiMode=!multiMode;if(!multiMode)selected.clear();multiToggle.setText(multiMode?"退出多选导出":"多选导出");selectionActions.setVisibility(multiMode?View.VISIBLE:View.GONE);showRecords();});root.addView(multiToggle);selectionActions=Ui.row(this);Button all=Ui.button(this,"全选筛选结果"),none=Ui.button(this,"取消全选"),export=Ui.button(this,"导出选中"),period=Ui.button(this,"导出当前周期");all.setOnClickListener(v->selectAll());none.setOnClickListener(v->{selected.clear();showRecords();});export.setOnClickListener(v->exportSelected());period.setOnClickListener(v->{selected.clear();exportSelected();});selectionActions.addView(all,Ui.weight(1));selectionActions.addView(none,Ui.weight(1));selectionActions.addView(export,Ui.weight(1));selectionActions.addView(period,Ui.weight(1));selectionActions.setVisibility(View.GONE);root.addView(selectionActions);
-        ScrollView sv=new ScrollView(this);records=Ui.column(this);records.setPadding(Ui.dp(this,10),Ui.dp(this,5),Ui.dp(this,10),Ui.dp(this,10));sv.addView(records);root.addView(sv,new LinearLayout.LayoutParams(-1,0,1));LinearLayout pager=Ui.row(this);Button p=Ui.button(this,"上一页"),n=Ui.button(this,"下一页");pageTitle=Ui.text(this,"",15,true);pageTitle.setGravity(Gravity.CENTER);p.setOnClickListener(v->{if(page>1){page--;load();}});n.setOnClickListener(v->{if(page*size<total){page++;load();}});pager.addView(p);pager.addView(pageTitle,Ui.weight(1));pager.addView(n);root.addView(pager);setContentView(root);}
-    private abstract class SimpleSelect implements AdapterView.OnItemSelectedListener{public void onItemSelected(AdapterView<?>a,View v,int p,long id){selected();}public void onNothingSelected(AdapterView<?>a){}abstract void selected();}
-    private Spinner spinner(String[]values){Spinner s=new Spinner(this);s.setAdapter(new ArrayAdapter<>(this,android.R.layout.simple_spinner_dropdown_item,values));return s;}
-    private String[]types(){List<String>o=new ArrayList<>();o.add("全部类型");for(Template t:repo.templates(true))if(!o.contains(t.category))o.add(t.category);return o.toArray(new String[0]);}
-    private void syncCalendar(){monthTitle.setText(String.format(Locale.CHINA,"%d年%d月",month.getYear(),month.getMonthValue()));calendarBox.removeAllViews();GridLayout grid=new GridLayout(this);grid.setColumnCount(7);String[]weeks={"一","二","三","四","五","六","日"};for(String w:weeks){TextView h=Ui.text(this,w,14,true);h.setGravity(Gravity.CENTER);grid.addView(h,new GridLayout.LayoutParams(GridLayout.spec(GridLayout.UNDEFINED,1,1f),GridLayout.spec(GridLayout.UNDEFINED,1,1f)));}Set<String>inspections=repo.markedDates(month.toString());Map<String,String[]>holidays=repo.holidays(month.toString());int leading=month.atDay(1).getDayOfWeek().getValue()-1;for(int i=0;i<leading;i++)grid.addView(Ui.text(this,"",14,false),cellParams());for(int day=1;day<=month.lengthOfMonth();day++){LocalDate date=month.atDay(day);String key=date.toString();String[]holiday=holidays.get(key);TextView cell=Ui.text(this,String.valueOf(day),15,inspections.contains(key));cell.setGravity(Gravity.CENTER);cell.setMinHeight(Ui.dp(this,42));int color=Color.WHITE;if(holiday!=null)color="WORKDAY".equals(holiday[1])?0xffffedd5:0xffffe4e6;if(inspections.contains(key))color=0xffa5f3fc;if(key.equals(selectedDate))color=0xfffef08a;cell.setBackground(Ui.border(this,color==Color.WHITE?0xffcbd5e1:color));cell.setBackgroundColor(color);cell.setContentDescription(key+(holiday==null?"":" "+holiday[0])+(inspections.contains(key)?" 有检查记录":""));cell.setOnClickListener(v->{selectedDate=key;range.setSelection(0);page=1;syncCalendar();load();});grid.addView(cell,cellParams());}calendarBox.addView(grid);TextView legend=Ui.text(this,"蓝色：有检查  红色：法定假日  橙色：调休上班  黄色：当前选择",12,false);calendarBox.addView(legend);}
-    private GridLayout.LayoutParams cellParams(){GridLayout.LayoutParams p=new GridLayout.LayoutParams(GridLayout.spec(GridLayout.UNDEFINED,1,1f),GridLayout.spec(GridLayout.UNDEFINED,1,1f));p.width=0;p.height=Ui.dp(this,44);p.setMargins(1,1,1,1);return p;}
-    private String[]bounds(){LocalDate today=selectedDate==null?LocalDate.now():LocalDate.parse(selectedDate);int r=range==null?1:range.getSelectedItemPosition();if(r==0)return new String[]{today.toString(),today.toString()};if(r==1){LocalDate a=month.atDay(1);return new String[]{a.toString(),a.with(TemporalAdjusters.lastDayOfMonth()).toString()};}if(r==2){int sm=((today.getMonthValue()-1)/3)*3+1;LocalDate a=LocalDate.of(today.getYear(),sm,1);return new String[]{a.toString(),a.plusMonths(2).with(TemporalAdjusters.lastDayOfMonth()).toString()};}if(r==3)return new String[]{LocalDate.of(today.getYear(),1,1).toString(),LocalDate.of(today.getYear(),12,31).toString()};return new String[]{null,null};}
-    private String selectedStatus(){if(statusFilter==null||statusFilter.getSelectedItemPosition()==0)return null;return new String[]{null,"PENDING_RECTIFICATION","RECTIFYING","RECTIFIED","COMPLETED"}[statusFilter.getSelectedItemPosition()];}
-    private void load(){if(records==null)return;String[]b=bounds();String ty=type==null||type.getSelectedItemPosition()==0?null:(String)type.getSelectedItem();Page<Inspection>p=repo.list(b[0],b[1],ty,selectedStatus(),false,page,size);current=p.rows;total=p.total;showRecords();}
-    private void showRecords(){records.removeAllViews();Set<String>marks=repo.markedDates(month.toString());if(!marks.isEmpty())records.addView(Ui.text(this,"本月有检查："+String.join("、",marks),13,true));Map<String,String[]>hs=repo.holidays(month.toString());if(hs.isEmpty())records.addView(Ui.text(this,"本年度法定节假日尚未正式公布或未缓存（不进行预测）",13,true));else{List<String>labels=new ArrayList<>();for(Map.Entry<String,String[]>e:hs.entrySet())labels.add(e.getKey().substring(5)+" "+e.getValue()[0]+("WORKDAY".equals(e.getValue()[1])?"（调休上班）":""));Collections.sort(labels);records.addView(Ui.text(this,"国务院正式安排："+String.join("、",labels),12,false));}for(Inspection x:current){LinearLayout row=Ui.row(this);CheckBox c=new CheckBox(this);c.setVisibility(multiMode?View.VISIBLE:View.GONE);c.setChecked(selected.contains(x.id));c.setOnCheckedChangeListener((b,on)->{if(on)selected.add(x.id);else selected.remove(x.id);pageTitle.setText(String.format(Locale.CHINA,"第 %d 页 · 共 %d 条 · 已选 %d 条",page,total,selected.size()));});TextView t=Ui.text(this,x.date+" "+x.time+" · "+x.templateName+"\n"+x.location+" · "+status(x.status),16,false);t.setOnClickListener(v->{if(multiMode)c.setChecked(!c.isChecked());else startActivity(new Intent(this,RecordDetailActivity.class).putExtra("inspection_id",x.id));});row.setBackground(Ui.border(this,0xffcbd5e1));row.addView(c);row.addView(t,Ui.weight(1));records.addView(row);records.addView(Ui.gap(this,6));}pageTitle.setText(String.format(Locale.CHINA,"第 %d 页 · 共 %d 条 · 已选 %d 条",page,total,selected.size()));}
-    private void selectAll(){String[]b=bounds();String ty=type.getSelectedItemPosition()==0?null:(String)type.getSelectedItem();for(Inspection x:repo.list(b[0],b[1],ty,selectedStatus(),false,1,100000).rows)selected.add(x.id);showRecords();}
-    private void exportSelected(){exportRecords=new ArrayList<>();if(selected.isEmpty()){String[]b=bounds();String ty=type.getSelectedItemPosition()==0?null:(String)type.getSelectedItem();for(Inspection x:repo.list(b[0],b[1],ty,selectedStatus(),false,1,100000).rows)exportRecords.add(repo.inspection(x.id));}else for(String id:selected){Inspection x=repo.inspection(id);if(x!=null)exportRecords.add(x);}if(exportRecords.isEmpty()){Ui.toast(this,"没有可导出的检查记录");return;}startActivityForResult(new Intent(Intent.ACTION_CREATE_DOCUMENT).setType("application/pdf").putExtra(Intent.EXTRA_TITLE,"安全检查台账-"+LocalDate.now()+".pdf"),EXPORT);}
-    @Override protected void onActivityResult(int r,int ok,Intent d){super.onActivityResult(r,ok,d);if(r==EXPORT&&ok==RESULT_OK&&d!=null)try(OutputStream o=getContentResolver().openOutputStream(d.getData())){new PdfExporter(this).export(exportRecords,o);Ui.toast(this,"已生成 A4 PDF，共 "+exportRecords.size()+" 条记录");}catch(Exception e){Ui.toast(this,"PDF 导出失败："+e.getMessage());}}
-    private String status(String s){return switch(s){case"PENDING_RECTIFICATION"->"待整改";case"RECTIFYING"->"整改中";case"RECTIFIED"->"已整改完成";case"COMPLETED"->"已完成";default->"草稿";};}
-    @Override protected void onResume(){super.onResume();if(records!=null)load();}
+import cn.safetyledger.app.data.Entities.Inspection;
+import cn.safetyledger.app.data.Entities.Page;
+import cn.safetyledger.app.data.Entities.Template;
+import cn.safetyledger.app.data.LedgerRepository;
+import cn.safetyledger.app.pdf.PdfExporter;
+
+import java.io.OutputStream;
+import java.time.DayOfWeek;
+import java.time.LocalDate;
+import java.time.YearMonth;
+import java.time.format.DateTimeFormatter;
+import java.time.temporal.TemporalAdjusters;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.LinkedHashSet;
+import java.util.List;
+import java.util.Locale;
+import java.util.Map;
+import java.util.Set;
+
+public final class LedgerActivity extends Activity {
+    private static final int EXPORT = 701;
+    private LedgerRepository repo;
+    private LinearLayout records;
+    private LinearLayout calendarBox;
+    private LinearLayout selectionActions;
+    private TextView monthTitle;
+    private TextView pageTitle;
+    private TextView todayTitle;
+    private TextView todaySubtitle;
+    private Spinner range;
+    private Spinner type;
+    private Spinner statusFilter;
+    private Spinner pageSize;
+    private Button multiToggle;
+    private boolean multiMode;
+    private YearMonth month = YearMonth.now();
+    private String selectedDate;
+    private int page = 1;
+    private int total;
+    private int size = 10;
+    private final Set<String> selected = new LinkedHashSet<>();
+    private List<Inspection> current = new ArrayList<>();
+    private List<Inspection> exportRecords;
+
+    @Override
+    protected void onCreate(Bundle state) {
+        super.onCreate(state);
+        Ui.setupWindow(this);
+        repo = new LedgerRepository(this);
+        render();
+        load();
+    }
+
+    private void render() {
+        LinearLayout root = Ui.column(this);
+        root.setBackgroundColor(Ui.BG);
+        root.addView(topBar());
+        ScrollView scroll = new ScrollView(this);
+        LinearLayout content = Ui.column(this);
+        content.setPadding(Ui.dp(this, 12), Ui.dp(this, 12), Ui.dp(this, 12), Ui.dp(this, 24));
+        content.addView(calendarCard());
+        content.addView(Ui.gap(this, 12));
+        content.addView(filterCard());
+        content.addView(Ui.gap(this, 12));
+        content.addView(recordsCard());
+        scroll.addView(content);
+        root.addView(scroll, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1));
+        setContentView(root);
+    }
+
+    private LinearLayout topBar() {
+        LinearLayout bar = Ui.row(this);
+        bar.setPadding(Ui.dp(this, 14), Ui.dp(this, 10), Ui.dp(this, 10), Ui.dp(this, 10));
+        bar.setBackgroundColor(Ui.BLUE);
+        TextView title = Ui.text(this, "安全检查台账", 22, true);
+        title.setTextColor(Color.WHITE);
+        Button settings = Ui.secondaryButton(this, "基础设置");
+        settings.setOnClickListener(view -> Ui.start(this, SettingsActivity.class));
+        Button form = Ui.secondaryButton(this, "+ 检查填报");
+        form.setOnClickListener(view -> startActivity(new Intent(this, MainActivity.class)));
+        bar.addView(title, Ui.weight(1));
+        bar.addView(settings, new LinearLayout.LayoutParams(Ui.dp(this, 98), Ui.dp(this, 48)));
+        bar.addView(Ui.horizontalGap(this, 7));
+        bar.addView(form, new LinearLayout.LayoutParams(Ui.dp(this, 112), Ui.dp(this, 48)));
+        return bar;
+    }
+
+    private LinearLayout calendarCard() {
+        LinearLayout card = Ui.card(this);
+        card.setPadding(Ui.dp(this, 10), Ui.dp(this, 9), Ui.dp(this, 10), Ui.dp(this, 8));
+        LinearLayout today = Ui.row(this);
+        todayTitle = Ui.text(this, "", 20, true);
+        todaySubtitle = Ui.text(this, "", 14, false);
+        todaySubtitle.setTextColor(Ui.MUTED);
+        LinearLayout todayText = Ui.column(this);
+        todayText.addView(todayTitle);
+        todayText.addView(todaySubtitle);
+        Button reset = Ui.secondaryButton(this, "回到今天");
+        reset.setMinHeight(Ui.dp(this, 40));
+        reset.setOnClickListener(view -> {
+            month = YearMonth.now();
+            selectedDate = LocalDate.now().toString();
+            if (range != null) range.setSelection(0);
+            syncCalendar();
+            load();
+        });
+        today.addView(todayText, Ui.weight(1));
+        today.addView(reset, new LinearLayout.LayoutParams(Ui.dp(this, 104), Ui.dp(this, 46)));
+        card.addView(today);
+        card.addView(Ui.divider(this));
+
+        LinearLayout monthNavigation = Ui.row(this);
+        monthTitle = Ui.text(this, "", 20, true);
+        Button previous = Ui.secondaryButton(this, "上月");
+        Button next = Ui.secondaryButton(this, "下月");
+        previous.setOnClickListener(view -> {
+            month = month.minusMonths(1);
+            selectedDate = null;
+            syncCalendar();
+            load();
+        });
+        next.setOnClickListener(view -> {
+            month = month.plusMonths(1);
+            selectedDate = null;
+            syncCalendar();
+            load();
+        });
+        monthNavigation.addView(monthTitle, Ui.weight(1));
+        monthNavigation.addView(previous, new LinearLayout.LayoutParams(Ui.dp(this, 72), Ui.dp(this, 38)));
+        monthNavigation.addView(Ui.horizontalGap(this, 6));
+        monthNavigation.addView(next, new LinearLayout.LayoutParams(Ui.dp(this, 72), Ui.dp(this, 38)));
+        card.addView(monthNavigation);
+        calendarBox = Ui.column(this);
+        card.addView(calendarBox);
+        syncCalendar();
+        return card;
+    }
+
+    private LinearLayout filterCard() {
+        LinearLayout card = Ui.card(this);
+        card.addView(Ui.text(this, "显示范围", 15, true));
+        range = spinner(new String[]{"当日", "本月", "本季度", "本年度", "全部"});
+        range.setSelection(1);
+        card.addView(range, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, Ui.dp(this, 50)));
+        card.addView(Ui.gap(this, 7));
+        card.addView(Ui.text(this, "检查类型与整改状态", 15, true));
+        LinearLayout filters = Ui.row(this);
+        type = spinner(types());
+        statusFilter = spinner(new String[]{"全部状态", "待整改", "整改中", "已整改完成", "检查完成"});
+        filters.addView(type, Ui.weight(1));
+        filters.addView(Ui.horizontalGap(this, 6));
+        filters.addView(statusFilter, Ui.weight(1));
+        card.addView(filters);
+        AdapterView.OnItemSelectedListener listener = new SimpleSelect() {
+            @Override void selected() { page = 1; load(); }
+        };
+        range.setOnItemSelectedListener(listener);
+        type.setOnItemSelectedListener(listener);
+        statusFilter.setOnItemSelectedListener(listener);
+        return card;
+    }
+
+    private LinearLayout recordsCard() {
+        LinearLayout card = Ui.card(this);
+        LinearLayout header = Ui.row(this);
+        TextView title = Ui.text(this, "检查记录", 21, true);
+        pageSize = spinner(new String[]{"10 条/页", "20 条/页", "50 条/页", "100 条/页", "200 条/页"});
+        pageSize.setOnItemSelectedListener(new SimpleSelect() {
+            @Override void selected() {
+                size = new int[]{10, 20, 50, 100, 200}[pageSize.getSelectedItemPosition()];
+                page = 1;
+                load();
+            }
+        });
+        header.addView(title, Ui.weight(1));
+        header.addView(pageSize, new LinearLayout.LayoutParams(Ui.dp(this, 118), Ui.dp(this, 46)));
+        card.addView(header);
+        multiToggle = Ui.secondaryButton(this, "多选导出");
+        multiToggle.setOnClickListener(view -> {
+            multiMode = !multiMode;
+            if (!multiMode) selected.clear();
+            multiToggle.setText(multiMode ? "退出多选导出" : "多选导出");
+            selectionActions.setVisibility(multiMode ? View.VISIBLE : View.GONE);
+            showRecords();
+        });
+        card.addView(multiToggle);
+        selectionActions = Ui.column(this);
+        LinearLayout first = Ui.row(this);
+        Button all = Ui.secondaryButton(this, "全选当前结果");
+        Button none = Ui.secondaryButton(this, "取消全选");
+        first.addView(all, Ui.weight(1));
+        first.addView(Ui.horizontalGap(this, 6));
+        first.addView(none, Ui.weight(1));
+        LinearLayout second = Ui.row(this);
+        Button export = Ui.button(this, "导出选中");
+        Button period = Ui.secondaryButton(this, "导出当前周期");
+        second.addView(export, Ui.weight(1));
+        second.addView(Ui.horizontalGap(this, 6));
+        second.addView(period, Ui.weight(1));
+        selectionActions.addView(first);
+        selectionActions.addView(Ui.gap(this, 6));
+        selectionActions.addView(second);
+        selectionActions.setVisibility(View.GONE);
+        all.setOnClickListener(view -> selectAll());
+        none.setOnClickListener(view -> { selected.clear(); showRecords(); });
+        export.setOnClickListener(view -> exportSelected());
+        period.setOnClickListener(view -> { selected.clear(); exportSelected(); });
+        card.addView(selectionActions);
+        card.addView(Ui.gap(this, 6));
+        records = Ui.column(this);
+        card.addView(records);
+        LinearLayout pager = Ui.row(this);
+        Button previous = Ui.secondaryButton(this, "上一页");
+        Button next = Ui.secondaryButton(this, "下一页");
+        pageTitle = Ui.text(this, "", 14, true);
+        pageTitle.setGravity(Gravity.CENTER);
+        previous.setOnClickListener(view -> { if (page > 1) { page--; load(); } });
+        next.setOnClickListener(view -> { if (page * size < total) { page++; load(); } });
+        pager.addView(previous, new LinearLayout.LayoutParams(Ui.dp(this, 82), Ui.dp(this, 44)));
+        pager.addView(pageTitle, Ui.weight(1));
+        pager.addView(next, new LinearLayout.LayoutParams(Ui.dp(this, 82), Ui.dp(this, 44)));
+        card.addView(pager);
+        return card;
+    }
+
+    private abstract class SimpleSelect implements AdapterView.OnItemSelectedListener {
+        @Override public void onItemSelected(AdapterView<?> parent, View view, int position, long id) { selected(); }
+        @Override public void onNothingSelected(AdapterView<?> parent) {}
+        abstract void selected();
+    }
+
+    private Spinner spinner(String[] values) {
+        Spinner spinner = new Spinner(this);
+        ArrayAdapter<String> adapter = new ArrayAdapter<>(this,
+                android.R.layout.simple_spinner_dropdown_item, values);
+        spinner.setAdapter(adapter);
+        spinner.setBackground(Ui.shape(this, Color.WHITE, Ui.LINE, 10));
+        spinner.setPadding(Ui.dp(this, 8), 0, Ui.dp(this, 8), 0);
+        return spinner;
+    }
+
+    private String[] types() {
+        List<Template> templates = repo.templates(true);
+        LinkedHashSet<String> values = new LinkedHashSet<>();
+        values.add("全部检查类型");
+        for (Template template : templates) values.add(template.category);
+        return values.toArray(new String[0]);
+    }
+
+    private void syncCalendar() {
+        if (calendarBox == null) return;
+        LocalDate focus = selectedDate == null ? LocalDate.now() : LocalDate.parse(selectedDate);
+        todayTitle.setText(focus.format(DateTimeFormatter.ofPattern("yyyy年M月d日 EEEE", Locale.CHINA)));
+        Map<String, String[]> focusedHolidays = repo.holidays(focus.toString().substring(0, 7));
+        String[] day = focusedHolidays.get(focus.toString());
+        todaySubtitle.setText(day == null ? "点击日期查看当天检查记录" : day[0]
+                + ("WORKDAY".equals(day[1]) ? " · 调休上班" : " · 法定放假"));
+        calendarBox.removeAllViews();
+        monthTitle.setText(month.getYear() + "年" + month.getMonthValue() + "月");
+        GridLayout grid = new GridLayout(this);
+        grid.setColumnCount(7);
+        String[] weekdays = {"一", "二", "三", "四", "五", "六", "日"};
+        for (String weekday : weekdays) {
+            TextView heading = Ui.text(this, weekday, 13, true);
+            heading.setGravity(Gravity.CENTER);
+            grid.addView(heading, cellParams(26));
+        }
+        Set<String> marked = repo.markedDates(month.toString());
+        Map<String, String[]> holidays = repo.holidays(month.toString());
+        int leading = month.atDay(1).getDayOfWeek().getValue() - 1;
+        int cells = leading + month.lengthOfMonth();
+        int rows = (int) Math.ceil(cells / 7d);
+        LocalDate firstVisible = month.atDay(1).minusDays(leading);
+        for (int i = 0; i < rows * 7; i++) {
+            LocalDate date = firstVisible.plusDays(i);
+            String key = date.toString();
+            boolean inMonth = YearMonth.from(date).equals(month);
+            boolean isMarked = marked.contains(key);
+            boolean isSelected = key.equals(selectedDate);
+            String[] holiday = holidays.get(key);
+            TextView cell = Ui.text(this, String.valueOf(date.getDayOfMonth()), 14, true);
+            cell.setPadding(0, 0, 0, 0);
+            cell.setGravity(Gravity.CENTER);
+            if (!inMonth) cell.setTextColor(Color.rgb(190, 197, 207));
+            else if (holiday != null && "HOLIDAY".equals(holiday[1])) cell.setTextColor(Ui.DANGER);
+            if (isMarked) cell.setBackground(Ui.shape(this, Ui.BLUE_PALE, Color.rgb(113, 158, 231), 10));
+            if (isSelected) {
+                cell.setBackground(Ui.shape(this, Color.rgb(91, 105, 120), Color.TRANSPARENT, 10));
+                cell.setTextColor(Color.WHITE);
+            }
+            if (inMonth) cell.setOnClickListener(view -> {
+                selectedDate = key;
+                range.setSelection(0);
+                page = 1;
+                syncCalendar();
+                load();
+            });
+            grid.addView(cell, cellParams(34));
+        }
+        calendarBox.addView(grid);
+        TextView legend = Ui.text(this,
+                "● 蓝底日期有检查记录    ● 红字法定放假    ● 灰底当前选择", 12, false);
+        legend.setTextColor(Ui.MUTED);
+        calendarBox.addView(legend);
+    }
+
+    private GridLayout.LayoutParams cellParams(int height) {
+        GridLayout.LayoutParams params = new GridLayout.LayoutParams(
+                GridLayout.spec(GridLayout.UNDEFINED, 1, 1f),
+                GridLayout.spec(GridLayout.UNDEFINED, 1, 1f));
+        params.width = 0;
+        params.height = Ui.dp(this, height);
+        params.setMargins(Ui.dp(this, 1), 0, Ui.dp(this, 1), 0);
+        return params;
+    }
+
+    private String[] bounds() {
+        LocalDate focus = selectedDate == null ? LocalDate.now() : LocalDate.parse(selectedDate);
+        int position = range == null ? 1 : range.getSelectedItemPosition();
+        if (position == 0) return new String[]{focus.toString(), focus.toString()};
+        if (position == 1) {
+            LocalDate start = month.atDay(1);
+            return new String[]{start.toString(), start.with(TemporalAdjusters.lastDayOfMonth()).toString()};
+        }
+        if (position == 2) {
+            int startMonth = ((focus.getMonthValue() - 1) / 3) * 3 + 1;
+            LocalDate start = LocalDate.of(focus.getYear(), startMonth, 1);
+            return new String[]{start.toString(),
+                    start.plusMonths(2).with(TemporalAdjusters.lastDayOfMonth()).toString()};
+        }
+        if (position == 3) return new String[]{LocalDate.of(focus.getYear(), 1, 1).toString(),
+                LocalDate.of(focus.getYear(), 12, 31).toString()};
+        return new String[]{null, null};
+    }
+
+    private String selectedStatus() {
+        if (statusFilter == null || statusFilter.getSelectedItemPosition() == 0) return null;
+        return new String[]{null, "PENDING_RECTIFICATION", "RECTIFYING", "RECTIFIED", "COMPLETED"}
+                [statusFilter.getSelectedItemPosition()];
+    }
+
+    private void load() {
+        if (records == null || range == null || type == null || statusFilter == null) return;
+        String[] bounds = bounds();
+        String selectedType = type.getSelectedItemPosition() == 0 ? null : (String) type.getSelectedItem();
+        Page<Inspection> result = repo.list(bounds[0], bounds[1], selectedType,
+                selectedStatus(), false, page, size);
+        current = result.rows;
+        total = result.total;
+        showRecords();
+    }
+
+    private void showRecords() {
+        if (records == null) return;
+        records.removeAllViews();
+        if (current.isEmpty()) {
+            TextView empty = Ui.text(this, "当前筛选条件下没有检查记录", 15, false);
+            empty.setTextColor(Ui.MUTED);
+            empty.setGravity(Gravity.CENTER);
+            records.addView(empty);
+        }
+        for (Inspection inspection : current) {
+            LinearLayout row = Ui.row(this);
+            row.setPadding(Ui.dp(this, 2), Ui.dp(this, 4), Ui.dp(this, 2), Ui.dp(this, 4));
+            row.setBackground(Ui.shape(this, Color.WHITE, Ui.LINE, 10));
+            CheckBox check = new CheckBox(this);
+            check.setVisibility(multiMode ? View.VISIBLE : View.GONE);
+            check.setChecked(selected.contains(inspection.id));
+            check.setOnCheckedChangeListener((button, checked) -> {
+                if (checked) selected.add(inspection.id); else selected.remove(inspection.id);
+                updatePageTitle();
+            });
+            TextView text = Ui.text(this, inspection.date + " · " + inspection.templateName
+                    + "\n" + inspection.location, 15, true);
+            TextView state = Ui.text(this, status(inspection.status), 13, true);
+            state.setTextColor(inspection.status.startsWith("PENDING") ? Ui.DANGER : Ui.BLUE_DARK);
+            text.setOnClickListener(view -> {
+                if (multiMode) check.setChecked(!check.isChecked());
+                else startActivity(new Intent(this, RecordDetailActivity.class)
+                        .putExtra("inspection_id", inspection.id));
+            });
+            row.addView(check);
+            row.addView(text, Ui.weight(1));
+            row.addView(state);
+            records.addView(row);
+            records.addView(Ui.gap(this, 7));
+        }
+        updatePageTitle();
+    }
+
+    private void updatePageTitle() {
+        if (pageTitle != null) pageTitle.setText(String.format(Locale.CHINA,
+                "第 %d 页 · 共 %d 条%s", page, total,
+                multiMode ? " · 已选 " + selected.size() + " 条" : ""));
+    }
+
+    private void selectAll() {
+        String[] bounds = bounds();
+        String selectedType = type.getSelectedItemPosition() == 0 ? null : (String) type.getSelectedItem();
+        for (Inspection inspection : repo.list(bounds[0], bounds[1], selectedType,
+                selectedStatus(), false, 1, 100000).rows) selected.add(inspection.id);
+        showRecords();
+    }
+
+    private void exportSelected() {
+        exportRecords = new ArrayList<>();
+        if (selected.isEmpty()) {
+            String[] bounds = bounds();
+            String selectedType = type.getSelectedItemPosition() == 0 ? null : (String) type.getSelectedItem();
+            for (Inspection inspection : repo.list(bounds[0], bounds[1], selectedType,
+                    selectedStatus(), false, 1, 100000).rows) {
+                exportRecords.add(repo.inspection(inspection.id));
+            }
+        } else {
+            for (String id : selected) {
+                Inspection inspection = repo.inspection(id);
+                if (inspection != null) exportRecords.add(inspection);
+            }
+        }
+        if (exportRecords.isEmpty()) {
+            Ui.toast(this, "没有可导出的检查记录");
+            return;
+        }
+        startActivityForResult(new Intent(Intent.ACTION_CREATE_DOCUMENT)
+                .setType("application/pdf")
+                .putExtra(Intent.EXTRA_TITLE, "安全检查台账-" + LocalDate.now() + ".pdf"), EXPORT);
+    }
+
+    @Override
+    protected void onActivityResult(int request, int result, Intent data) {
+        super.onActivityResult(request, result, data);
+        if (request == EXPORT && result == RESULT_OK && data != null) {
+            try (OutputStream output = getContentResolver().openOutputStream(data.getData())) {
+                new PdfExporter(this).export(exportRecords, output);
+                Ui.toast(this, "已生成 A4 PDF，共 " + exportRecords.size() + " 条记录");
+            } catch (Exception error) {
+                Ui.toast(this, "PDF 导出失败：" + error.getMessage());
+            }
+        }
+    }
+
+    private String status(String status) {
+        return switch (status) {
+            case "PENDING_RECTIFICATION" -> "待整改";
+            case "RECTIFYING" -> "整改中";
+            case "RECTIFIED" -> "已整改完成";
+            case "COMPLETED" -> "检查完成";
+            default -> "草稿";
+        };
+    }
+
+    @Override
+    protected void onResume() {
+        super.onResume();
+        if (records != null) {
+            syncCalendar();
+            load();
+        }
+    }
 }
+
