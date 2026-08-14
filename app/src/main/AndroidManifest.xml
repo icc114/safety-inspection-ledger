@@ -17,6 +17,7 @@
         android:label="安全检查台账"
         android:theme="@style/AppTheme"
         android:usesCleartextTraffic="false">
+        <activity android:name=".PhotoPreviewActivity" />
         <activity android:name=".SignatureActivity" android:configChanges="orientation|screenSize" android:screenOrientation="sensorLandscape" />
         <activity android:name=".TrashActivity" />
         <activity android:name=".SettingsActivity" />

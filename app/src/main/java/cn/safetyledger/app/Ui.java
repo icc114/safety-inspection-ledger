@@ -7,6 +7,7 @@ import android.graphics.Color;
 import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
 import android.os.Build;
+import android.provider.MediaStore;
 import android.view.Gravity;
 import android.view.View;
 import android.view.ViewGroup;
@@ -233,6 +234,24 @@ public final class Ui {
 
     public static void start(Context context, Class<?> destination) {
         context.startActivity(new Intent(context, destination));
+    }
+
+    /** Opens Android's photo grid instead of the generic document/security browser. */
+    public static Intent photoPickerIntent() {
+        if (Build.VERSION.SDK_INT >= 33) {
+            return new Intent(MediaStore.ACTION_PICK_IMAGES)
+                    .setType("image/*")
+                    .putExtra(MediaStore.EXTRA_PICK_IMAGES_MAX,
+                            Math.min(50, MediaStore.getPickImagesMaxLimit()));
+        }
+        return new Intent(Intent.ACTION_PICK, MediaStore.Images.Media.EXTERNAL_CONTENT_URI)
+                .setType("image/*")
+                .putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true);
+    }
+
+    public static void previewPhoto(Activity activity, String path) {
+        activity.startActivity(new Intent(activity, PhotoPreviewActivity.class)
+                .putExtra("photo_path", path));
     }
 
     public static void toast(Context context, String message) {

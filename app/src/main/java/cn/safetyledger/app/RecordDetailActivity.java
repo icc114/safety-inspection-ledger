@@ -273,10 +273,7 @@ public final class RecordDetailActivity extends Activity {
     }
 
     private void pick() {
-        startActivityForResult(new Intent(Intent.ACTION_OPEN_DOCUMENT)
-                .setType("image/*")
-                .addCategory(Intent.CATEGORY_OPENABLE)
-                .putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true), PICK);
+        startActivityForResult(Ui.photoPickerIntent(), PICK);
     }
 
     private void capture() {
@@ -309,13 +306,13 @@ public final class RecordDetailActivity extends Activity {
             if (request == PICK && data != null) {
                 if (data.getClipData() != null) {
                     for (int i = 0; i < data.getClipData().getItemCount(); i++) {
-                        importPhoto(data.getClipData().getItemAt(i).getUri());
+                        importPhoto(data.getClipData().getItemAt(i).getUri(), false);
                     }
                 } else if (data.getData() != null) {
-                    importPhoto(data.getData());
+                    importPhoto(data.getData(), false);
                 }
             } else if (request == CAMERA && cameraUri != null) {
-                importPhoto(cameraUri);
+                importPhoto(cameraUri, true);
                 getContentResolver().delete(cameraUri, null, null);
             } else if (request == PDF && data != null) {
                 try (OutputStream output = getContentResolver().openOutputStream(data.getData())) {
@@ -340,12 +337,12 @@ public final class RecordDetailActivity extends Activity {
         return best;
     }
 
-    private void importPhoto(Uri uri) throws Exception {
+    private void importPhoto(Uri uri, boolean capturedNow) throws Exception {
         Media media = new MediaService(this).importAndWatermark(uri, model.id, null,
-                "RECTIFICATION", model.location, lastLocation());
+                "RECTIFICATION", model.location, capturedNow ? lastLocation() : null, capturedNow);
         repo.addMedia(media);
         showMedia();
-        Ui.toast(this, "整改照片已保存并添加水印");
+        Ui.toast(this, "整改照片已保存；可读取的原始时间和 GPS 已写入水印");
     }
 
     private void showMedia() {
@@ -358,8 +355,10 @@ public final class RecordDetailActivity extends Activity {
             ImageView image = new ImageView(this);
             image.setImageBitmap(BitmapFactory.decodeFile(media.localPath));
             image.setScaleType(ImageView.ScaleType.CENTER_CROP);
+            image.setContentDescription("点击放大照片");
+            image.setOnClickListener(view -> Ui.previewPhoto(this, media.localPath));
             row.addView(image, new LinearLayout.LayoutParams(Ui.dp(this, 82), Ui.dp(this, 66)));
-            TextView label = Ui.text(this, category(media.category), 14, true);
+            TextView label = Ui.text(this, category(media.category) + " · 点击照片放大", 14, true);
             if ("RECTIFICATION".equals(media.category)) label.setTextColor(Ui.BLUE_DARK);
             row.addView(label, Ui.weight(1));
             mediaBox.addView(row);

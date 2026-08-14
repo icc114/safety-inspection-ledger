@@ -1,9 +1,15 @@
 package cn.safetyledger.app;
 
 import android.app.Activity;
+import android.app.AlertDialog;
 import android.content.Intent;
 import android.graphics.Color;
+import android.net.Uri;
 import android.os.Bundle;
+import android.provider.DocumentsContract;
+import android.text.SpannableStringBuilder;
+import android.text.Spanned;
+import android.text.style.ForegroundColorSpan;
 import android.view.Gravity;
 import android.view.View;
 import android.view.ViewGroup;
@@ -12,6 +18,7 @@ import android.widget.ArrayAdapter;
 import android.widget.Button;
 import android.widget.CheckBox;
 import android.widget.GridLayout;
+import android.widget.ImageButton;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
 import android.widget.Spinner;
@@ -31,6 +38,7 @@ import java.time.format.DateTimeFormatter;
 import java.time.temporal.TemporalAdjusters;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.Comparator;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashSet;
@@ -40,7 +48,8 @@ import java.util.Map;
 import java.util.Set;
 
 public final class LedgerActivity extends Activity {
-    private static final int EXPORT = 701;
+    private static final int EXPORT_MERGED = 701;
+    private static final int EXPORT_DIRECTORY = 702;
     private LedgerRepository repo;
     private LinearLayout records;
     private LinearLayout calendarBox;
@@ -54,6 +63,7 @@ public final class LedgerActivity extends Activity {
     private Spinner statusFilter;
     private Spinner pageSize;
     private Button multiToggle;
+    private Button allToggle;
     private boolean multiMode;
     private YearMonth month = YearMonth.now();
     private String selectedDate;
@@ -94,16 +104,21 @@ public final class LedgerActivity extends Activity {
         LinearLayout bar = Ui.row(this);
         bar.setPadding(Ui.dp(this, 14), Ui.dp(this, 10), Ui.dp(this, 10), Ui.dp(this, 10));
         bar.setBackgroundColor(Ui.BLUE);
-        TextView title = Ui.text(this, "安全检查台账", 22, true);
+        TextView title = Ui.text(this, "安全检查台账", 21, true);
         title.setTextColor(Color.WHITE);
-        Button settings = Ui.iconButton(this, "⚙");
+        ImageButton settings = new ImageButton(this);
+        settings.setImageResource(R.drawable.ic_settings);
+        settings.setColorFilter(Color.WHITE);
+        settings.setPadding(Ui.dp(this, 9), Ui.dp(this, 9), Ui.dp(this, 9), Ui.dp(this, 9));
+        settings.setBackground(Ui.shape(this, Color.TRANSPARENT, 0x55ffffff, 20));
         settings.setContentDescription("基础设置");
         settings.setOnClickListener(view -> Ui.start(this, SettingsActivity.class));
         Button form = Ui.secondaryButton(this, "+ 检查填报");
         form.setOnClickListener(view -> startActivity(new Intent(this, MainActivity.class)));
-        bar.addView(title, Ui.weight(1));
-        bar.addView(settings, new LinearLayout.LayoutParams(Ui.dp(this, 48), Ui.dp(this, 44)));
-        bar.addView(Ui.horizontalGap(this, 7));
+        bar.addView(title);
+        bar.addView(Ui.horizontalGap(this, 4));
+        bar.addView(settings, new LinearLayout.LayoutParams(Ui.dp(this, 40), Ui.dp(this, 40)));
+        bar.addView(Ui.horizontalGap(this, 0), Ui.weight(1));
         bar.addView(form, new LinearLayout.LayoutParams(Ui.dp(this, 112), Ui.dp(this, 48)));
         return bar;
     }
@@ -123,6 +138,7 @@ public final class LedgerActivity extends Activity {
         reset.setOnClickListener(view -> {
             month = YearMonth.now();
             selectedDate = LocalDate.now().toString();
+            selected.clear();
             if (range != null) range.setSelection(0);
             syncCalendar();
             load();
@@ -139,12 +155,14 @@ public final class LedgerActivity extends Activity {
         previous.setOnClickListener(view -> {
             month = month.minusMonths(1);
             selectedDate = null;
+            selected.clear();
             syncCalendar();
             load();
         });
         next.setOnClickListener(view -> {
             month = month.plusMonths(1);
             selectedDate = null;
+            selected.clear();
             syncCalendar();
             load();
         });
@@ -178,7 +196,7 @@ public final class LedgerActivity extends Activity {
         filters.addView(statusFilter, new LinearLayout.LayoutParams(0, Ui.dp(this, 42), 1));
         card.addView(filters);
         AdapterView.OnItemSelectedListener listener = new SimpleSelect() {
-            @Override void selected() { page = 1; load(); }
+            @Override void selected() { selected.clear(); page = 1; load(); }
         };
         range.setOnItemSelectedListener(listener);
         type.setOnItemSelectedListener(listener);
@@ -213,26 +231,16 @@ public final class LedgerActivity extends Activity {
         header.addView(pageSize, new LinearLayout.LayoutParams(Ui.dp(this, 106), Ui.dp(this, 40)));
         card.addView(header);
         selectionActions = Ui.column(this);
-        LinearLayout first = Ui.row(this);
-        Button all = Ui.secondaryButton(this, "全选当前结果");
-        Button none = Ui.secondaryButton(this, "取消全选");
-        first.addView(all, Ui.weight(1));
-        first.addView(Ui.horizontalGap(this, 6));
-        first.addView(none, Ui.weight(1));
-        LinearLayout second = Ui.row(this);
-        Button export = Ui.button(this, "导出选中");
-        Button period = Ui.secondaryButton(this, "导出当前周期");
-        second.addView(export, Ui.weight(1));
-        second.addView(Ui.horizontalGap(this, 6));
-        second.addView(period, Ui.weight(1));
-        selectionActions.addView(first);
-        selectionActions.addView(Ui.gap(this, 6));
-        selectionActions.addView(second);
+        LinearLayout actions = Ui.row(this);
+        allToggle = Ui.secondaryButton(this, "全选");
+        Button export = Ui.button(this, "导出");
+        actions.addView(allToggle, Ui.weight(1));
+        actions.addView(Ui.horizontalGap(this, 7));
+        actions.addView(export, Ui.weight(1));
+        selectionActions.addView(actions);
         selectionActions.setVisibility(View.GONE);
-        all.setOnClickListener(view -> selectAll());
-        none.setOnClickListener(view -> { selected.clear(); showRecords(); });
-        export.setOnClickListener(view -> exportSelected());
-        period.setOnClickListener(view -> { selected.clear(); exportSelected(); });
+        allToggle.setOnClickListener(view -> toggleSelectAll());
+        export.setOnClickListener(view -> showExportOptions());
         card.addView(selectionActions);
         card.addView(Ui.gap(this, 6));
         records = Ui.column(this);
@@ -306,12 +314,20 @@ public final class LedgerActivity extends Activity {
             boolean isMarked = marked.contains(key);
             boolean isSelected = key.equals(selectedDate);
             String[] holiday = holidays.get(key);
-            TextView cell = Ui.text(this, String.valueOf(date.getDayOfMonth()), 14, true);
+            SpannableStringBuilder label = new SpannableStringBuilder(String.valueOf(date.getDayOfMonth()));
+            if (isMarked) {
+                int starStart = label.length();
+                label.append("\n★");
+                label.setSpan(new ForegroundColorSpan(Color.rgb(245, 166, 35)),
+                        starStart, label.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+            }
+            TextView cell = Ui.text(this, label.toString(), 13, true);
+            cell.setText(label);
+            cell.setLineSpacing(0, .88f);
             cell.setPadding(0, 0, 0, 0);
             cell.setGravity(Gravity.CENTER);
             if (!inMonth) cell.setTextColor(Color.rgb(190, 197, 207));
             else if (holiday != null && "HOLIDAY".equals(holiday[1])) cell.setTextColor(Ui.DANGER);
-            if (isMarked) cell.setBackground(Ui.shape(this, Ui.BLUE_PALE, Color.rgb(113, 158, 231), 10));
             if (isSelected) {
                 cell.setBackground(Ui.shape(this, Color.rgb(91, 105, 120), Color.TRANSPARENT, 10));
                 cell.setTextColor(Color.WHITE);
@@ -323,18 +339,18 @@ public final class LedgerActivity extends Activity {
                 syncCalendar();
                 load();
             });
-            grid.addView(cell, cellParams(31));
+            grid.addView(cell, cellParams(38));
         }
         calendarBox.addView(grid);
         TextView legend = Ui.text(this,
-                "● 蓝底日期有检查记录    ● 红字法定放假    ● 灰底当前选择", 12, false);
+                "★ 黄色五角星：有检查记录    ● 红字：法定放假    ● 灰底：当前选择", 11, false);
         legend.setTextColor(Ui.MUTED);
         calendarBox.addView(legend);
     }
 
     private GridLayout.LayoutParams cellParams(int height) {
         GridLayout.LayoutParams params = new GridLayout.LayoutParams(
-                GridLayout.spec(GridLayout.UNDEFINED, 1, 1f),
+                GridLayout.spec(GridLayout.UNDEFINED),
                 GridLayout.spec(GridLayout.UNDEFINED, 1, 1f));
         params.width = 0;
         params.height = Ui.dp(this, height);
@@ -420,50 +436,126 @@ public final class LedgerActivity extends Activity {
         if (pageTitle != null) pageTitle.setText(String.format(Locale.CHINA,
                 "第 %d 页 · 共 %d 条%s", page, total,
                 multiMode ? " · 已选 " + selected.size() + " 条" : ""));
+        if (allToggle != null) allToggle.setText(total > 0 && selected.size() == total
+                ? "取消全选" : "全选");
     }
 
-    private void selectAll() {
+    private void toggleSelectAll() {
+        if (total > 0 && selected.size() == total) {
+            selected.clear();
+            showRecords();
+            return;
+        }
         String[] bounds = bounds();
         String selectedType = type.getSelectedItemPosition() == 0 ? null : (String) type.getSelectedItem();
+        selected.clear();
         for (Inspection inspection : repo.list(bounds[0], bounds[1], selectedType,
                 selectedStatus(), false, 1, 100000).rows) selected.add(inspection.id);
         showRecords();
     }
 
-    private void exportSelected() {
-        exportRecords = new ArrayList<>();
+    private void showExportOptions() {
         if (selected.isEmpty()) {
-            String[] bounds = bounds();
-            String selectedType = type.getSelectedItemPosition() == 0 ? null : (String) type.getSelectedItem();
-            for (Inspection inspection : repo.list(bounds[0], bounds[1], selectedType,
-                    selectedStatus(), false, 1, 100000).rows) {
-                exportRecords.add(repo.inspection(inspection.id));
-            }
-        } else {
-            for (String id : selected) {
-                Inspection inspection = repo.inspection(id);
-                if (inspection != null) exportRecords.add(inspection);
-            }
-        }
-        if (exportRecords.isEmpty()) {
-            Ui.toast(this, "没有可导出的检查记录");
+            Ui.toast(this, "请先勾选需要导出的检查记录");
             return;
         }
+        new AlertDialog.Builder(this)
+                .setTitle("选择导出方式")
+                .setItems(new String[]{"逐条导出（每条记录一个 PDF）", "全部导出（合并为一个 PDF）"},
+                        (dialog, which) -> {
+                            collectSelectedRecords();
+                            if (which == 0) startIndividualExport();
+                            else chooseMergedSort();
+                        })
+                .setNegativeButton("取消", null)
+                .show();
+    }
+
+    private void collectSelectedRecords() {
+        exportRecords = new ArrayList<>();
+        for (String id : selected) {
+            Inspection inspection = repo.inspection(id);
+            if (inspection != null) exportRecords.add(inspection);
+        }
+        sortExportRecords(true);
+    }
+
+    private void startIndividualExport() {
+        startActivityForResult(new Intent(Intent.ACTION_OPEN_DOCUMENT_TREE)
+                .addFlags(Intent.FLAG_GRANT_WRITE_URI_PERMISSION
+                        | Intent.FLAG_GRANT_READ_URI_PERMISSION
+                        | Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION), EXPORT_DIRECTORY);
+    }
+
+    private void chooseMergedSort() {
+        new AlertDialog.Builder(this)
+                .setTitle("全部导出排序")
+                .setSingleChoiceItems(new String[]{"检查日期由前到后", "检查日期由后到前"}, 0,
+                        null)
+                .setPositiveButton("继续导出", (dialog, which) -> {
+                    AlertDialog alert = (AlertDialog) dialog;
+                    sortExportRecords(alert.getListView().getCheckedItemPosition() != 1);
+                    startMergedExport();
+                })
+                .setNegativeButton("取消", null)
+                .show();
+    }
+
+    private void sortExportRecords(boolean ascending) {
+        Comparator<Inspection> comparator = Comparator.comparing(
+                inspection -> inspection.date + " " + inspection.time);
+        if (!ascending) comparator = comparator.reversed();
+        exportRecords.sort(comparator);
+    }
+
+    private void startMergedExport() {
         startActivityForResult(new Intent(Intent.ACTION_CREATE_DOCUMENT)
                 .setType("application/pdf")
-                .putExtra(Intent.EXTRA_TITLE, "安全检查台账-" + LocalDate.now() + ".pdf"), EXPORT);
+                .putExtra(Intent.EXTRA_TITLE, "安全检查台账-" + LocalDate.now() + ".pdf"),
+                EXPORT_MERGED);
     }
 
     @Override
     protected void onActivityResult(int request, int result, Intent data) {
         super.onActivityResult(request, result, data);
-        if (request == EXPORT && result == RESULT_OK && data != null) {
+        if (request == EXPORT_MERGED && result == RESULT_OK && data != null) {
             try (OutputStream output = getContentResolver().openOutputStream(data.getData())) {
                 new PdfExporter(this).export(exportRecords, output);
                 Ui.toast(this, "已生成 A4 PDF，共 " + exportRecords.size() + " 条记录");
             } catch (Exception error) {
                 Ui.toast(this, "PDF 导出失败：" + error.getMessage());
             }
+        } else if (request == EXPORT_DIRECTORY && result == RESULT_OK && data != null) {
+            exportIndividualPdfs(data.getData(), data.getFlags());
+        }
+    }
+
+    private void exportIndividualPdfs(Uri treeUri, int flags) {
+        try {
+            getContentResolver().takePersistableUriPermission(treeUri, flags
+                    & (Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_GRANT_WRITE_URI_PERMISSION));
+        } catch (Exception ignored) {
+            // Some gallery/file providers grant access only for this activity result.
+        }
+        try {
+            Uri directory = DocumentsContract.buildDocumentUriUsingTree(treeUri,
+                    DocumentsContract.getTreeDocumentId(treeUri));
+            int exported = 0;
+            for (Inspection inspection : exportRecords) {
+                String safeTemplate = inspection.templateName.replaceAll("[\\\\/:*?\"<>|]", "-");
+                String name = inspection.date + "-" + safeTemplate + "-"
+                        + inspection.id.substring(0, 8) + ".pdf";
+                Uri file = DocumentsContract.createDocument(getContentResolver(), directory,
+                        "application/pdf", name);
+                if (file == null) throw new IllegalStateException("无法创建 " + name);
+                try (OutputStream output = getContentResolver().openOutputStream(file)) {
+                    new PdfExporter(this).export(List.of(inspection), output);
+                }
+                exported++;
+            }
+            Ui.toast(this, "逐条导出完成，共生成 " + exported + " 个 PDF");
+        } catch (Exception error) {
+            Ui.toast(this, "逐条导出失败：" + error.getMessage());
         }
     }
 

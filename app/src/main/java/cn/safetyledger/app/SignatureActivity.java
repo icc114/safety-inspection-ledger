@@ -11,6 +11,9 @@ import android.os.Bundle;
 import android.view.Gravity;
 import android.view.MotionEvent;
 import android.view.View;
+import android.view.WindowInsets;
+import android.view.WindowInsetsController;
+import android.view.WindowManager;
 import android.widget.Button;
 import android.widget.LinearLayout;
 import android.widget.TextView;
@@ -33,31 +36,58 @@ public final class SignatureActivity extends Activity {
     protected void onCreate(Bundle state) {
         super.onCreate(state);
         Ui.setupWindow(this);
+        hideSystemBars();
         inspectionId = getIntent().getStringExtra("inspection_id");
         role = getIntent().getStringExtra("role");
 
         LinearLayout root = Ui.column(this);
         root.setBackgroundColor(Ui.BG);
         LinearLayout controls = Ui.row(this);
-        controls.setPadding(Ui.dp(this, 6), Ui.dp(this, 3), Ui.dp(this, 6), Ui.dp(this, 3));
+        controls.setPadding(Ui.dp(this, 5), Ui.dp(this, 2), Ui.dp(this, 5), Ui.dp(this, 2));
         controls.setBackgroundColor(Ui.BLUE);
-        TextView title = Ui.text(this, "‹  " + roleName(role) + " · 请在下方签名", 16, true);
+        TextView title = Ui.text(this, "‹  " + roleName(role) + "（下方签名）", 14, true);
         title.setTextColor(Color.WHITE);
         title.setOnClickListener(view -> finish());
         Button clear = Ui.secondaryButton(this, "清空");
         Button save = Ui.secondaryButton(this, "确认");
-        clear.setTextSize(14);
-        save.setTextSize(14);
+        clear.setTextSize(12);
+        save.setTextSize(12);
         clear.setOnClickListener(view -> pad.clear());
         save.setOnClickListener(view -> save());
         controls.addView(title, Ui.weight(1));
-        controls.addView(clear, new LinearLayout.LayoutParams(Ui.dp(this, 72), Ui.dp(this, 38)));
-        controls.addView(Ui.horizontalGap(this, 6));
-        controls.addView(save, new LinearLayout.LayoutParams(Ui.dp(this, 72), Ui.dp(this, 38)));
-        root.addView(controls, new LinearLayout.LayoutParams(-1, Ui.dp(this, 44)));
+        controls.addView(clear, new LinearLayout.LayoutParams(Ui.dp(this, 60), Ui.dp(this, 30)));
+        controls.addView(Ui.horizontalGap(this, 4));
+        controls.addView(save, new LinearLayout.LayoutParams(Ui.dp(this, 60), Ui.dp(this, 30)));
+        root.addView(controls, new LinearLayout.LayoutParams(-1, Ui.dp(this, 34)));
         pad = new SignaturePad(this);
         root.addView(pad, new LinearLayout.LayoutParams(-1, 0, 1));
         setContentView(root);
+        hideSystemBars();
+    }
+
+    private void hideSystemBars() {
+        getWindow().addFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN);
+        if (android.os.Build.VERSION.SDK_INT >= 30) {
+            getWindow().setDecorFitsSystemWindows(false);
+            WindowInsetsController controller = getWindow().getInsetsController();
+            if (controller != null) {
+                controller.hide(WindowInsets.Type.statusBars() | WindowInsets.Type.navigationBars());
+                controller.setSystemBarsBehavior(
+                        WindowInsetsController.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE);
+            }
+        } else {
+            getWindow().getDecorView().setSystemUiVisibility(View.SYSTEM_UI_FLAG_FULLSCREEN
+                    | View.SYSTEM_UI_FLAG_HIDE_NAVIGATION | View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY
+                    | View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN
+                    | View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION
+                    | View.SYSTEM_UI_FLAG_LAYOUT_STABLE);
+        }
+    }
+
+    @Override
+    public void onWindowFocusChanged(boolean hasFocus) {
+        super.onWindowFocusChanged(hasFocus);
+        if (hasFocus) hideSystemBars();
     }
 
     private String roleName(String value) {

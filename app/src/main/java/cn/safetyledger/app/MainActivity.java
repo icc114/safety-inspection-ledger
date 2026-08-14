@@ -437,11 +437,7 @@ public class MainActivity extends Activity {
     private void pick(String category, String itemId) {
         pendingCategory = category;
         pendingItemId = itemId;
-        Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT)
-                .setType("image/*")
-                .addCategory(Intent.CATEGORY_OPENABLE)
-                .putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true);
-        startActivityForResult(intent, GALLERY);
+        startActivityForResult(Ui.photoPickerIntent(), GALLERY);
     }
 
     private void sign(String role) {
@@ -455,15 +451,15 @@ public class MainActivity extends Activity {
         super.onActivityResult(request, result, data);
         if (result != RESULT_OK) return;
         if (request == CAMERA && cameraUri != null) {
-            importPhoto(cameraUri);
+            importPhoto(cameraUri, true);
             getContentResolver().delete(cameraUri, null, null);
         } else if (request == GALLERY && data != null) {
             if (data.getClipData() != null) {
                 for (int i = 0; i < data.getClipData().getItemCount(); i++) {
-                    importPhoto(data.getClipData().getItemAt(i).getUri());
+                    importPhoto(data.getClipData().getItemAt(i).getUri(), false);
                 }
             } else if (data.getData() != null) {
-                importPhoto(data.getData());
+                importPhoto(data.getData(), false);
             }
         } else if (request == SIGN) {
             renderSignatures();
@@ -492,14 +488,14 @@ public class MainActivity extends Activity {
         return best;
     }
 
-    private void importPhoto(Uri uri) {
+    private void importPhoto(Uri uri, boolean capturedNow) {
         syncFields();
         try {
             Media media = new MediaService(this).importAndWatermark(uri, model.id, pendingItemId,
-                    pendingCategory, model.location, lastLocation());
+                    pendingCategory, model.location, capturedNow ? lastLocation() : null, capturedNow);
             repo.addMedia(media);
             renderMedia();
-            Ui.toast(this, "照片已保存并添加水印");
+            Ui.toast(this, "照片已保存；可读取的原始时间和 GPS 已写入水印");
         } catch (Exception error) {
             Ui.toast(this, "照片处理失败：" + error.getMessage());
         }
@@ -516,8 +512,10 @@ public class MainActivity extends Activity {
             ImageView image = new ImageView(this);
             image.setScaleType(ImageView.ScaleType.CENTER_CROP);
             image.setImageBitmap(BitmapFactory.decodeFile(item.localPath));
+            image.setContentDescription("点击放大检查照片");
+            image.setOnClickListener(view -> Ui.previewPhoto(this, item.localPath));
             row.addView(image, new LinearLayout.LayoutParams(Ui.dp(this, 76), Ui.dp(this, 64)));
-            row.addView(Ui.text(this, "检查照片\n" + new File(item.localPath).getName(), 13, false),
+            row.addView(Ui.text(this, "检查照片 · 点击放大\n" + new File(item.localPath).getName(), 13, false),
                     Ui.weight(1));
             mediaBox.addView(row);
         }

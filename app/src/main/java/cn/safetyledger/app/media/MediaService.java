@@ -1,29 +1,241 @@
 package cn.safetyledger.app.media;
 
-import android.content.*;
-import android.graphics.*;
+import android.content.Context;
+import android.graphics.Bitmap;
+import android.graphics.BitmapFactory;
+import android.graphics.Canvas;
+import android.graphics.Color;
+import android.graphics.Matrix;
+import android.graphics.Paint;
+import android.graphics.Typeface;
 import android.location.Location;
+import android.media.ExifInterface;
 import android.net.Uri;
+
 import cn.safetyledger.app.data.Entities.Media;
-import java.io.*;
+
+import java.io.File;
+import java.io.FileOutputStream;
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.OutputStream;
 import java.nio.file.Files;
 import java.security.MessageDigest;
-import java.time.*;
+import java.time.Instant;
+import java.time.LocalDateTime;
+import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
-import java.util.*;
+import java.time.format.DateTimeParseException;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Locale;
+import java.util.UUID;
 
+/** Keeps the untouched source and creates a business JPEG from available EXIF metadata. */
 public final class MediaService {
+    private static final DateTimeFormatter EXIF_TIME =
+            DateTimeFormatter.ofPattern("yyyy:MM:dd HH:mm:ss", Locale.US);
+    private static final DateTimeFormatter WATERMARK_TIME =
+            DateTimeFormatter.ofPattern("yyyy年MM月dd日 HH:mm:ss", Locale.CHINA);
     private final Context context;
-    public MediaService(Context c){context=c.getApplicationContext();}
-    public File mediaDir(String inspectionId){File d=new File(context.getFilesDir(),"business_media/"+inspectionId);if(!d.exists()&&!d.mkdirs())throw new IllegalStateException("无法创建媒体目录");return d;}
-    public Media importAndWatermark(Uri source,String iid,String itemId,String category,String place,Location location) throws IOException {
-        Bitmap original;try(InputStream input=context.getContentResolver().openInputStream(source)){original=BitmapFactory.decodeStream(input);}if(original==null)throw new IOException("无法读取照片");
-        int max=2400;float scale=Math.min(1f,max/(float)Math.max(original.getWidth(),original.getHeight()));Bitmap bitmap=scale<1?Bitmap.createScaledBitmap(original,Math.round(original.getWidth()*scale),Math.round(original.getHeight()*scale),true):original.copy(Bitmap.Config.ARGB_8888,true);if(bitmap!=original)original.recycle();
-        LocalDateTime now=LocalDateTime.now();String locationText=place==null?"":place;String line1="拍摄时间："+now.format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss"));String line2="检查地点："+(locationText.isBlank()?"未填写":locationText);String line3=location==null?"":"经纬度："+String.format(Locale.US,"%.6f, %.6f",location.getLatitude(),location.getLongitude());
-        Canvas canvas=new Canvas(bitmap);Paint p=new Paint(Paint.ANTI_ALIAS_FLAG);p.setTypeface(Typeface.create(Typeface.DEFAULT,Typeface.BOLD));p.setTextSize(Math.max(28,bitmap.getWidth()/35f));p.setColor(Color.WHITE);p.setShadowLayer(3,0,1,Color.BLACK);float pad=24,line=p.getTextSize()*1.4f;int lines=line3.isBlank()?2:3;Paint bg=new Paint();bg.setColor(0x99000000);canvas.drawRect(0,bitmap.getHeight()-pad*2-line*lines,bitmap.getWidth(),bitmap.getHeight(),bg);float y=bitmap.getHeight()-pad-line*(lines-1);canvas.drawText(line1,pad,y,p);canvas.drawText(line2,pad,y+line,p);if(lines==3)canvas.drawText(line3,pad,y+line*2,p);
-        String id=UUID.randomUUID().toString();File originalFile=new File(mediaDir(iid),id+"-original.bin");try(InputStream rawIn=context.getContentResolver().openInputStream(source);OutputStream rawOut=new FileOutputStream(originalFile)){if(rawIn==null)throw new IOException("原始照片读取失败");byte[]buf=new byte[65536];for(int n;(n=rawIn.read(buf))>=0;)if(n>0)rawOut.write(buf,0,n);}File out=new File(mediaDir(iid),id+".jpg");try(OutputStream os=new FileOutputStream(out)){if(!bitmap.compress(Bitmap.CompressFormat.JPEG,92,os))throw new IOException("照片压缩失败");}bitmap.recycle();
-        Media m=new Media();m.id=id;m.inspectionId=iid;m.itemId=itemId;m.category=category;m.localPath=out.getAbsolutePath();m.capturedAt=System.currentTimeMillis();m.location=locationText;m.latitude=location==null?null:location.getLatitude();m.longitude=location==null?null:location.getLongitude();m.sha256=sha256(out);m.mime="image/jpeg";m.size=out.length();return m;
+
+    public MediaService(Context context) {
+        this.context = context.getApplicationContext();
     }
-    public static String sha256(File file) throws IOException {try{MessageDigest d=MessageDigest.getInstance("SHA-256");try(InputStream in=Files.newInputStream(file.toPath())){byte[]b=new byte[65536];for(int n;(n=in.read(b))>0;)d.update(b,0,n);}StringBuilder s=new StringBuilder();for(byte x:d.digest())s.append(String.format("%02x",x));return s.toString();}catch(Exception e){throw new IOException(e);}}
-    public void deleteInspectionMedia(String iid){File d=mediaDir(iid);File[]fs=d.listFiles();if(fs!=null)for(File f:fs)if(!f.delete())f.deleteOnExit();d.delete();}
+
+    public File mediaDir(String inspectionId) {
+        File directory = new File(context.getFilesDir(), "business_media/" + inspectionId);
+        if (!directory.exists() && !directory.mkdirs()) {
+            throw new IllegalStateException("无法创建媒体目录");
+        }
+        return directory;
+    }
+
+    public Media importAndWatermark(Uri source, String inspectionId, String itemId,
+                                    String category, String inspectionPlace,
+                                    Location capturedLocation, boolean capturedNow)
+            throws IOException {
+        PhotoMetadata metadata = readMetadata(source);
+        Long capturedAt = metadata.capturedAt;
+        if (capturedAt == null && capturedNow) capturedAt = System.currentTimeMillis();
+        Double latitude = metadata.latitude;
+        Double longitude = metadata.longitude;
+        if (latitude == null && capturedNow && capturedLocation != null) {
+            latitude = capturedLocation.getLatitude();
+            longitude = capturedLocation.getLongitude();
+        }
+
+        String id = UUID.randomUUID().toString();
+        File directory = mediaDir(inspectionId);
+        File originalFile = new File(directory, id + "-original.bin");
+        copySource(source, originalFile);
+
+        Bitmap decoded;
+        try (InputStream input = context.getContentResolver().openInputStream(source)) {
+            decoded = BitmapFactory.decodeStream(input);
+        }
+        if (decoded == null) throw new IOException("无法读取照片");
+        Bitmap oriented = orient(decoded, metadata.orientation);
+        if (oriented != decoded) decoded.recycle();
+        int maximum = 2400;
+        float scale = Math.min(1f, maximum
+                / (float) Math.max(oriented.getWidth(), oriented.getHeight()));
+        Bitmap resized = scale < 1f
+                ? Bitmap.createScaledBitmap(oriented, Math.round(oriented.getWidth() * scale),
+                        Math.round(oriented.getHeight() * scale), true)
+                : oriented;
+        if (resized != oriented) oriented.recycle();
+        Bitmap business = resized.copy(Bitmap.Config.ARGB_8888, true);
+        resized.recycle();
+
+        List<String> lines = new ArrayList<>();
+        if (capturedAt != null) {
+            lines.add("拍摄时间：" + Instant.ofEpochMilli(capturedAt)
+                    .atZone(ZoneId.systemDefault()).toLocalDateTime().format(WATERMARK_TIME));
+        }
+        String gpsText = "";
+        if (latitude != null && longitude != null) {
+            gpsText = chineseCoordinates(latitude, longitude);
+            lines.add("拍摄位置：" + gpsText);
+        }
+        // Do not invent a watermark from the inspection form. If EXIF/fresh-camera
+        // metadata is unavailable, the business JPEG remains visually unchanged.
+        if (!lines.isEmpty()) drawWatermark(business, lines);
+
+        File output = new File(directory, id + ".jpg");
+        try (OutputStream stream = new FileOutputStream(output)) {
+            if (!business.compress(Bitmap.CompressFormat.JPEG, 92, stream)) {
+                throw new IOException("照片压缩失败");
+            }
+        } finally {
+            business.recycle();
+        }
+
+        Media media = new Media();
+        media.id = id;
+        media.inspectionId = inspectionId;
+        media.itemId = itemId;
+        media.category = category;
+        media.localPath = output.getAbsolutePath();
+        media.capturedAt = capturedAt == null ? System.currentTimeMillis() : capturedAt;
+        media.location = gpsText;
+        media.latitude = latitude;
+        media.longitude = longitude;
+        media.sha256 = sha256(output);
+        media.mime = "image/jpeg";
+        media.size = output.length();
+        return media;
+    }
+
+    private void copySource(Uri source, File target) throws IOException {
+        try (InputStream input = context.getContentResolver().openInputStream(source);
+             OutputStream output = new FileOutputStream(target)) {
+            if (input == null) throw new IOException("原始照片读取失败");
+            byte[] buffer = new byte[65536];
+            for (int count; (count = input.read(buffer)) >= 0;) {
+                if (count > 0) output.write(buffer, 0, count);
+            }
+        }
+    }
+
+    private PhotoMetadata readMetadata(Uri source) {
+        PhotoMetadata metadata = new PhotoMetadata();
+        try (InputStream input = context.getContentResolver().openInputStream(source)) {
+            if (input == null) return metadata;
+            ExifInterface exif = new ExifInterface(input);
+            metadata.orientation = exif.getAttributeInt(ExifInterface.TAG_ORIENTATION,
+                    ExifInterface.ORIENTATION_NORMAL);
+            String time = exif.getAttribute(ExifInterface.TAG_DATETIME_ORIGINAL);
+            if (time == null) time = exif.getAttribute(ExifInterface.TAG_DATETIME_DIGITIZED);
+            if (time == null) time = exif.getAttribute(ExifInterface.TAG_DATETIME);
+            metadata.capturedAt = parseTime(time);
+            float[] coordinates = new float[2];
+            if (exif.getLatLong(coordinates)) {
+                metadata.latitude = (double) coordinates[0];
+                metadata.longitude = (double) coordinates[1];
+            }
+        } catch (Exception ignored) {
+            // Original photo remains importable even when its EXIF block is absent or malformed.
+        }
+        return metadata;
+    }
+
+    private Long parseTime(String value) {
+        if (value == null || value.isBlank()) return null;
+        try {
+            return LocalDateTime.parse(value.trim(), EXIF_TIME)
+                    .atZone(ZoneId.systemDefault()).toInstant().toEpochMilli();
+        } catch (DateTimeParseException ignored) {
+            return null;
+        }
+    }
+
+    private Bitmap orient(Bitmap source, int orientation) {
+        Matrix matrix = new Matrix();
+        if (orientation == ExifInterface.ORIENTATION_ROTATE_90) matrix.postRotate(90);
+        else if (orientation == ExifInterface.ORIENTATION_ROTATE_180) matrix.postRotate(180);
+        else if (orientation == ExifInterface.ORIENTATION_ROTATE_270) matrix.postRotate(270);
+        else return source;
+        return Bitmap.createBitmap(source, 0, 0, source.getWidth(), source.getHeight(),
+                matrix, true);
+    }
+
+    private String chineseCoordinates(double latitude, double longitude) {
+        return String.format(Locale.CHINA, "%s %.6f°，%s %.6f°",
+                latitude >= 0 ? "北纬" : "南纬", Math.abs(latitude),
+                longitude >= 0 ? "东经" : "西经", Math.abs(longitude));
+    }
+
+    private void drawWatermark(Bitmap bitmap, List<String> lines) {
+        Canvas canvas = new Canvas(bitmap);
+        Paint text = new Paint(Paint.ANTI_ALIAS_FLAG);
+        text.setTypeface(Typeface.create(Typeface.DEFAULT, Typeface.BOLD));
+        text.setTextSize(Math.max(28, bitmap.getWidth() / 35f));
+        text.setColor(Color.WHITE);
+        text.setShadowLayer(3, 0, 1, Color.BLACK);
+        float padding = Math.max(20, bitmap.getWidth() / 80f);
+        float lineHeight = text.getTextSize() * 1.4f;
+        Paint background = new Paint();
+        background.setColor(0x99000000);
+        canvas.drawRect(0, bitmap.getHeight() - padding * 2 - lineHeight * lines.size(),
+                bitmap.getWidth(), bitmap.getHeight(), background);
+        float y = bitmap.getHeight() - padding - lineHeight * (lines.size() - 1);
+        for (String line : lines) {
+            canvas.drawText(line, padding, y, text);
+            y += lineHeight;
+        }
+    }
+
+    public static String sha256(File file) throws IOException {
+        try {
+            MessageDigest digest = MessageDigest.getInstance("SHA-256");
+            try (InputStream input = Files.newInputStream(file.toPath())) {
+                byte[] buffer = new byte[65536];
+                for (int count; (count = input.read(buffer)) > 0;) {
+                    digest.update(buffer, 0, count);
+                }
+            }
+            StringBuilder value = new StringBuilder();
+            for (byte part : digest.digest()) value.append(String.format("%02x", part));
+            return value.toString();
+        } catch (Exception error) {
+            throw new IOException(error);
+        }
+    }
+
+    public void deleteInspectionMedia(String inspectionId) {
+        File directory = mediaDir(inspectionId);
+        File[] files = directory.listFiles();
+        if (files != null) {
+            for (File file : files) if (!file.delete()) file.deleteOnExit();
+        }
+        directory.delete();
+    }
+
+    private static final class PhotoMetadata {
+        int orientation = ExifInterface.ORIENTATION_NORMAL;
+        Long capturedAt;
+        Double latitude;
+        Double longitude;
+    }
 }
