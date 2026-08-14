@@ -6,6 +6,35 @@
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
+    const method = request.method.toUpperCase();
+
+    // Public diagnostics endpoint. It exposes no user data or credentials, only whether
+    // the Worker was deployed with the storage binding required by the Android client.
+    if (url.pathname === '/health' && method === 'GET') {
+      const ready = Boolean(env.SAFETY_LEDGER_BUCKET);
+      return new Response(JSON.stringify({
+        ok: ready,
+        service: 'Safety Ledger Sync',
+        protocol: 'safety-ledger-webdav-v1',
+        storage: 'R2',
+        binding: 'SAFETY_LEDGER_BUCKET',
+        error: ready ? null : '未绑定 R2：请将私有 R2 bucket 绑定为 SAFETY_LEDGER_BUCKET',
+      }), {
+        status: ready ? 200 : 503,
+        headers: { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' },
+      });
+    }
+
+    if (!env.SAFETY_LEDGER_BUCKET) {
+      return new Response(JSON.stringify({
+        ok: false,
+        error: '云端部署不完整：当前 APK 需要 R2，绑定名必须为 SAFETY_LEDGER_BUCKET；旧版 D1 env.DB Worker 不兼容。',
+      }), {
+        status: 503,
+        headers: { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' },
+      });
+    }
+
     const key = decodeURIComponent(url.pathname.replace(/^\/+/, ''));
     if (!(await authorized(request, env, key))) {
       return new Response(JSON.stringify({ ok: false, error: '需要设备授权' }), {
@@ -17,7 +46,6 @@ export default {
       });
     }
 
-    const method = request.method.toUpperCase();
     const common = { 'DAV': '1', 'Cache-Control': 'no-store' };
 
     if (method === 'OPTIONS') {
