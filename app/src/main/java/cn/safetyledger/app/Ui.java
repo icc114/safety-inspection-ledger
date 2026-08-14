@@ -85,6 +85,29 @@ public final class Ui {
         return button;
     }
 
+    public static Button compactButton(Context context, String label, boolean primary) {
+        Button button = primary ? button(context, label) : secondaryButton(context, label);
+        button.setTextSize(13);
+        button.setMinHeight(dp(context, 36));
+        button.setPadding(dp(context, 8), 0, dp(context, 8), 0);
+        return button;
+    }
+
+    public static Button dangerButton(Context context, String label) {
+        Button button = compactButton(context, label, false);
+        button.setTextColor(DANGER);
+        button.setBackground(shape(context, Color.WHITE, Color.rgb(244, 190, 190), 9));
+        return button;
+    }
+
+    public static Button iconButton(Context context, String label) {
+        Button button = secondaryButton(context, label);
+        button.setTextSize(22);
+        button.setMinHeight(dp(context, 42));
+        button.setPadding(0, 0, 0, 0);
+        return button;
+    }
+
     public static Button choiceButton(Context context, String label, boolean selected) {
         Button button = secondaryButton(context, label);
         styleChoice(context, button, selected);
@@ -195,6 +218,19 @@ public final class Ui {
         return text;
     }
 
+    public static LinearLayout appBar(Activity activity, String title) {
+        LinearLayout bar = row(activity);
+        bar.setPadding(dp(activity, 8), dp(activity, 5), dp(activity, 10), dp(activity, 5));
+        bar.setBackgroundColor(BLUE);
+        Button back = iconButton(activity, "‹");
+        back.setOnClickListener(view -> activity.finish());
+        TextView text = text(activity, title, 20, true);
+        text.setTextColor(Color.WHITE);
+        bar.addView(back, new LinearLayout.LayoutParams(dp(activity, 44), dp(activity, 44)));
+        bar.addView(text, weight(1));
+        return bar;
+    }
+
     public static void start(Context context, Class<?> destination) {
         context.startActivity(new Intent(context, destination));
     }
@@ -203,4 +239,3 @@ public final class Ui {
         Toast.makeText(context, message, Toast.LENGTH_LONG).show();
     }
 }
-

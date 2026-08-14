@@ -22,7 +22,9 @@ import android.widget.EditText;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
+import android.widget.Spinner;
 import android.widget.TextView;
+import android.widget.ArrayAdapter;
 
 import cn.safetyledger.app.data.Entities.Inspection;
 import cn.safetyledger.app.data.Entities.InspectionItem;
@@ -34,6 +36,7 @@ import cn.safetyledger.app.media.MediaService;
 
 import java.io.File;
 import java.time.LocalDate;
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
@@ -52,6 +55,9 @@ public class MainActivity extends Activity {
     private LinearLayout signaturesBox;
     private TextView answeredCount;
     private TextView photoCount;
+    private Spinner templateSpinner;
+    private List<Template> activeTemplates;
+    private boolean bindingTemplate;
     private final Map<String, EditText> fields = new HashMap<>();
     private final Map<String, EditText> problemFields = new HashMap<>();
     private final Map<String, LinearLayout> problemAreas = new HashMap<>();
@@ -68,38 +74,17 @@ public class MainActivity extends Activity {
         if (id == null) id = repo.setting("current_draft", "");
         model = id.isBlank() ? null : repo.inspection(id);
         if (model == null || model.deletedAt != null || !"DRAFT".equals(model.status)) {
-            List<Template> templates = repo.templates(false);
-            if (templates.isEmpty()) {
+            activeTemplates = usableTemplates();
+            if (activeTemplates.isEmpty()) {
                 Ui.toast(this, "请先新建并启用检查模板");
                 Ui.start(this, TemplateActivity.class);
                 finish();
                 return;
             }
-            chooseTemplate(templates);
-            return;
+            model = repo.newInspection(activeTemplates.get(0).id);
+            repo.putSetting("current_draft", model.id);
         }
         render();
-    }
-
-    private void chooseTemplate(List<Template> templates) {
-        String[] names = new String[templates.size()];
-        for (int i = 0; i < names.length; i++) {
-            names[i] = templates.get(i).name + " · " + templates.get(i).category;
-        }
-        new AlertDialog.Builder(this)
-                .setTitle("选择检查模板")
-                .setMessage("模板决定本次检查项目，保存后历史记录不会随模板修改。")
-                .setCancelable(false)
-                .setItems(names, (dialog, which) -> {
-                    model = repo.newInspection(templates.get(which).id);
-                    repo.putSetting("current_draft", model.id);
-                    render();
-                })
-                .setNeutralButton("模板管理", (dialog, which) -> {
-                    Ui.start(this, TemplateActivity.class);
-                    finish();
-                })
-                .show();
     }
 
     private void render() {
@@ -150,10 +135,94 @@ public class MainActivity extends Activity {
         title.setGravity(Gravity.CENTER);
         card.addView(title);
         card.addView(Ui.gap(this, 8));
+        card.addView(templatePicker());
+        card.addView(Ui.gap(this, 8));
         card.addView(labeledInput("检查日期", model.date, "date", true));
         card.addView(Ui.gap(this, 8));
         card.addView(labeledInput("检查地点", model.location, "location", false));
         return card;
+    }
+
+    private View templatePicker() {
+        LinearLayout box = Ui.column(this);
+        TextView caption = Ui.text(this, "检查类型 / 检查模板", 14, true);
+        caption.setTextColor(Ui.MUTED);
+        activeTemplates = usableTemplates();
+        String[] names = new String[activeTemplates.size()];
+        int selected = 0;
+        for (int i = 0; i < activeTemplates.size(); i++) {
+            names[i] = activeTemplates.get(i).name;
+            if (activeTemplates.get(i).id.equals(model.templateId)) selected = i;
+        }
+        templateSpinner = new Spinner(this);
+        templateSpinner.setAdapter(new ArrayAdapter<>(this,
+                android.R.layout.simple_spinner_dropdown_item, names));
+        templateSpinner.setBackground(Ui.shape(this, Color.WHITE, Ui.LINE, 10));
+        templateSpinner.setPadding(Ui.dp(this, 10), 0, Ui.dp(this, 10), 0);
+        bindingTemplate = true;
+        templateSpinner.setOnItemSelectedListener(new android.widget.AdapterView.OnItemSelectedListener() {
+            @Override public void onItemSelected(android.widget.AdapterView<?> parent, View view,
+                                                  int position, long id) {
+                if (bindingTemplate) { bindingTemplate = false; return; }
+                Template chosen = activeTemplates.get(position);
+                if (chosen.id.equals(model.templateId)) return;
+                switchTemplate(chosen);
+            }
+            @Override public void onNothingSelected(android.widget.AdapterView<?> parent) {}
+        });
+        templateSpinner.setSelection(selected, false);
+        templateSpinner.post(() -> bindingTemplate = false);
+        box.addView(caption);
+        box.addView(templateSpinner, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT,
+                Ui.dp(this, 50)));
+        return box;
+    }
+
+    private void switchTemplate(Template template) {
+        Runnable replace = () -> {
+            new MediaService(this).deleteInspectionMedia(model.id);
+            repo.discardDraft(model.id);
+            model = repo.newInspection(template.id);
+            repo.putSetting("current_draft", model.id);
+            render();
+        };
+        if (hasDraftInput()) {
+            new AlertDialog.Builder(this)
+                    .setTitle("切换检查模板")
+                    .setMessage("切换会放弃当前尚未保存的勾选、问题、照片和签名。是否继续？")
+                    .setPositiveButton("继续切换", (dialog, which) -> replace.run())
+                    .setNegativeButton("取消", (dialog, which) -> restoreTemplateSelection())
+                    .setOnCancelListener(dialog -> restoreTemplateSelection())
+                    .show();
+        } else replace.run();
+    }
+
+    private boolean hasDraftInput() {
+        for (InspectionItem item : model.items) {
+            if ("PASS".equals(item.result) || "FAIL".equals(item.result) || !item.problem.isBlank()) return true;
+        }
+        return !repo.media(model.id).isEmpty() || !repo.signatures(model.id).isEmpty()
+                || (fields.containsKey("location") && !value("location").isBlank());
+    }
+
+    private void restoreTemplateSelection() {
+        if (templateSpinner == null) return;
+        for (int i = 0; i < activeTemplates.size(); i++) {
+            if (activeTemplates.get(i).id.equals(model.templateId)) {
+                bindingTemplate = true;
+                templateSpinner.setSelection(i, false);
+                templateSpinner.post(() -> bindingTemplate = false);
+                break;
+            }
+        }
+    }
+
+    private List<Template> usableTemplates() {
+        List<Template> usable = new ArrayList<>();
+        for (Template template : repo.templates(false)) {
+            if (!template.items.isEmpty()) usable.add(template);
+        }
+        return usable;
     }
 
     private View labeledInput(String label, String value, String key, boolean date) {
@@ -507,4 +576,3 @@ public class MainActivity extends Activity {
         finish();
     }
 }
-

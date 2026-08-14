@@ -81,9 +81,9 @@ public final class LedgerActivity extends Activity {
         LinearLayout content = Ui.column(this);
         content.setPadding(Ui.dp(this, 12), Ui.dp(this, 12), Ui.dp(this, 12), Ui.dp(this, 24));
         content.addView(calendarCard());
-        content.addView(Ui.gap(this, 12));
+        content.addView(Ui.gap(this, 8));
         content.addView(filterCard());
-        content.addView(Ui.gap(this, 12));
+        content.addView(Ui.gap(this, 8));
         content.addView(recordsCard());
         scroll.addView(content);
         root.addView(scroll, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1));
@@ -96,12 +96,13 @@ public final class LedgerActivity extends Activity {
         bar.setBackgroundColor(Ui.BLUE);
         TextView title = Ui.text(this, "安全检查台账", 22, true);
         title.setTextColor(Color.WHITE);
-        Button settings = Ui.secondaryButton(this, "基础设置");
+        Button settings = Ui.iconButton(this, "⚙");
+        settings.setContentDescription("基础设置");
         settings.setOnClickListener(view -> Ui.start(this, SettingsActivity.class));
         Button form = Ui.secondaryButton(this, "+ 检查填报");
         form.setOnClickListener(view -> startActivity(new Intent(this, MainActivity.class)));
         bar.addView(title, Ui.weight(1));
-        bar.addView(settings, new LinearLayout.LayoutParams(Ui.dp(this, 98), Ui.dp(this, 48)));
+        bar.addView(settings, new LinearLayout.LayoutParams(Ui.dp(this, 48), Ui.dp(this, 44)));
         bar.addView(Ui.horizontalGap(this, 7));
         bar.addView(form, new LinearLayout.LayoutParams(Ui.dp(this, 112), Ui.dp(this, 48)));
         return bar;
@@ -111,8 +112,8 @@ public final class LedgerActivity extends Activity {
         LinearLayout card = Ui.card(this);
         card.setPadding(Ui.dp(this, 10), Ui.dp(this, 9), Ui.dp(this, 10), Ui.dp(this, 8));
         LinearLayout today = Ui.row(this);
-        todayTitle = Ui.text(this, "", 20, true);
-        todaySubtitle = Ui.text(this, "", 14, false);
+        todayTitle = Ui.text(this, "", 18, true);
+        todaySubtitle = Ui.text(this, "", 12, false);
         todaySubtitle.setTextColor(Ui.MUTED);
         LinearLayout todayText = Ui.column(this);
         todayText.addView(todayTitle);
@@ -127,12 +128,12 @@ public final class LedgerActivity extends Activity {
             load();
         });
         today.addView(todayText, Ui.weight(1));
-        today.addView(reset, new LinearLayout.LayoutParams(Ui.dp(this, 104), Ui.dp(this, 46)));
+        today.addView(reset, new LinearLayout.LayoutParams(Ui.dp(this, 90), Ui.dp(this, 40)));
         card.addView(today);
         card.addView(Ui.divider(this));
 
         LinearLayout monthNavigation = Ui.row(this);
-        monthTitle = Ui.text(this, "", 20, true);
+        monthTitle = Ui.text(this, "", 18, true);
         Button previous = Ui.secondaryButton(this, "上月");
         Button next = Ui.secondaryButton(this, "下月");
         previous.setOnClickListener(view -> {
@@ -160,18 +161,21 @@ public final class LedgerActivity extends Activity {
 
     private LinearLayout filterCard() {
         LinearLayout card = Ui.card(this);
-        card.addView(Ui.text(this, "显示范围", 15, true));
+        card.setPadding(Ui.dp(this, 10), Ui.dp(this, 8), Ui.dp(this, 10), Ui.dp(this, 8));
+        LinearLayout rangeRow = Ui.row(this);
+        TextView rangeLabel = Ui.text(this, "显示范围", 14, true);
         range = spinner(new String[]{"当日", "本月", "本季度", "本年度", "全部"});
         range.setSelection(1);
-        card.addView(range, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, Ui.dp(this, 50)));
-        card.addView(Ui.gap(this, 7));
-        card.addView(Ui.text(this, "检查类型与整改状态", 15, true));
+        rangeRow.addView(rangeLabel, new LinearLayout.LayoutParams(Ui.dp(this, 82), Ui.dp(this, 42)));
+        rangeRow.addView(range, new LinearLayout.LayoutParams(0, Ui.dp(this, 42), 1));
+        card.addView(rangeRow);
+        card.addView(Ui.gap(this, 4));
         LinearLayout filters = Ui.row(this);
         type = spinner(types());
         statusFilter = spinner(new String[]{"全部状态", "待整改", "整改中", "已整改完成", "检查完成"});
-        filters.addView(type, Ui.weight(1));
+        filters.addView(type, new LinearLayout.LayoutParams(0, Ui.dp(this, 42), 1));
         filters.addView(Ui.horizontalGap(this, 6));
-        filters.addView(statusFilter, Ui.weight(1));
+        filters.addView(statusFilter, new LinearLayout.LayoutParams(0, Ui.dp(this, 42), 1));
         card.addView(filters);
         AdapterView.OnItemSelectedListener listener = new SimpleSelect() {
             @Override void selected() { page = 1; load(); }
@@ -184,8 +188,9 @@ public final class LedgerActivity extends Activity {
 
     private LinearLayout recordsCard() {
         LinearLayout card = Ui.card(this);
+        card.setPadding(Ui.dp(this, 10), Ui.dp(this, 8), Ui.dp(this, 10), Ui.dp(this, 8));
         LinearLayout header = Ui.row(this);
-        TextView title = Ui.text(this, "检查记录", 21, true);
+        TextView title = Ui.text(this, "检查记录", 19, true);
         pageSize = spinner(new String[]{"10 条/页", "20 条/页", "50 条/页", "100 条/页", "200 条/页"});
         pageSize.setOnItemSelectedListener(new SimpleSelect() {
             @Override void selected() {
@@ -194,10 +199,7 @@ public final class LedgerActivity extends Activity {
                 load();
             }
         });
-        header.addView(title, Ui.weight(1));
-        header.addView(pageSize, new LinearLayout.LayoutParams(Ui.dp(this, 118), Ui.dp(this, 46)));
-        card.addView(header);
-        multiToggle = Ui.secondaryButton(this, "多选导出");
+        multiToggle = Ui.compactButton(this, "多选导出", false);
         multiToggle.setOnClickListener(view -> {
             multiMode = !multiMode;
             if (!multiMode) selected.clear();
@@ -205,7 +207,11 @@ public final class LedgerActivity extends Activity {
             selectionActions.setVisibility(multiMode ? View.VISIBLE : View.GONE);
             showRecords();
         });
-        card.addView(multiToggle);
+        header.addView(title, Ui.weight(1));
+        header.addView(multiToggle, new LinearLayout.LayoutParams(Ui.dp(this, 92), Ui.dp(this, 38)));
+        header.addView(Ui.horizontalGap(this, 5));
+        header.addView(pageSize, new LinearLayout.LayoutParams(Ui.dp(this, 106), Ui.dp(this, 40)));
+        card.addView(header);
         selectionActions = Ui.column(this);
         LinearLayout first = Ui.row(this);
         Button all = Ui.secondaryButton(this, "全选当前结果");
@@ -285,7 +291,7 @@ public final class LedgerActivity extends Activity {
         for (String weekday : weekdays) {
             TextView heading = Ui.text(this, weekday, 13, true);
             heading.setGravity(Gravity.CENTER);
-            grid.addView(heading, cellParams(26));
+            grid.addView(heading, cellParams(22));
         }
         Set<String> marked = repo.markedDates(month.toString());
         Map<String, String[]> holidays = repo.holidays(month.toString());
@@ -317,7 +323,7 @@ public final class LedgerActivity extends Activity {
                 syncCalendar();
                 load();
             });
-            grid.addView(cell, cellParams(34));
+            grid.addView(cell, cellParams(31));
         }
         calendarBox.addView(grid);
         TextView legend = Ui.text(this,
@@ -480,4 +486,3 @@ public final class LedgerActivity extends Activity {
         }
     }
 }
-
