@@ -256,8 +256,13 @@ public final class Ui {
             toast(activity, "照片文件不存在；如果这是云端历史照片，请先完成媒体下载");
             return;
         }
-        activity.startActivity(new Intent(activity, PhotoPreviewActivity.class)
-                .putExtra("photo_path", path));
+        try {
+            activity.startActivity(new Intent(activity, PhotoPreviewActivity.class)
+                    .putExtra("photo_path", path));
+        } catch (RuntimeException error) {
+            toast(activity, "无法打开照片预览：" + (error.getMessage() == null
+                    ? error.getClass().getSimpleName() : error.getMessage()));
+        }
     }
 
     public static void toast(Context context, String message) {
