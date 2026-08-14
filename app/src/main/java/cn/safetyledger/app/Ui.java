@@ -103,8 +103,8 @@ public final class Ui {
 
     public static Button iconButton(Context context, String label) {
         Button button = secondaryButton(context, label);
-        button.setTextSize(22);
-        button.setMinHeight(dp(context, 42));
+        button.setTextSize(18);
+        button.setMinHeight(dp(context, 36));
         button.setPadding(0, 0, 0, 0);
         return button;
     }
@@ -227,7 +227,7 @@ public final class Ui {
         back.setOnClickListener(view -> activity.finish());
         TextView text = text(activity, title, 20, true);
         text.setTextColor(Color.WHITE);
-        bar.addView(back, new LinearLayout.LayoutParams(dp(activity, 44), dp(activity, 44)));
+        bar.addView(back, new LinearLayout.LayoutParams(dp(activity, 38), dp(activity, 38)));
         bar.addView(text, weight(1));
         return bar;
     }

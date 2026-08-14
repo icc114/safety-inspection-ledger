@@ -7,7 +7,6 @@ import android.app.DatePickerDialog;
 import android.content.ContentValues;
 import android.content.Intent;
 import android.content.pm.PackageManager;
-import android.graphics.BitmapFactory;
 import android.graphics.Color;
 import android.location.Location;
 import android.location.LocationManager;
@@ -82,8 +81,8 @@ public class MainActivity extends Activity {
                 return;
             }
             model = repo.newInspection(activeTemplates.get(0).id);
-            repo.putSetting("current_draft", model.id);
         }
+        repo.putSetting("current_draft", model.id);
         render();
     }
 
@@ -98,13 +97,13 @@ public class MainActivity extends Activity {
         bar.setPadding(Ui.dp(this, 10), Ui.dp(this, 6), Ui.dp(this, 10), Ui.dp(this, 6));
         bar.setBackgroundColor(Ui.BLUE);
         Button back = Ui.secondaryButton(this, "‹");
-        back.setTextSize(28);
+        back.setTextSize(22);
         back.setOnClickListener(view -> finish());
         TextView topTitle = Ui.text(this, "本地检查表\n检查填报", 20, true);
         topTitle.setTextColor(Color.WHITE);
         Button topSave = Ui.secondaryButton(this, "保存");
         topSave.setOnClickListener(view -> save());
-        bar.addView(back, new LinearLayout.LayoutParams(Ui.dp(this, 46), Ui.dp(this, 46)));
+        bar.addView(back, new LinearLayout.LayoutParams(Ui.dp(this, 40), Ui.dp(this, 40)));
         bar.addView(topTitle, Ui.weight(1));
         bar.addView(topSave, new LinearLayout.LayoutParams(Ui.dp(this, 76), Ui.dp(this, 46)));
         root.addView(bar);
@@ -511,7 +510,7 @@ public class MainActivity extends Activity {
             row.setPadding(0, Ui.dp(this, 7), 0, 0);
             ImageView image = new ImageView(this);
             image.setScaleType(ImageView.ScaleType.CENTER_CROP);
-            image.setImageBitmap(BitmapFactory.decodeFile(item.localPath));
+            image.setImageBitmap(MediaService.decodeThumbnail(item.localPath, 320));
             image.setContentDescription("点击放大检查照片");
             image.setOnClickListener(view -> Ui.previewPhoto(this, item.localPath));
             row.addView(image, new LinearLayout.LayoutParams(Ui.dp(this, 76), Ui.dp(this, 64)));
@@ -572,5 +571,19 @@ public class MainActivity extends Activity {
         startActivity(new Intent(this, RecordDetailActivity.class)
                 .putExtra("inspection_id", model.id));
         finish();
+    }
+
+    @Override
+    protected void onPause() {
+        if (model != null && "DRAFT".equals(model.status)) {
+            try {
+                syncFields();
+                repo.saveInspection(model);
+                repo.putSetting("current_draft", model.id);
+            } catch (RuntimeException ignored) {
+                // Keep navigation responsive; an explicit save still reports validation errors.
+            }
+        }
+        super.onPause();
     }
 }

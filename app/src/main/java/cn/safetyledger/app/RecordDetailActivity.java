@@ -104,14 +104,14 @@ public final class RecordDetailActivity extends Activity {
         bar.setPadding(Ui.dp(this, 10), Ui.dp(this, 6), Ui.dp(this, 10), Ui.dp(this, 6));
         bar.setBackgroundColor(Ui.BLUE);
         Button back = Ui.secondaryButton(this, "‹");
-        back.setTextSize(28);
+        back.setTextSize(22);
         back.setOnClickListener(view -> finish());
         TextView title = Ui.text(this, "检查记录详情", 20, true);
         title.setTextColor(Color.WHITE);
         TextView status = Ui.text(this, status(model.status), 14, true);
         status.setTextColor(Ui.BLUE_DARK);
         status.setBackground(Ui.shape(this, Color.WHITE, Color.TRANSPARENT, 18));
-        bar.addView(back, new LinearLayout.LayoutParams(Ui.dp(this, 46), Ui.dp(this, 46)));
+        bar.addView(back, new LinearLayout.LayoutParams(Ui.dp(this, 40), Ui.dp(this, 40)));
         bar.addView(title, Ui.weight(1));
         bar.addView(status);
         return bar;
@@ -353,7 +353,7 @@ public final class RecordDetailActivity extends Activity {
         for (Media media : model.media) {
             LinearLayout row = Ui.row(this);
             ImageView image = new ImageView(this);
-            image.setImageBitmap(BitmapFactory.decodeFile(media.localPath));
+            image.setImageBitmap(MediaService.decodeThumbnail(media.localPath, 360));
             image.setScaleType(ImageView.ScaleType.CENTER_CROP);
             image.setContentDescription("点击放大照片");
             image.setOnClickListener(view -> Ui.previewPhoto(this, media.localPath));

@@ -109,7 +109,7 @@ public final class LedgerActivity extends Activity {
         ImageButton settings = new ImageButton(this);
         settings.setImageResource(R.drawable.ic_settings);
         settings.setColorFilter(Color.WHITE);
-        settings.setPadding(Ui.dp(this, 9), Ui.dp(this, 9), Ui.dp(this, 9), Ui.dp(this, 9));
+        settings.setPadding(Ui.dp(this, 8), Ui.dp(this, 8), Ui.dp(this, 8), Ui.dp(this, 8));
         settings.setBackground(Ui.shape(this, Color.TRANSPARENT, 0x55ffffff, 20));
         settings.setContentDescription("基础设置");
         settings.setOnClickListener(view -> Ui.start(this, SettingsActivity.class));
@@ -117,7 +117,7 @@ public final class LedgerActivity extends Activity {
         form.setOnClickListener(view -> startActivity(new Intent(this, MainActivity.class)));
         bar.addView(title);
         bar.addView(Ui.horizontalGap(this, 4));
-        bar.addView(settings, new LinearLayout.LayoutParams(Ui.dp(this, 40), Ui.dp(this, 40)));
+        bar.addView(settings, new LinearLayout.LayoutParams(Ui.dp(this, 34), Ui.dp(this, 34)));
         bar.addView(Ui.horizontalGap(this, 0), Ui.weight(1));
         bar.addView(form, new LinearLayout.LayoutParams(Ui.dp(this, 112), Ui.dp(this, 48)));
         return bar;
@@ -420,8 +420,11 @@ public final class LedgerActivity extends Activity {
             state.setTextColor(inspection.status.startsWith("PENDING") ? Ui.DANGER : Ui.BLUE_DARK);
             text.setOnClickListener(view -> {
                 if (multiMode) check.setChecked(!check.isChecked());
-                else startActivity(new Intent(this, RecordDetailActivity.class)
-                        .putExtra("inspection_id", inspection.id));
+                else {
+                    Class<?> target = "DRAFT".equals(inspection.status)
+                            ? MainActivity.class : RecordDetailActivity.class;
+                    startActivity(new Intent(this, target).putExtra("inspection_id", inspection.id));
+                }
             });
             row.addView(check);
             row.addView(text, Ui.weight(1));

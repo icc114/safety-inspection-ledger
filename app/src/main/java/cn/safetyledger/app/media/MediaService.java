@@ -70,10 +70,7 @@ public final class MediaService {
         File originalFile = new File(directory, id + "-original.bin");
         copySource(source, originalFile);
 
-        Bitmap decoded;
-        try (InputStream input = context.getContentResolver().openInputStream(source)) {
-            decoded = BitmapFactory.decodeStream(input);
-        }
+        Bitmap decoded = decodeSampled(source, 2400);
         if (decoded == null) throw new IOException("无法读取照片");
         Bitmap oriented = orient(decoded, metadata.orientation);
         if (oriented != decoded) decoded.recycle();
@@ -136,6 +133,46 @@ public final class MediaService {
                 if (count > 0) output.write(buffer, 0, count);
             }
         }
+    }
+
+    /**
+     * Decodes a picker/camera URI close to the size needed by the business copy.
+     * Modern phone photos can exceed 40 MP; decoding them at full resolution can
+     * exhaust the app heap before the later resize has a chance to run.
+     */
+    private Bitmap decodeSampled(Uri source, int maximum) throws IOException {
+        BitmapFactory.Options bounds = new BitmapFactory.Options();
+        bounds.inJustDecodeBounds = true;
+        try (InputStream input = context.getContentResolver().openInputStream(source)) {
+            if (input == null) throw new IOException("原始照片读取失败");
+            BitmapFactory.decodeStream(input, null, bounds);
+        }
+        BitmapFactory.Options options = new BitmapFactory.Options();
+        options.inSampleSize = sampleSize(bounds.outWidth, bounds.outHeight, maximum);
+        options.inPreferredConfig = Bitmap.Config.ARGB_8888;
+        try (InputStream input = context.getContentResolver().openInputStream(source)) {
+            if (input == null) throw new IOException("原始照片读取失败");
+            return BitmapFactory.decodeStream(input, null, options);
+        }
+    }
+
+    /** Decodes a small file thumbnail without loading the full business image. */
+    public static Bitmap decodeThumbnail(String path, int maximum) {
+        BitmapFactory.Options bounds = new BitmapFactory.Options();
+        bounds.inJustDecodeBounds = true;
+        BitmapFactory.decodeFile(path, bounds);
+        if (bounds.outWidth <= 0 || bounds.outHeight <= 0) return null;
+        BitmapFactory.Options options = new BitmapFactory.Options();
+        options.inSampleSize = sampleSize(bounds.outWidth, bounds.outHeight, maximum);
+        options.inPreferredConfig = Bitmap.Config.RGB_565;
+        return BitmapFactory.decodeFile(path, options);
+    }
+
+    private static int sampleSize(int width, int height, int maximum) {
+        int sample = 1;
+        int longest = Math.max(width, height);
+        while (longest / sample > maximum && sample <= 1024) sample *= 2;
+        return sample;
     }
 
     private PhotoMetadata readMetadata(Uri source) {
