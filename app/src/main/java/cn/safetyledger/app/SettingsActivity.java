@@ -173,7 +173,7 @@ public final class SettingsActivity extends Activity {
         });
         card.addView(save);
         card.addView(Ui.gap(this, 6));
-        Button manage = Ui.secondaryButton(this, "管理已配对设备 / 快速刷新");
+        Button manage = Ui.secondaryButton(this, "管理已配对设备");
         manage.setOnClickListener(view -> refreshAndManageDevices());
         card.addView(manage);
         return card;
@@ -230,7 +230,7 @@ public final class SettingsActivity extends Activity {
         explanation.setTextColor(Ui.MUTED);
         card.addView(explanation);
         TextView syncStrategy = Ui.text(this,
-                "自动同步策略：本机记录、照片、签名等有变更后约 2–5 分钟合并后台同步；无本地变更时约每 2 小时检查一次云端。设备列表刷新只读取云端设备目录，不再执行全量记录/照片同步。",
+                "自动同步策略：本机记录、照片、签名等有变更后约 2–5 分钟合并后台同步；无本地变更时约每 2 小时检查一次云端。设备管理只读取云端设备目录，不再执行全量记录/照片同步。",
                 12, false);
         syncStrategy.setTextColor(Ui.MUTED);
         card.addView(syncStrategy);
@@ -729,7 +729,7 @@ public final class SettingsActivity extends Activity {
     }
 
     private void refreshAndManageDevices() {
-        syncStatus.setText("同步状态：正在快速读取云端设备列表…");
+        syncStatus.setText("同步状态：正在读取云端设备列表…");
         new Thread(() -> {
             try {
                 CloudSyncService.DiscoveryResult result = new CloudSyncService(this).discoverDevices();
@@ -827,7 +827,7 @@ public final class SettingsActivity extends Activity {
                     new AlertDialog.Builder(this)
                             .setTitle("云端同步空间已重新建立")
                             .setMessage("已清理 " + result.deletedSnapshots()
-                                    + " 个旧设备快照。\n\n本机已成为首位管理员。现在让另一台正式手机使用完全相同的同步空间名称和同步密码点击“立即同步”；随后回到本机点“管理已配对设备 / 快速刷新”，即可看到并管理它。")
+                                    + " 个旧设备快照。\n\n本机已成为首位管理员。现在让另一台正式手机使用完全相同的同步空间名称和同步密码点击“立即同步”；随后回到本机点“管理已配对设备”，即可看到并管理它。")
                             .setPositiveButton("知道了", null).show();
                 });
             } catch (Exception error) {
@@ -869,21 +869,59 @@ public final class SettingsActivity extends Activity {
         for (int i = 0; i < ids.size(); i++) if (ids.get(i).equals(localId)) localRole = roles.get(i);
         boolean canManage = "OWNER".equals(localRole) || "ADMIN".equals(localRole);
         boolean finalCanManage = canManage;
+
+        LinearLayout deviceList = Ui.column(this);
+        deviceList.setPadding(Ui.dp(this, 6), Ui.dp(this, 4), Ui.dp(this, 6), Ui.dp(this, 4));
+        TextView note = Ui.text(this,
+                canManage
+                        ? "共发现 " + ids.size() + " 台设备。点击其他设备即可设置为管理员或工作人员。"
+                        : "共发现 " + ids.size() + " 台设备。本机是工作人员，只能查看设备列表。",
+                13, false);
+        note.setTextColor(Ui.MUTED);
+        deviceList.addView(note);
+        deviceList.addView(Ui.gap(this, 6));
+
+        for (int i = 0; i < ids.size(); i++) {
+            final int index = i;
+            boolean isLocal = ids.get(i).equals(localId);
+            String title = labels.get(i);
+            if (!isLocal && title.startsWith("设备 ")) {
+                title += "\n云端已发现，完整同步后显示设备名称";
+            }
+            Button deviceButton = Ui.secondaryButton(this, title);
+            deviceButton.setGravity(Gravity.START | Gravity.CENTER_VERTICAL);
+            deviceButton.setTextSize(14);
+            deviceButton.setMinHeight(Ui.dp(this, 68));
+            deviceButton.setPadding(Ui.dp(this, 14), Ui.dp(this, 8), Ui.dp(this, 14), Ui.dp(this, 8));
+            deviceButton.setOnClickListener(view -> {
+                if (ids.get(index).equals(localId)) {
+                    Ui.toast(this, "这是本机；请点击其他设备设置角色");
+                    return;
+                }
+                if (!finalCanManage) {
+                    Ui.toast(this, "只有管理员可以修改设备角色");
+                    return;
+                }
+                if ("OWNER".equals(roles.get(index))) {
+                    Ui.toast(this, "首位管理员不能降级");
+                    return;
+                }
+                chooseDeviceRole(ids.get(index), labels.get(index));
+            });
+            deviceList.addView(deviceButton, Ui.match());
+            deviceList.addView(Ui.gap(this, 7));
+        }
+
+        ScrollView scroll = new ScrollView(this);
+        scroll.setFillViewport(true);
+        scroll.addView(deviceList, new ScrollView.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+        int maxHeight = Ui.dp(this, 430);
+        scroll.setLayoutParams(new ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, maxHeight));
+
         new AlertDialog.Builder(this)
                 .setTitle("已配对设备")
-                .setMessage(canManage ? "点击设备可设置为管理员或工作人员。角色修改会在下次同步后传到其他手机。"
-                        : "本机是工作人员，只能查看设备列表。")
-                .setItems(labels.toArray(new String[0]), (dialog, which) -> {
-                    if (!finalCanManage) {
-                        Ui.toast(this, "只有管理员可以修改设备角色");
-                        return;
-                    }
-                    if ("OWNER".equals(roles.get(which))) {
-                        Ui.toast(this, "首位管理员不能降级");
-                        return;
-                    }
-                    chooseDeviceRole(ids.get(which), labels.get(which));
-                })
+                .setView(scroll)
                 .setNegativeButton("关闭", null)
                 .show();
     }
