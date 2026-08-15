@@ -43,8 +43,6 @@ jobs:
           git add app/build.gradle \
                   app/src/main/java/cn/safetyledger/app/sync/WebDavClient.java \
                   app/src/main/java/cn/safetyledger/app/sync/CloudSyncService.java \
-                  app/src/main/java/cn/safetyledger/app/SettingsActivity.java \
-                  .github/workflows/android-build.yml \
-                  .github/workflows/android-release.yml
+                  app/src/main/java/cn/safetyledger/app/SettingsActivity.java
           git diff --cached --quiet || git commit -m 'Release 1.2.10 reliable sync and paired-device management'
           git push
