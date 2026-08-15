@@ -71,17 +71,9 @@ if anchor not in t: raise SystemExit('refreshTable anchor not found')
 t = t.replace(anchor, method + anchor, 1)
 p.write_text(t, encoding='utf-8')
 
-# PC version and artifact names.
+# PC version.
 replace('desktop/pom.xml', '<version>0.1.0</version>', '<version>0.1.1</version>')
 replace('desktop/pom.xml', '<finalName>safety-ledger-pc-0.1.0-all</finalName>', '<finalName>safety-ledger-pc-0.1.1-all</finalName>')
-
-p = Path('.github/workflows/windows-pc-build.yml')
-t = p.read_text(encoding='utf-8')
-t = t.replace('safety-ledger-pc-0.1.0-all.jar', 'safety-ledger-pc-0.1.1-all.jar')
-t = t.replace('--app-version 0.1.0', '--app-version 0.1.1')
-t = t.replace('安全检查台账-PC-0.1.0-Windows.zip', '安全检查台账-PC-0.1.1-Windows.zip')
-t = t.replace('安全检查台账-PC-0.1.0-Windows', '安全检查台账-PC-0.1.1-Windows')
-p.write_text(t, encoding='utf-8')
 
 p = Path('desktop/README.md')
 t = p.read_text(encoding='utf-8')
