@@ -4,13 +4,15 @@ import android.content.*;
 import android.database.Cursor;
 import android.database.sqlite.SQLiteDatabase;
 import cn.safetyledger.app.data.Entities.*;
+import cn.safetyledger.app.sync.CloudSyncScheduler;
 import java.time.*;
 import java.time.format.DateTimeFormatter;
 import java.util.*;
 
 public final class LedgerRepository {
     private final LedgerDatabase helper;
-    public LedgerRepository(Context c){helper=((cn.safetyledger.app.SafetyLedgerApp)c.getApplicationContext()).db();}
+    private final Context context;
+    public LedgerRepository(Context c){context=c.getApplicationContext();helper=((cn.safetyledger.app.SafetyLedgerApp)context).db();}
     public SQLiteDatabase raw(){return helper.getWritableDatabase();}
 
     public List<Template> templates(boolean includeInactive){
@@ -47,7 +49,8 @@ public final class LedgerRepository {
     public void restore(String id){long n=System.currentTimeMillis();raw().update("inspections",LedgerDatabase.values("deleted_at",null,"updated_at",n),"id=?",new String[]{id});queue("inspection",id,"UPSERT");}
     public void permanentDelete(String id){SQLiteDatabase d=raw();d.beginTransaction();try{d.delete("inspections","id=?",new String[]{id});tombstone("inspection",id);d.setTransactionSuccessful();}finally{d.endTransaction();}}
     private void tombstone(String type,String id){long n=System.currentTimeMillis();raw().insertWithOnConflict("tombstones",null,LedgerDatabase.values("id",UUID.randomUUID().toString(),"entity_type",type,"entity_id",id,"deleted_at",n,"revision",1),SQLiteDatabase.CONFLICT_REPLACE);queue(type,id,"DELETE");}
-    private void queue(String type,String id,String op){long n=System.currentTimeMillis();raw().insertWithOnConflict("sync_queue",null,LedgerDatabase.values("id",UUID.randomUUID().toString(),"entity_type",type,"entity_id",id,"operation",op,"attempts",0,"next_attempt_at",n,"created_at",n),SQLiteDatabase.CONFLICT_REPLACE);}
+    private void queue(String type,String id,String op){long n=System.currentTimeMillis();raw().insertWithOnConflict("sync_queue",null,LedgerDatabase.values("id",UUID.randomUUID().toString(),"entity_type",type,"entity_id",id,"operation",op,"attempts",0,"next_attempt_at",n,"created_at",n),SQLiteDatabase.CONFLICT_REPLACE);CloudSyncScheduler.scheduleSoon(context);}
+    public void queueDeviceRole(String deviceId){queue("sync_device",deviceId,"UPSERT");}
     public void addMedia(Media m){long n=System.currentTimeMillis();raw().insertOrThrow("media",null,LedgerDatabase.values("id",m.id,"inspection_id",m.inspectionId,"inspection_item_id",m.itemId,"category",m.category,"local_path",m.localPath,"remote_key",m.remoteKey,"captured_at",m.capturedAt,"location",m.location,"latitude",m.latitude,"longitude",m.longitude,"sha256",m.sha256,"mime_type",m.mime,"size_bytes",m.size,"created_at",n,"updated_at",n));queue("media",m.id,"UPSERT");}
     public List<Media> media(String iid){List<Media>o=new ArrayList<>();try(Cursor c=raw().query("media",null,"inspection_id=? AND deleted_at IS NULL",new String[]{iid},null,null,"captured_at")){while(c.moveToNext()){Media m=new Media();m.id=s(c,"id");m.inspectionId=iid;m.itemId=s(c,"inspection_item_id");m.category=s(c,"category");m.localPath=s(c,"local_path");m.remoteKey=s(c,"remote_key");m.location=s(c,"location");m.sha256=s(c,"sha256");m.mime=s(c,"mime_type");m.capturedAt=LedgerDatabase.lng(c,"captured_at");m.size=LedgerDatabase.lng(c,"size_bytes");int la=c.getColumnIndex("latitude"),lo=c.getColumnIndex("longitude");m.latitude=c.isNull(la)?null:c.getDouble(la);m.longitude=c.isNull(lo)?null:c.getDouble(lo);o.add(m);}}return o;}
     public void saveSignature(Signature s){long n=System.currentTimeMillis();ContentValues v=LedgerDatabase.values("id",s.id,"inspection_id",s.inspectionId,"role",s.role,"local_path",s.path,"sha256",s.sha256,"created_at",n,"updated_at",n);raw().insertWithOnConflict("signatures",null,v,SQLiteDatabase.CONFLICT_REPLACE);queue("signature",s.id,"UPSERT");}

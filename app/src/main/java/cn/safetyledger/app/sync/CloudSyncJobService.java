@@ -15,22 +15,30 @@ import cn.safetyledger.app.data.LedgerRepository;
 public final class CloudSyncJobService extends JobService {
     @Override
     public boolean onStartJob(JobParameters params) {
-        try (android.database.Cursor cursor = new LedgerRepository(this).raw().rawQuery(
+        LedgerRepository repo = new LedgerRepository(this);
+        try (android.database.Cursor cursor = repo.raw().rawQuery(
                 "SELECT 1 FROM sync_providers WHERE enabled=1 LIMIT 1", null)) {
-            if (!cursor.moveToFirst()) {
-                return false;
-            }
+            if (!cursor.moveToFirst()) return false;
         }
+
+        if (params.getJobId() == CloudSyncScheduler.CHANGE_JOB_ID && !hasPendingLocalChanges(repo)) {
+            return false;
+        }
+
         new Thread(() -> {
             boolean retry = false;
             try {
                 new CloudSyncService(this).syncNow();
             } catch (Exception error) {
-                retry = true;
                 String message = error.getMessage() == null ? error.getClass().getSimpleName()
                         : error.getMessage();
-                new LedgerRepository(this).putSetting("last_sync_error", message);
-                notifyFailure(message);
+                // Manual and background sync can meet. This is not a network failure and must not
+                // trigger notifications/retry bursts; the active sync already owns the work.
+                if (!message.contains("已有同步任务正在运行")) {
+                    retry = true;
+                    repo.putSetting("last_sync_error", message);
+                    notifyFailure(message);
+                }
             }
             jobFinished(params, retry);
         }, "safety-ledger-cloud-sync").start();
@@ -39,6 +47,13 @@ public final class CloudSyncJobService extends JobService {
 
     @Override
     public boolean onStopJob(JobParameters params) { return true; }
+
+    private boolean hasPendingLocalChanges(LedgerRepository repo) {
+        try (android.database.Cursor cursor = repo.raw().rawQuery(
+                "SELECT 1 FROM sync_queue LIMIT 1", null)) {
+            return cursor.moveToFirst();
+        }
+    }
 
     private void notifyFailure(String message) {
         if (Build.VERSION.SDK_INT >= 33
