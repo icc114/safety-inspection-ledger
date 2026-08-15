@@ -88,6 +88,7 @@ public final class WebDavClient {
         mkcol(spaceUrl(space));
         mkcol(devicesUrl(space));
         mkcol(deviceControlUrl(space));
+        mkcol(adminRecoveryUrl(space));
     }
 
     public List<String> listSnapshots(String space) throws Exception {
@@ -161,6 +162,49 @@ public final class WebDavClient {
 
     public void deleteDeviceProfile(String space, String deviceId) throws Exception {
         delete(controlFileUrl(space, deviceId + ".device.json"));
+    }
+
+    /** Encrypted snapshots retained only for administrator recovery after a permanent delete. */
+    public List<String> listAdminRecovery(String space) throws Exception {
+        ResponseInfo response = execute("PROPFIND", adminRecoveryUrl(space), PROPFIND, "1");
+        if (!response.successDav()) throw failure("无法读取管理员恢复库", response);
+        String xmlText = new String(response.body, StandardCharsets.UTF_8);
+        String upperXml = xmlText.toUpperCase(java.util.Locale.ROOT);
+        if (upperXml.contains("<!DOCTYPE") || upperXml.contains("<!ENTITY")) {
+            throw new java.io.IOException("服务器返回了不安全的 XML DTD/ENTITY，已拒绝解析");
+        }
+        DocumentBuilderFactory factory = DocumentBuilderFactory.newInstance();
+        factory.setNamespaceAware(true);
+        setXmlFeatureSafely(factory, "http://apache.org/xml/features/disallow-doctype-decl", true);
+        setXmlFeatureSafely(factory, "http://xml.org/sax/features/external-general-entities", false);
+        setXmlFeatureSafely(factory, "http://xml.org/sax/features/external-parameter-entities", false);
+        try { factory.setXIncludeAware(false); } catch (RuntimeException | AbstractMethodError ignored) {}
+        try { factory.setExpandEntityReferences(false); } catch (RuntimeException | AbstractMethodError ignored) {}
+        Document document = factory.newDocumentBuilder().parse(new java.io.ByteArrayInputStream(response.body));
+        NodeList hrefs = document.getElementsByTagNameNS("*", "href");
+        List<String> names = new ArrayList<>();
+        for (int i = 0; i < hrefs.getLength(); i++) {
+            String href = hrefs.item(i).getTextContent();int slash = href.lastIndexOf('/');
+            String name = URLDecoder.decode(slash >= 0 ? href.substring(slash + 1) : href, StandardCharsets.UTF_8.name());
+            if (name.endsWith(".safetydata") && !names.contains(name)) names.add(name);
+        }
+        return names;
+    }
+
+    public void uploadAdminRecovery(String space,String name,File source)throws Exception{
+        RequestBody body=RequestBody.create(BINARY,source);
+        try(Response response=http.newCall(request(recoveryFileUrl(space,name)).put(body).build()).execute()){
+            if(!response.isSuccessful())throw failure("上传管理员恢复副本失败",response);
+        }
+    }
+
+    public void downloadAdminRecovery(String space,String name,File target)throws Exception{
+        Request request=request(recoveryFileUrl(space,name)).get().build();
+        try(Response response=http.newCall(request).execute()){
+            if(!response.isSuccessful())throw failure("下载管理员恢复副本失败",response);
+            ResponseBody body=response.body();if(body==null)throw new java.io.IOException("云端返回空恢复文件");
+            try(InputStream input=body.byteStream();FileOutputStream output=new FileOutputStream(target)){copy(input,output);}
+        }
     }
 
     public void download(String space, String name, File target) throws Exception {
@@ -291,8 +335,10 @@ public final class WebDavClient {
     private String devicesUrl(String space) { return spaceUrl(space) + "devices/"; }
     /** Small device name/role/logout metadata. */
     private String deviceControlUrl(String space) { return spaceUrl(space) + "device-control/"; }
+    private String adminRecoveryUrl(String space) { return spaceUrl(space) + "admin-recovery/"; }
     private String fileUrl(String space, String name) { return devicesUrl(space) + segment(name); }
     private String controlFileUrl(String space, String name) { return deviceControlUrl(space) + segment(name); }
+    private String recoveryFileUrl(String space, String name) { return adminRecoveryUrl(space) + segment(name); }
     private String segment(String value) {
         try {
             return URLEncoder.encode(value, "UTF-8").replace("+", "%20");

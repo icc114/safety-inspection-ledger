@@ -145,6 +145,26 @@ public final class BackupService{
         p.close();
         return changed;
     }
+    public void restoreInspection(RestorePackage p,String inspectionId)throws Exception{
+        LedgerDatabase h=((SafetyLedgerApp)context).db();SQLiteDatabase d=h.getWritableDatabase();
+        String path=p.database.getAbsolutePath().replace("'","''");
+        d.execSQL("ATTACH DATABASE '"+path+"' AS incoming");d.beginTransaction();
+        try{
+            try(Cursor c=d.rawQuery("SELECT 1 FROM incoming.inspections WHERE id=? LIMIT 1",new String[]{inspectionId})){
+                if(!c.moveToFirst())throw new IOException("恢复包中找不到该检查记录");
+            }
+            d.delete("inspections","id=?",new String[]{inspectionId});
+            d.execSQL("INSERT INTO main.inspections SELECT * FROM incoming.inspections WHERE id=?",new Object[]{inspectionId});
+            for(String table:new String[]{"inspection_items","media","signatures"}){
+                if(tableExists(d,"incoming",table))d.execSQL("INSERT OR REPLACE INTO main."+table+" SELECT * FROM incoming."+table+" WHERE inspection_id=?",new Object[]{inspectionId});
+            }
+            d.setTransactionSuccessful();
+        }finally{d.endTransaction();d.execSQL("DETACH DATABASE incoming");}
+        File source=new File(new File(p.root,"business_media"),inspectionId);
+        File target=new File(new File(context.getFilesDir(),"business_media"),inspectionId);
+        deleteTree(target);copyMedia(source,target);normalizeMediaPaths(d);p.close();
+    }
+
     private void normalizeMediaPaths(SQLiteDatabase d){File root=new File(context.getFilesDir(),"business_media");try(Cursor c=d.rawQuery("SELECT id,inspection_id FROM media WHERE deleted_at IS NULL",null)){while(c.moveToNext()){File f=new File(new File(root,c.getString(1)),c.getString(0)+".jpg");if(f.isFile())d.execSQL("UPDATE media SET local_path=? WHERE id=?",new Object[]{f.getAbsolutePath(),c.getString(0)});}}try(Cursor c=d.rawQuery("SELECT id,inspection_id,role,local_path FROM signatures WHERE deleted_at IS NULL",null)){while(c.moveToNext()){String stored=c.getString(3);String name=stored==null||stored.isBlank()?"signature-"+c.getString(2)+".png":new File(stored).getName();File f=new File(new File(root,c.getString(1)),name);if(f.isFile())d.execSQL("UPDATE signatures SET local_path=? WHERE id=?",new Object[]{f.getAbsolutePath(),c.getString(0)});}}}
     private boolean tableExists(SQLiteDatabase d,String schema,String table){try(Cursor c=d.rawQuery("SELECT 1 FROM "+schema+".sqlite_master WHERE type='table' AND name=?",new String[]{table})){return c.moveToFirst();}}
     private Set<String> columns(SQLiteDatabase d,String schema,String t){Set<String>s=new LinkedHashSet<>();try(Cursor c=d.rawQuery("PRAGMA "+schema+".table_info("+t+")",null)){while(c.moveToNext())s.add(c.getString(1));}return s;}
