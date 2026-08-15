@@ -15,27 +15,12 @@ function Find-Tool([string]$Name, [string[]]$Fallbacks) {
     return $null
 }
 
-function New-RandomSecret([int]$Bytes = 24) {
-    $data = New-Object byte[] $Bytes
-    [System.Security.Cryptography.RandomNumberGenerator]::Fill($data)
-    return ([Convert]::ToBase64String($data)).Replace("+", "A").Replace("/", "B").Replace("=", "")
-}
-
 Write-Host "==================================================" -ForegroundColor DarkCyan
-Write-Host "Safety Ledger - one-time Android release signing setup" -ForegroundColor Cyan
+Write-Host "Safety Ledger - upload EXISTING permanent signing key" -ForegroundColor Cyan
 Write-Host "==================================================" -ForegroundColor DarkCyan
-Write-Host "This creates ONE permanent private signing key for all future Android releases." -ForegroundColor Yellow
-Write-Host "Do not regenerate the key in future versions." -ForegroundColor Yellow
+Write-Host "This script NEVER creates a new signing key." -ForegroundColor Yellow
+Write-Host "It only uploads the already-created permanent key to GitHub Actions Secrets." -ForegroundColor Yellow
 Write-Host ""
-
-$keytool = Find-Tool "keytool.exe" @(
-    "C:\Program Files\Eclipse Adoptium\jdk-17*\bin\keytool.exe",
-    "C:\Program Files\Java\jdk-*\bin\keytool.exe",
-    "C:\Program Files\Android\Android Studio\jbr\bin\keytool.exe"
-)
-if (-not $keytool) {
-    throw "keytool.exe was not found. Install JDK 17 (Temurin/OpenJDK) or Android Studio first."
-}
 
 $gh = Find-Tool "gh.exe" @("C:\Program Files\GitHub CLI\gh.exe")
 if (-not $gh) {
@@ -49,69 +34,50 @@ if ($LASTEXITCODE -ne 0) {
     if ($LASTEXITCODE -ne 0) { throw "GitHub login failed." }
 }
 
-New-Item -ItemType Directory -Force -Path $BackupDirectory | Out-Null
 $keystore = Join-Path $BackupDirectory "safety-ledger-release.jks"
 $recovery = Join-Path $BackupDirectory "SIGNING-RECOVERY-KEEP-PRIVATE.txt"
+if (-not (Test-Path $keystore)) {
+    throw "Missing permanent keystore: $keystore. Do NOT generate another key. Restore the official signing backup first."
+}
+if (-not (Test-Path $recovery)) {
+    throw "Missing recovery text: $recovery. Do NOT generate another key. Restore the official signing backup first."
+}
 
-if (Test-Path $keystore) {
-    Write-Host "Existing signing key found: $keystore" -ForegroundColor Green
-    Write-Host "This script will NOT create a second key." -ForegroundColor Yellow
-    if (-not (Test-Path $recovery)) {
-        throw "The keystore exists but recovery text is missing. Do not regenerate; recover the original passwords."
-    }
-    $pairs = @{}
-    Get-Content $recovery | ForEach-Object {
-        if ($_ -match '^([^=]+)=(.*)$') { $pairs[$matches[1]] = $matches[2] }
-    }
-    $storePassword = $pairs['STORE_PASSWORD']
-    $keyPassword = $pairs['KEY_PASSWORD']
-    $alias = $pairs['KEY_ALIAS']
-    if (-not $storePassword -or -not $keyPassword -or -not $alias) {
-        throw "Recovery file is incomplete."
-    }
-} else {
-    $storePassword = New-RandomSecret 24
-    $keyPassword = New-RandomSecret 24
-    $alias = "safety-ledger-release"
-    & $keytool -genkeypair -v `
-        -keystore $keystore `
-        -storetype JKS `
-        -storepass $storePassword `
-        -keypass $keyPassword `
-        -alias $alias `
-        -keyalg RSA `
-        -keysize 4096 `
-        -validity 10000 `
-        -dname "CN=Safety Inspection Ledger, OU=Android, O=Safety Ledger, L=Beijing, ST=Beijing, C=CN"
-    if ($LASTEXITCODE -ne 0) { throw "keytool failed to create the signing key." }
+$pairs = @{}
+Get-Content $recovery | ForEach-Object {
+    if ($_ -match '^([^=]+)=(.*)$') { $pairs[$matches[1]] = $matches[2] }
+}
+$storePassword = $pairs['STORE_PASSWORD']
+$keyPassword = $pairs['KEY_PASSWORD']
+$alias = $pairs['KEY_ALIAS']
+$expectedFingerprint = $pairs['CERT_SHA256']
+if (-not $storePassword -or -not $keyPassword -or -not $alias) {
+    throw "Recovery file is incomplete."
+}
 
-    @(
-        "Repository=$Repository",
-        "KEY_ALIAS=$alias",
-        "STORE_PASSWORD=$storePassword",
-        "KEY_PASSWORD=$keyPassword",
-        "Keystore=$keystore",
-        "",
-        "IMPORTANT: Keep this file and safety-ledger-release.jks private and backed up.",
-        "Every future Android release must use this exact same key."
-    ) | Set-Content -Encoding UTF8 $recovery
+$keytool = Find-Tool "keytool.exe" @(
+    "C:\Program Files\Eclipse Adoptium\jdk-17*\bin\keytool.exe",
+    "C:\Program Files\Java\jdk-*\bin\keytool.exe",
+    "C:\Program Files\Android\Android Studio\jbr\bin\keytool.exe"
+)
+if ($keytool -and $expectedFingerprint) {
+    $details = & $keytool -list -v -keystore $keystore -storepass $storePassword -alias $alias 2>&1 | Out-String
+    if ($details -notmatch [regex]::Escape($expectedFingerprint)) {
+        throw "Signing certificate fingerprint does not match the official permanent key. Upload aborted."
+    }
 }
 
 $bytes = [IO.File]::ReadAllBytes($keystore)
 $base64 = [Convert]::ToBase64String($bytes)
 
-Write-Host "Uploading signing material to GitHub Actions Secrets..." -ForegroundColor Cyan
+Write-Host "Uploading the permanent signing material to GitHub Actions Secrets..." -ForegroundColor Cyan
 $base64 | & $gh secret set ANDROID_KEYSTORE_BASE64 --repo $Repository
 $storePassword | & $gh secret set ANDROID_KEYSTORE_PASSWORD --repo $Repository
 $alias | & $gh secret set ANDROID_KEY_ALIAS --repo $Repository
 $keyPassword | & $gh secret set ANDROID_KEY_PASSWORD --repo $Repository
-
 if ($LASTEXITCODE -ne 0) { throw "Failed to save GitHub Actions secrets." }
 
 Write-Host ""
-Write-Host "SIGNING SETUP COMPLETE." -ForegroundColor Green
-Write-Host "Private backup folder: $BackupDirectory" -ForegroundColor Green
-Write-Host "Keep that folder in at least one additional OFFLINE private backup." -ForegroundColor Yellow
-Write-Host "Do NOT upload the JKS or recovery file to GitHub, cloud drives, chat groups, or public sharing." -ForegroundColor Yellow
-Write-Host ""
-Write-Host "Next: GitHub -> Actions -> Android Stable Signed Release -> Run workflow." -ForegroundColor Cyan
+Write-Host "PERMANENT SIGNING KEY UPLOADED." -ForegroundColor Green
+Write-Host "Do not delete the private offline backup." -ForegroundColor Yellow
+Write-Host "Future releases must keep using this exact same key." -ForegroundColor Yellow
