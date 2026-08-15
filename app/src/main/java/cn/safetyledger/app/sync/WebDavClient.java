@@ -60,7 +60,7 @@ public final class WebDavClient {
             authorization = "SafetyLedger " + pairingProof(syncSpace, syncPassword);
         }
         else authorization = "";
-        pairingSpace = syncSpace == null ? "" : syncSpace;
+        pairingSpace = wireSpace(syncSpace);
     }
 
     public SyncProvider.ConnectionResult testReadWrite(String space) {
@@ -187,7 +187,20 @@ public final class WebDavClient {
         }
     }
 
-    private String spaceUrl(String space) { return endpoint + segment(space) + "/"; }
+    /**
+     * HTTP header values must be ASCII. Keep existing simple ASCII space names unchanged
+     * for backward compatibility, and encode names containing Chinese, spaces or other
+     * unsafe characters into a deterministic URL-safe namespace used by both the header
+     * and the WebDAV path.
+     */
+    static String wireSpace(String value) {
+        String space = value == null ? "" : value.trim();
+        if (space.matches("[A-Za-z0-9._-]+")) return space;
+        return "u-" + Base64.getUrlEncoder().withoutPadding()
+                .encodeToString(space.getBytes(StandardCharsets.UTF_8));
+    }
+
+    private String spaceUrl(String space) { return endpoint + segment(wireSpace(space)) + "/"; }
     private String devicesUrl(String space) { return spaceUrl(space) + "devices/"; }
     private String fileUrl(String space, String name) { return devicesUrl(space) + segment(name); }
     private String segment(String value) {
