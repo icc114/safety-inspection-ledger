@@ -102,10 +102,24 @@ p.write_text(t,encoding='utf-8')
 p=Path('app/src/main/java/cn/safetyledger/app/MainActivity.java')
 t=p.read_text(encoding='utf-8')
 t=t.replace('import android.provider.MediaStore;','import android.provider.MediaStore;\nimport android.text.InputFilter;')
+t=t.replace('''        TextView title = Ui.text(this, model.templateName + "记录表", 23, true);''',
+'''        TextView title = Ui.text(this, formTitle(model.templateName), 23, true);''')
 t=t.replace('''            EditText problem = Ui.input(this, "请填写发现的问题和整改要求");
             problem.setText(item.problem);''','''            EditText problem = Ui.input(this, "请填写发现的问题和整改要求（最多40字）");
             problem.setFilters(new InputFilter[]{new InputFilter.LengthFilter(40)});
             problem.setText(item.problem);''')
+# Add helper before the final class brace.
+insert='''
+    private String formTitle(String value) {
+        String name = value == null || value.isBlank() ? "安全检查" : value.trim();
+        if (name.endsWith("记录表")) return name;
+        if (name.endsWith("记录")) return name + "表";
+        return name + "记录表";
+    }
+'''
+idx=t.rfind('\n}')
+if idx<0: raise SystemExit('MainActivity class end not found')
+t=t[:idx]+insert+t[idx:]
 p.write_text(t,encoding='utf-8')
 
 # Rectification confirmation becomes a real square checkbox; cap rectification text to the PDF summary area.
@@ -114,11 +128,24 @@ t=p.read_text(encoding='utf-8')
 t=t.replace('import android.provider.MediaStore;','import android.provider.MediaStore;\nimport android.text.InputFilter;')
 t=t.replace('import android.widget.Switch;','import android.widget.CheckBox;')
 t=t.replace('private Switch confirmed;','private CheckBox confirmed;')
+t=t.replace('''        TextView title = Ui.text(this, model.templateName + "记录表", 22, true);''',
+'''        TextView title = Ui.text(this, formTitle(model.templateName), 22, true);''')
 t=t.replace('''        rectification = Ui.input(this, "填写具体整改情况");
         rectification.setText(model.rectification);''','''        rectification = Ui.input(this, "填写具体整改情况（最多70字）");
         rectification.setFilters(new InputFilter[]{new InputFilter.LengthFilter(70)});
         rectification.setText(model.rectification);''')
 t=t.replace('confirmed = new Switch(this);','confirmed = new CheckBox(this);')
+insert='''
+    private String formTitle(String value) {
+        String name = value == null || value.isBlank() ? "安全检查" : value.trim();
+        if (name.endsWith("记录表")) return name;
+        if (name.endsWith("记录")) return name + "表";
+        return name + "记录表";
+    }
+'''
+idx=t.rfind('\n}')
+if idx<0: raise SystemExit('RecordDetailActivity class end not found')
+t=t[:idx]+insert+t[idx:]
 p.write_text(t,encoding='utf-8')
 
 # Stable A4 row slots: adding the 9th item no longer makes the first eight rows suddenly smaller.
@@ -132,7 +159,6 @@ t=t.replace('''        int itemCount = Math.max(1, record.items.size());
         int layoutRows = record.items.isEmpty() ? 1 : Math.max(FORM_ITEM_SLOTS, itemCount);
         float itemArea = detailY - y;
         float itemHeight = itemArea / layoutRows;''')
-# Fill unused slots so every <=9-item template uses the same row height and full table height.
 needle='''                y += itemHeight;
             }
         }
@@ -152,7 +178,45 @@ replacement='''                y += itemHeight;
 if needle not in t:
     raise SystemExit('PdfExporter item-loop anchor not found')
 t=t.replace(needle,replacement,1)
+t=t.replace('''        return value.endsWith("记录表") ? value : value + "记录表";''','''        if (value.endsWith("记录表")) return value;
+        if (value.endsWith("记录")) return value + "表";
+        return value + "记录表";''')
 t=t.replace('''                ? "已整改完成" : "尚未确认完成";''','''                ? "☑ 已整改完成" : "□ 尚未确认完成";''')
 p.write_text(t,encoding='utf-8')
 
-print('Fixed Android 1.2.18 build; added A4 template limits, stable 9-row layout and checkbox rectification')
+# Keep editable PC Word output aligned with the Android first-page A4 contract.
+p=Path('desktop/src/main/java/cn/safetyledger/pc/WordExporter.java')
+t=p.read_text(encoding='utf-8')
+t=t.replace('public static final int LAYOUT_VERSION = 2;','public static final int LAYOUT_VERSION = 3;')
+t=t.replace('''        int itemCount = Math.max(1, record.items == null ? 0 : record.items.size());
+        XWPFTable table = table(doc, itemCount + 1, 5, widths);''','''        int realCount = record.items == null ? 0 : record.items.size();
+        int itemCount = Math.max(1, realCount);
+        int layoutRows = realCount == 0 ? 1 : Math.max(9, realCount);
+        XWPFTable table = table(doc, layoutRows + 1, 5, widths);''')
+t=t.replace('''        int rowHeight = 10200 / itemCount;''','''        int rowHeight = 10200 / layoutRows;''')
+t=t.replace('''        for (int r = 0; r < record.items.size(); r++) {
+            ArchiveService.Item item = record.items.get(r);''','''        for (int r = 0; r < record.items.size(); r++) {
+            ArchiveService.Item item = record.items.get(r);''')
+# Blank rows are already created by the table; make their height explicit after real rows.
+needle='''            cell(row.getCell(4), blank(item.problem, ""), itemFont, false, ParagraphAlignment.LEFT);
+        }
+    }
+'''
+replacement='''            cell(row.getCell(4), blank(item.problem, ""), itemFont, false, ParagraphAlignment.LEFT);
+        }
+        for (int r = record.items.size(); r < layoutRows; r++) exactRow(table.getRow(r + 1), rowHeight);
+    }
+'''
+if needle not in t: raise SystemExit('WordExporter item loop anchor not found')
+t=t.replace(needle,replacement,1)
+t=t.replace('''        return value.endsWith("记录表") ? value : value + "记录表";''','''        if (value.endsWith("记录表")) return value;
+        if (value.endsWith("记录")) return value + "表";
+        return value + "记录表";''')
+t=t.replace('''? "已整改完成" : "尚未确认完成";''','''? "☑ 已整改完成" : "□ 尚未确认完成";''')
+p.write_text(t,encoding='utf-8')
+
+# Make CI artifact names match the actual Android version.
+for workflow in ['.github/workflows/android-build.yml','.github/workflows/android-release.yml']:
+    p=Path(workflow); t=p.read_text(encoding='utf-8').replace('1.2.17','1.2.18'); p.write_text(t,encoding='utf-8')
+
+print('Fixed Android 1.2.18 build; added A4 template limits, stable 9-row layout, checkbox rectification and consistent record titles')
