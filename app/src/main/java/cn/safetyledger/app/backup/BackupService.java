@@ -25,6 +25,9 @@ public final class BackupService{
             Properties manifest=new Properties();
             manifest.setProperty("format","safetydata");
             manifest.setProperty("formatVersion","1");
+            manifest.setProperty("container","safety-ledger-portable");
+            manifest.setProperty("appPackage","cn.safetyledger.app");
+            manifest.setProperty("portableCompatibility","android-windows");
             manifest.setProperty("schemaVersion",String.valueOf(LedgerDatabase.VERSION));
             manifest.setProperty("createdAt",String.valueOf(System.currentTimeMillis()));
             manifest.setProperty("databaseSha256",sha(dbFile));

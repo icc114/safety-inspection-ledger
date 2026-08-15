@@ -12,7 +12,7 @@ public final class Entities {
         public String id,templateId,category,content,standard; public int order; public boolean active;
     }
     public static final class Inspection {
-        public String id,templateId,templateName,date,time,type,unit,location,onDuty,inspector1,inspector2,inspectee,conclusion,advice,responsible,deadline,rectification,recheck,status;
+        public String id,templateId,templateName,date,time,type,unit,location,onDuty,inspector1,inspector2,inspectee,conclusion,advice,responsible,deadline,rectification,recheck,status,deviceId;
         public long createdAt,updatedAt; public Long deletedAt; public final List<InspectionItem> items=new ArrayList<>(); public final List<Media> media=new ArrayList<>();
     }
     public static final class InspectionItem {

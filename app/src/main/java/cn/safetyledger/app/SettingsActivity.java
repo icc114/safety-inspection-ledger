@@ -101,8 +101,13 @@ public final class SettingsActivity extends Activity {
         card.setPadding(Ui.dp(this, 12), Ui.dp(this, 10), Ui.dp(this, 12), Ui.dp(this, 10));
         card.addView(Ui.sectionTitle(this, "1", "检查基础设置", "模板、检查类别和检查项目"));
         card.addView(Ui.gap(this, 5));
-        card.addView(menuRow("检查模板管理", "新建、编辑、停用模板及调整检查项目", () ->
-                Ui.start(this, TemplateActivity.class)));
+        card.addView(menuRow("检查模板管理", "新建、编辑、停用模板及调整检查项目", () -> {
+            if ("FIELD".equals(repo.setting("device_role", "PRIMARY"))) {
+                Ui.toast(this, "工作人员设备只能使用已同步模板，模板维护请由管理员设备完成");
+            } else {
+                Ui.start(this, TemplateActivity.class);
+            }
+        }));
         card.addView(Ui.divider(this));
         card.addView(menuRow("回收站", "恢复误删记录或使用密码永久删除", () ->
                 Ui.start(this, TrashActivity.class)));
@@ -322,10 +327,19 @@ public final class SettingsActivity extends Activity {
                 syncEnabledStatus.setTextColor(Ui.DANGER);
                 syncStatus.setText("同步状态：请重新输入同步密码，然后点击保存并启用");
                 if (syncSaveButton != null) syncSaveButton.setText("保存并启用");
+                secret.setText("");
+                token.setText("");
+                encryption.setText("");
+                secret.setHint("WebDAV / NAS 登录密码");
+                token.setHint("Cloudflare 设备 Token / Bearer Token");
+                encryption.setHint("同步密码（至少 8 位）");
+                space.setText(cursor.getString(5));
+                repo.putSetting("last_sync_error", "");
                 new AlertDialog.Builder(this)
                         .setTitle("本机安全密钥已重置")
-                        .setMessage("手机系统使旧的本机加密密钥失效。APP 已自动清理无法解密的云端凭据；检查记录、照片、签名和模板均未删除。请重新输入同步密码后点击“保存并启用”。")
+                        .setMessage("手机系统使旧的本机加密密钥失效。APP 已自动清理无法解密的云端凭据；检查记录、照片、签名和模板均未删除。服务地址和同步空间名称已保留，请重新输入同步密码后点击“保存并启用”。")
                         .setPositiveButton("知道了", null).show();
+                return;
             }
             secret.setText("");
             token.setText("");
@@ -738,7 +752,10 @@ public final class SettingsActivity extends Activity {
             while (cursor.moveToNext()) {
                 ids.add(cursor.getString(0));
                 roles.add(cursor.getString(2));
-                labels.add(cursor.getString(1) + "\n" + roleName(cursor.getString(2)));
+                String seen = DateFormat.getDateTimeInstance(DateFormat.SHORT, DateFormat.SHORT)
+                        .format(new Date(cursor.getLong(3)));
+                labels.add(cursor.getString(1) + "\n" + roleName(cursor.getString(2))
+                        + " · 最后同步 " + seen);
             }
         }
         if (ids.isEmpty()) {
