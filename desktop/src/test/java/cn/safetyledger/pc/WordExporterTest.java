@@ -1,6 +1,7 @@
 package cn.safetyledger.pc;
 
 import org.apache.poi.xwpf.usermodel.XWPFDocument;
+import org.apache.poi.xwpf.usermodel.XWPFTableRow;
 import org.junit.jupiter.api.Test;
 
 import java.nio.file.Files;
@@ -42,8 +43,8 @@ class WordExporterTest {
 
                 // Header + nine fixed item slots. Adding the ninth item must not shrink earlier rows.
                 assertEquals(10, doc.getTables().get(1).getRows().size());
-                assertTrue(doc.getTables().get(1).getRow(1).getText().contains("灭火器是否完好"));
-                assertTrue(doc.getTables().get(1).getRow(9).getText().isBlank());
+                assertTrue(rowText(doc.getTables().get(1).getRow(1)).contains("灭火器是否完好"));
+                assertTrue(rowText(doc.getTables().get(1).getRow(9)).isBlank());
 
                 assertTrue(doc.getTables().get(2).getText().contains("检查情况："));
                 assertTrue(doc.getTables().get(2).getText().contains("整改意见："));
@@ -52,5 +53,11 @@ class WordExporterTest {
                 assertTrue(doc.getFooterList().stream().anyMatch(f -> f.getText().contains("第1页/共3页")));
             }
         } finally { Files.deleteIfExists(out); }
+    }
+
+    private static String rowText(XWPFTableRow row) {
+        StringBuilder out = new StringBuilder();
+        row.getTableCells().forEach(cell -> out.append(cell.getText()));
+        return out.toString();
     }
 }
