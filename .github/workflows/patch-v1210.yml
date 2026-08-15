@@ -19,7 +19,9 @@ jobs:
         with:
           fetch-depth: 0
       - name: Apply v1.2.10 patch
-        run: python3 tools/patch_v1210.py
+        run: |
+          python3 tools/patch_v1210.py
+          python3 tools/fix_v1210_strings.py
       - name: Set up Java 17
         uses: actions/setup-java@v4
         with:
