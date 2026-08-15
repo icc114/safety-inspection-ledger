@@ -31,7 +31,6 @@ public final class PdfExporter {
     private static final int WIDTH = 595;
     private static final int HEIGHT = 842;
     private static final int MARGIN = 24;
-    private static final int FORM_ITEM_SLOTS = 12;
     private final Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final LedgerRepository repo;
 
@@ -133,7 +132,9 @@ public final class PdfExporter {
         final float signatureY = HEIGHT - 31 - signatureHeight;
         final float detailY = signatureY - detailHeight;
         int itemCount = Math.max(1, record.items.size());
-        int layoutRows = record.items.isEmpty() ? 1 : Math.max(FORM_ITEM_SLOTS, itemCount);
+        // Only render the inspection items actually present in this record.
+        // Templates may contain up to 12 items, but unused blank rows never appear in the formal PDF.
+        int layoutRows = itemCount;
         float itemArea = detailY - y;
         float itemHeight = itemArea / layoutRows;
         float font = Math.max(5.2f, Math.min(10.5f, itemHeight * .22f));
@@ -161,12 +162,6 @@ public final class PdfExporter {
                         result(item.result), font + .5f, Math.min(2, maximumLines), Paint.Align.CENTER);
                 fittedCell(canvas, columns[4], y, columns[5] - columns[4], itemHeight,
                         item.problem, font, 6.8f, Paint.Align.LEFT);
-                y += itemHeight;
-            }
-            for (int blank = record.items.size(); blank < FORM_ITEM_SLOTS; blank++) {
-                for (int column = 0; column < columns.length - 1; column++) {
-                    rect(canvas, columns[column], y, columns[column + 1] - columns[column], itemHeight);
-                }
                 y += itemHeight;
             }
         }
