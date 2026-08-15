@@ -1,0 +1,55 @@
+name: Commit Android 1.2.21 dynamic PDF source
+
+on:
+  push:
+    branches:
+      - agent/v1220-complete-android-pc
+
+permissions:
+  contents: write
+
+jobs:
+  commit-source:
+    if: contains(github.event.head_commit.message, 'Commit Android 1.2.21 dynamic PDF source')
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Apply 1.2.21 source changes
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          def rep(path, old, new):
+              p = Path(path)
+              s = p.read_text(encoding='utf-8')
+              if old not in s:
+                  raise SystemExit(f'missing expected text in {path}: {old[:160]!r}')
+              p.write_text(s.replace(old, new), encoding='utf-8')
+
+          p='app/src/main/java/cn/safetyledger/app/pdf/PdfExporter.java'
+          rep(p, '    private static final int FORM_ITEM_SLOTS = 12;\n', '')
+          rep(p,
+              '        int itemCount = Math.max(1, record.items.size());\n        int layoutRows = record.items.isEmpty() ? 1 : Math.max(FORM_ITEM_SLOTS, itemCount);',
+              '        int itemCount = Math.max(1, record.items.size());\n        // Only render the inspection items actually present in this record.\n        // Templates may contain up to 12 items, but unused blank rows never appear in the formal PDF.\n        int layoutRows = itemCount;')
+          rep(p,
+              '            for (int blank = record.items.size(); blank < FORM_ITEM_SLOTS; blank++) {\n                for (int column = 0; column < columns.length - 1; column++) {\n                    rect(canvas, columns[column], y, columns[column + 1] - columns[column], itemHeight);\n                }\n                y += itemHeight;\n            }\n',
+              '')
+
+          rep('app/build.gradle', 'versionCode 23', 'versionCode 24')
+          rep('app/build.gradle', "versionName '1.2.20'", "versionName '1.2.21'")
+
+          Path('docs/release-1.2.21.md').write_text('''# Android 1.2.21\n\n- 模板仍允许最多 12 个检查项目。\n- 正式 PDF 只绘制当前记录实际存在的检查项目，不再为 12 项上限补空白单元格。\n- 实际 8 项显示 8 行，9 项显示 9 行，最多 12 行。\n- 整改意见、整改记录和三方签名仍保留在 A4 第1页；照片继续从第2页开始。\n''', encoding='utf-8')
+          PY
+      - name: Commit and push source
+        shell: bash
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add app/build.gradle app/src/main/java/cn/safetyledger/app/pdf/PdfExporter.java docs/release-1.2.21.md
+          git commit -m 'Android 1.2.21 dynamic PDF item rows'
+          git push origin HEAD:agent/v1220-complete-android-pc
