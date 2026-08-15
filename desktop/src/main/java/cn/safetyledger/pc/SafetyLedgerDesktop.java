@@ -51,7 +51,7 @@ public final class SafetyLedgerDesktop extends JFrame {
     private void chooseArchive(){JFileChooser chooser=new JFileChooser(config.archiveRoot);chooser.setFileSelectionMode(JFileChooser.DIRECTORIES_ONLY);chooser.setDialogTitle("选择安全检查台账本地资料库");if(chooser.showOpenDialog(this)==JFileChooser.APPROVE_OPTION)archive.setText(chooser.getSelectedFile().toPath().toString());}
     private void openArchive(){try{if(!saveConfig())return;Desktop.getDesktop().open(config.archivePath().toFile());}catch(Exception e){showError("打开资料库失败",e);}}
 
-    private void testConnection(){if(!saveConfig())return;runTask("正在测试云端读写…",()->{CloudClient client=new CloudClient(config.endpoint,config.space,config.password.toCharArray());client.testReadWrite();client.registerPcDevice(config.deviceId,config.deviceName);return "连接成功；本电脑已登记到设备管理";},null);}
+    private void testConnection(){if(!saveConfig())return;runTask("正在测试云端读写…",()->{CloudClient client=new CloudClient(config.endpoint,config.space,config.password.toCharArray());client.testReadWrite();if(client.isDeviceLoggedOut(config.deviceId))throw new SecurityException("此电脑已被管理员登出；请先在管理员手机中允许该设备重新加入");client.registerPcDevice(config.deviceId,config.deviceName);return "连接成功；本电脑已登记到设备管理";},null);}
 
     private void sync(boolean manual){
         synchronized(syncLock){if(syncing){if(manual)setStatus("已有同步正在进行");return;}syncing=true;}
@@ -62,7 +62,7 @@ public final class SafetyLedgerDesktop extends JFrame {
                 if(config.endpoint.isBlank()||config.password.isBlank())return;
                 Files.createDirectories(config.privateDir());Path cache=config.privateDir().resolve("cloud-cache");Files.createDirectories(cache);
                 Properties fingerprints=load(config.privateDir().resolve("cloud-fingerprints.properties"));
-                CloudClient client=new CloudClient(config.endpoint,config.space,config.password.toCharArray());client.prepare();client.registerPcDevice(config.deviceId,config.deviceName);
+                CloudClient client=new CloudClient(config.endpoint,config.space,config.password.toCharArray());client.prepare();if(client.isDeviceLoggedOut(config.deviceId))throw new SecurityException("此电脑已被管理员登出；请先在管理员手机中允许该设备重新加入");client.registerPcDevice(config.deviceId,config.deviceName);
                 List<String> names=client.listSnapshots();ArchiveService archiveService=new ArchiveService(config.archivePath());int changed=0,records=0;
                 for(int i=0;i<names.size();i++){
                     String name=names.get(i);String fp=client.fingerprint(name);Path local=cache.resolve(safeFile(name));boolean needs=!fp.equals(fingerprints.getProperty(name,""))||!Files.isRegularFile(local);

@@ -84,10 +84,27 @@ public final class CloudClient {
         if (response.statusCode() / 100 != 2) throw new IOException("下载云端检查内容失败：HTTP " + response.statusCode());
     }
 
+    public boolean isDeviceLoggedOut(String deviceId) throws Exception {
+        HttpResponse<byte[]> response = send("GET", controlFileUrl(deviceId + ".logout"), HttpRequest.BodyPublishers.noBody(), null, HttpResponse.BodyHandlers.ofByteArray());
+        if (response.statusCode() == 404) return false;
+        if (response.statusCode() / 100 == 2) return true;
+        throw failure("无法读取电脑设备登出状态", response.statusCode(), response.body());
+    }
+
     public void registerPcDevice(String deviceId, String displayName) throws Exception {
+        String role = existingDeviceRole(deviceId);
         long now = System.currentTimeMillis();
-        String json = "{\"version\":1,\"deviceId\":\"" + escapeJson(deviceId) + "\",\"displayName\":\"" + escapeJson(displayName) + "\",\"role\":\"FIELD\",\"lastSeenAt\":" + now + ",\"updatedAt\":" + now + ",\"platform\":\"WINDOWS\"}";
+        String json = "{\"version\":1,\"deviceId\":\"" + escapeJson(deviceId) + "\",\"displayName\":\"" + escapeJson(displayName) + "\",\"role\":\"" + role + "\",\"lastSeenAt\":" + now + ",\"updatedAt\":" + now + ",\"platform\":\"WINDOWS\"}";
         sendBytes("PUT", controlFileUrl(deviceId + ".device.json"), json.getBytes(StandardCharsets.UTF_8), null, 200,201,204);
+    }
+
+    private String existingDeviceRole(String deviceId) throws Exception {
+        HttpResponse<byte[]> response = send("GET", controlFileUrl(deviceId + ".device.json"), HttpRequest.BodyPublishers.noBody(), null, HttpResponse.BodyHandlers.ofByteArray());
+        if (response.statusCode() == 404) return "FIELD";
+        if (response.statusCode() / 100 != 2) throw failure("无法读取电脑设备信息", response.statusCode(), response.body());
+        String json = new String(response.body(), StandardCharsets.UTF_8);
+        Matcher matcher = Pattern.compile("\"role\"\s*:\s*\"(OWNER|ADMIN|FIELD|LOGGED_OUT)\"").matcher(json);
+        return matcher.find() ? matcher.group(1) : "FIELD";
     }
 
     private void mkcol(URI uri) throws Exception {

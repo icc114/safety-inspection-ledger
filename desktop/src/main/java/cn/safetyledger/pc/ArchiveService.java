@@ -66,7 +66,13 @@ public final class ArchiveService {
         for (Map.Entry<String,Long> deleted : collectedTombstones.entrySet()) {
             String relative = index.getProperty(deleted.getKey() + ".path", "");
             if (relative.isBlank()) continue;
+            long newestRecord = longValue(index.getProperty(deleted.getKey() + ".updated"), -1);
             Path oldFolder = root.resolve(relative).normalize();
+            // A later administrator restore must win over an older deletion marker from a stale peer.
+            if (newestRecord > deleted.getValue()) {
+                if (oldFolder.startsWith(root)) Files.deleteIfExists(oldFolder.resolve("已从移动端删除.txt"));
+                continue;
+            }
             if (!oldFolder.startsWith(root) || !Files.isDirectory(oldFolder)) continue;
             Files.writeString(oldFolder.resolve("已从移动端删除.txt"),
                     "该记录已从移动端同步删除，但电脑本地资料库保留历史副本。\n删除时间："
