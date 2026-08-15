@@ -57,6 +57,7 @@ public class MainActivity extends Activity {
     private Spinner templateSpinner;
     private List<Template> activeTemplates;
     private boolean bindingTemplate;
+    private boolean deletingDraft;
     private final Map<String, EditText> fields = new HashMap<>();
     private final Map<String, EditText> problemFields = new HashMap<>();
     private final Map<String, LinearLayout> problemAreas = new HashMap<>();
@@ -123,6 +124,12 @@ public class MainActivity extends Activity {
         save.setOnClickListener(view -> save());
         content.addView(save, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT,
                 Ui.dp(this, 52)));
+        content.addView(Ui.gap(this, 8));
+        Button deleteDraft = Ui.dangerButton(this, "删除草稿（移入回收站）");
+        deleteDraft.setTextSize(15);
+        deleteDraft.setOnClickListener(view -> confirmDeleteDraft());
+        content.addView(deleteDraft, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT,
+                Ui.dp(this, 48)));
         root.addView(content);
         scroll.addView(root);
         setContentView(scroll);
@@ -544,6 +551,27 @@ public class MainActivity extends Activity {
         return fields.get(key).getText().toString().trim();
     }
 
+    private void confirmDeleteDraft() {
+        syncFields();
+        new AlertDialog.Builder(this)
+                .setTitle("删除草稿")
+                .setMessage("该草稿将移入回收站，包含已填写的检查结果、问题、照片和签名。误删后可在“基础设置 → 回收站”恢复。")
+                .setPositiveButton("删除草稿", (dialog, which) -> {
+                    deletingDraft = true;
+                    repo.saveInspection(model);
+                    repo.softDelete(model.id);
+                    if (model.id.equals(repo.setting("current_draft", ""))) {
+                        repo.putSetting("current_draft", "");
+                    }
+                    Ui.toast(this, "草稿已移入回收站");
+                    startActivity(new Intent(this, LedgerActivity.class)
+                            .addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP | Intent.FLAG_ACTIVITY_SINGLE_TOP));
+                    finish();
+                })
+                .setNegativeButton("取消", null)
+                .show();
+    }
+
     private void save() {
         syncFields();
         boolean incomplete = false;
@@ -581,7 +609,7 @@ public class MainActivity extends Activity {
 
     @Override
     protected void onPause() {
-        if (model != null && "DRAFT".equals(model.status)) {
+        if (!deletingDraft && model != null && "DRAFT".equals(model.status)) {
             try {
                 syncFields();
                 repo.saveInspection(model);
