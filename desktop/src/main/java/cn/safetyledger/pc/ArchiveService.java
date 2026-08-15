@@ -28,8 +28,10 @@ public final class ArchiveService {
         Class.forName("org.sqlite.JDBC");
         Properties index = load(indexFile);
         List<Record> exported = new ArrayList<>();
+        Map<String,Long> collectedTombstones = new HashMap<>();
         try (Connection db = DriverManager.getConnection("jdbc:sqlite:" + pkg.database.toAbsolutePath())) {
             Map<String,Long> tombstones = tombstones(db);
+            collectedTombstones.putAll(tombstones);
             Map<String,Integer> sequence = dailySequence(db);
             try (PreparedStatement ps = db.prepareStatement("SELECT * FROM inspections WHERE status<>'DRAFT' ORDER BY inspection_date,inspection_time,created_at"); ResultSet rs = ps.executeQuery()) {
                 while (rs.next()) {
@@ -57,6 +59,19 @@ public final class ArchiveService {
                     exported.add(record);
                 }
             }
+        }
+        // A synchronized Android snapshot may contain only the tombstone after the business
+        // row has already been physically removed. Preserve the Windows archive and mark its
+        // existing folder instead of silently losing the deletion state.
+        for (Map.Entry<String,Long> deleted : collectedTombstones.entrySet()) {
+            String relative = index.getProperty(deleted.getKey() + ".path", "");
+            if (relative.isBlank()) continue;
+            Path oldFolder = root.resolve(relative).normalize();
+            if (!oldFolder.startsWith(root) || !Files.isDirectory(oldFolder)) continue;
+            Files.writeString(oldFolder.resolve("已从移动端删除.txt"),
+                    "该记录已从移动端同步删除，但电脑本地资料库保留历史副本。\n删除时间："
+                            + Instant.ofEpochMilli(deleted.getValue()).atZone(ZoneId.systemDefault()) + "\n",
+                    StandardCharsets.UTF_8, StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING);
         }
         store(indexFile, index);
         return exported;
@@ -129,10 +144,10 @@ public final class ArchiveService {
 
     public static final class Record {
         public String id="",templateName="",date="",time="",type="",location="",status="",rectification="",recheck="";public long updatedAt;public int sequence;public boolean deleted;
-        public final List<Item> items=new ArrayList<>();public final List<Media> media=new ArrayList<>();public final Map<String,Path> signatures=new LinkedHashMap<>();
+        public final List<Item> items=new ArrayList<>();public final List<Media> media=new ArrayList<>();public final transient Map<String,Path> signatures=new LinkedHashMap<>();
         public Path signature(String role){return signatures.get(role);}
     }
     public static final class Item { public String category="",content="",standard="",result="",problem="";public int order; }
-    public static final class Media { public String id="",category="",location="";public long capturedAt;public Path source; }
+    public static final class Media { public String id="",category="",location="";public long capturedAt;public transient Path source; }
     public static final class IndexEntry { public final String id,date,time,title,location,status;public final Path folder;IndexEntry(String id,String date,String time,String title,String location,String status,Path folder){this.id=id;this.date=date;this.time=time;this.title=title;this.location=location;this.status=status;this.folder=folder;} }
 }
