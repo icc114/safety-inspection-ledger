@@ -1,0 +1,45 @@
+name: Finalize PC device security
+
+on:
+  push:
+    branches: [agent/v1216-pc-client]
+    paths:
+      - 'tools/finalize_pc_security.py'
+      - '.github/workflows/finalize-pc-security.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  finalize:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/v1216-pc-client
+      - name: Apply final PC changes
+        run: python tools/finalize_pc_security.py
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: maven
+      - name: Test and package
+        run: mvn -B -f desktop/pom.xml test package
+      - name: Build Windows app image
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path desktop/target/jpackage-input | Out-Null
+          Copy-Item desktop/target/safety-ledger-pc-0.1.0-all.jar desktop/target/jpackage-input/
+          jpackage --type app-image --name SafetyLedgerPC --app-version 0.1.0 --vendor "Safety Ledger" --input desktop/target/jpackage-input --main-jar safety-ledger-pc-0.1.0-all.jar --main-class cn.safetyledger.pc.SafetyLedgerDesktop --dest desktop/target/windows
+      - name: Commit verified PC source
+        shell: bash
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add desktop
+          git commit -m 'Respect PC logout roles and restored records' || exit 0
+          git push origin HEAD:agent/v1216-pc-client
