@@ -1,0 +1,52 @@
+name: Build Android 1.2.22 adaptive PDF
+
+on:
+  push:
+    branches:
+      - agent/v1220-complete-android-pc
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    if: contains(github.event.head_commit.message, 'Run Android 1.2.22 adaptive PDF build')
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Patch source
+        run: python tools/patch_v1222_adaptive_pdf.py
+      - name: Commit source
+        shell: bash
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add app/build.gradle app/src/main/java/cn/safetyledger/app/pdf/PdfExporter.java docs/release-1.2.22.md
+          git commit -m 'Android 1.2.22 adaptive A4 PDF layout'
+          git push origin HEAD:agent/v1220-complete-android-pc
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: gradle
+      - uses: android-actions/setup-android@v3
+      - name: Install Android SDK
+        run: sdkmanager 'platform-tools' 'platforms;android-35' 'build-tools;35.0.0'
+      - run: chmod +x gradlew
+      - name: Test lint and build release APK
+        run: ./gradlew --no-daemon testDebugUnitTest lintDebug assembleRelease
+      - name: Stage unsigned APK
+        shell: bash
+        run: |
+          test -f app/build/outputs/apk/release/app-release-unsigned.apk
+          cp app/build/outputs/apk/release/app-release-unsigned.apk '安全检查台账-1.2.22-待永久签名.apk'
+      - uses: actions/upload-artifact@v4
+        with:
+          name: safety-ledger-1.2.22-unsigned
+          path: 安全检查台账-1.2.22-待永久签名.apk
+          if-no-files-found: error
+          retention-days: 30
