@@ -95,8 +95,7 @@ public final class BackupService{
         String path=p.database.getAbsolutePath().replace("'","''");
         int changed=0;
         String[] tables={"templates","template_items","inspections","inspection_items","media",
-                "signatures","app_settings","sync_providers","tombstones",
-                "archive_index","holiday_cache"};
+                "signatures","tombstones","archive_index","holiday_cache"};
         d.execSQL("ATTACH DATABASE '"+path+"' AS incoming");
         d.beginTransaction();
         try{

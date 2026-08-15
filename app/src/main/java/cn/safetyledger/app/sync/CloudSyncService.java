@@ -67,11 +67,10 @@ public final class CloudSyncService {
             // space is FIELD until an existing OWNER/ADMIN explicitly promotes it.
             registerCurrentDevice(deviceId, emptyCloud);
 
-            // Publish presence first. Previously a bad/stale peer snapshot could fail before the
-            // new device ever uploaded anything, so the administrator could never see/manage it.
+            // Device presence/roles now use the independent device-control channel. Content sync
+            // therefore downloads/merges first and uploads only once at the end, avoiding the old
+            // double-upload of every photo-heavy .safetydata snapshot.
             BackupService backup = new BackupService(context);
-            progress(listener, "正在准备本机检查内容…");
-            uploadSnapshot(backup, client, config, deviceId);
 
             int peers = 0;
             int changed = 0;
@@ -106,7 +105,7 @@ public final class CloudSyncService {
                 }
             }
 
-            // Merged role data may contain an administrator's change for this device.
+            // Device roles are intentionally not transported by inspection-content snapshots.
             registerCurrentDevice(deviceId, emptyCloud);
             if (client.isDeviceLoggedOut(config.space, deviceId)
                     || "LOGGED_OUT".equals(deviceRole(deviceId))) {
