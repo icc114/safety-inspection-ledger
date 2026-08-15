@@ -36,13 +36,13 @@ jobs:
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force -Path desktop/target/jpackage-input | Out-Null
-          Copy-Item desktop/target/safety-ledger-pc-0.1.0-all.jar desktop/target/jpackage-input/
-          jpackage --type app-image --name SafetyLedgerPC --app-version 0.1.0 --vendor "Safety Ledger" --input desktop/target/jpackage-input --main-jar safety-ledger-pc-0.1.0-all.jar --main-class cn.safetyledger.pc.SafetyLedgerDesktop --dest desktop/target/windows
-          Compress-Archive -Path desktop/target/windows/SafetyLedgerPC -DestinationPath "desktop/target/安全检查台账-PC-0.1.0-Windows.zip" -Force
+          Copy-Item desktop/target/safety-ledger-pc-0.1.1-all.jar desktop/target/jpackage-input/
+          jpackage --type app-image --name SafetyLedgerPC --app-version 0.1.1 --vendor "Safety Ledger" --input desktop/target/jpackage-input --main-jar safety-ledger-pc-0.1.1-all.jar --main-class cn.safetyledger.pc.SafetyLedgerDesktop --dest desktop/target/windows
+          Compress-Archive -Path desktop/target/windows/SafetyLedgerPC -DestinationPath "desktop/target/安全检查台账-PC-0.1.1-Windows.zip" -Force
       - name: Upload Windows client
         uses: actions/upload-artifact@v4
         with:
-          name: 安全检查台账-PC-0.1.0-Windows
-          path: desktop/target/安全检查台账-PC-0.1.0-Windows.zip
+          name: 安全检查台账-PC-0.1.1-Windows
+          path: desktop/target/安全检查台账-PC-0.1.1-Windows.zip
           if-no-files-found: error
           retention-days: 30
