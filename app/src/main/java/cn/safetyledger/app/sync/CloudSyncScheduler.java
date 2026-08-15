@@ -9,8 +9,11 @@ public final class CloudSyncScheduler {
     public static final int PERIODIC_JOB_ID = 1142026;
     public static final int CHANGE_JOB_ID = 1142027;
     public static final int DEVICE_JOB_ID = 1142028;
+    public static final int TRASH_PERIODIC_JOB_ID = 1142029;
+    public static final int TRASH_SOON_JOB_ID = 1142030;
     private static final long TWO_HOURS = 2L * 60L * 60L * 1000L;
     private static final long DEVICE_INTERVAL = 30L * 60L * 1000L;
+    private static final long TRASH_INTERVAL = 15L * 60L * 1000L;
     private static final long CHANGE_DEBOUNCE = 90L * 1000L;
     private static final long CHANGE_DEADLINE = 5L * 60L * 1000L;
 
@@ -33,6 +36,20 @@ public final class CloudSyncScheduler {
                 .setPersisted(true)
                 .build();
         scheduler.schedule(devices);
+        JobInfo trash = new JobInfo.Builder(TRASH_PERIODIC_JOB_ID,
+                new ComponentName(context, CloudSyncJobService.class))
+                .setRequiredNetworkType(JobInfo.NETWORK_TYPE_ANY)
+                .setPeriodic(TRASH_INTERVAL)
+                .setPersisted(true)
+                .build();
+        scheduler.schedule(trash);
+    }
+
+    public static void scheduleTrashSoon(Context context) {
+        JobScheduler scheduler=context.getSystemService(JobScheduler.class);if(scheduler==null)return;
+        JobInfo job=new JobInfo.Builder(TRASH_SOON_JOB_ID,new ComponentName(context,CloudSyncJobService.class))
+                .setRequiredNetworkType(JobInfo.NETWORK_TYPE_ANY).setMinimumLatency(2_000L).setOverrideDeadline(30_000L).build();
+        scheduler.schedule(job);
     }
 
     /**
@@ -58,5 +75,7 @@ public final class CloudSyncScheduler {
         scheduler.cancel(PERIODIC_JOB_ID);
         scheduler.cancel(CHANGE_JOB_ID);
         scheduler.cancel(DEVICE_JOB_ID);
+        scheduler.cancel(TRASH_PERIODIC_JOB_ID);
+        scheduler.cancel(TRASH_SOON_JOB_ID);
     }
 }

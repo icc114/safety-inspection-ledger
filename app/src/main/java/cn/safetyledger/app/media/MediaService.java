@@ -282,6 +282,17 @@ public final class MediaService {
         }
     }
 
+    /** Releases only untouched source-photo duplicates; watermarked business JPEGs remain. */
+    public long releaseOriginalCopies(String inspectionId) {
+        File directory = mediaDir(inspectionId); long released = 0;
+        File[] files = directory.listFiles();
+        if (files != null) for (File file : files) {
+            if (!file.getName().endsWith("-original.bin")) continue;
+            long size=file.length(); if(file.delete()) released += size;
+        }
+        return released;
+    }
+
     public void deleteInspectionMedia(String inspectionId) {
         File directory = mediaDir(inspectionId);
         File[] files = directory.listFiles();

@@ -48,6 +48,8 @@ public final class LedgerRepository {
     public void softDelete(String id){long n=System.currentTimeMillis();raw().update("inspections",LedgerDatabase.values("deleted_at",n,"updated_at",n),"id=?",new String[]{id});queue("inspection",id,"DELETE");}
     public void restore(String id){long n=System.currentTimeMillis();raw().update("inspections",LedgerDatabase.values("deleted_at",null,"updated_at",n),"id=?",new String[]{id});queue("inspection",id,"UPSERT");}
     public void permanentDelete(String id){SQLiteDatabase d=raw();d.beginTransaction();try{d.delete("inspections","id=?",new String[]{id});tombstone("inspection",id);d.setTransactionSuccessful();}finally{d.endTransaction();}}
+    public void permanentDeleteAt(String id,long deletedAt){SQLiteDatabase d=raw();d.beginTransaction();try{d.delete("inspections","id=?",new String[]{id});d.execSQL("INSERT OR REPLACE INTO tombstones(entity_type,entity_id,deleted_at,synced_at) VALUES('inspection',?,?,NULL)",new Object[]{id,deletedAt});d.setTransactionSuccessful();}finally{d.endTransaction();}}
+    public void clearInspectionTombstone(String id){raw().delete("tombstones","entity_type='inspection' AND entity_id=?",new String[]{id});}
     public void clearInspectionTombstoneAndRestore(String id){
         long now=System.currentTimeMillis();SQLiteDatabase d=raw();d.beginTransaction();
         try{

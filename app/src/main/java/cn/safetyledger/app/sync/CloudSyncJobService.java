@@ -28,28 +28,31 @@ public final class CloudSyncJobService extends JobService {
         new Thread(() -> {
             boolean retry = false;
             boolean deviceJob = params.getJobId() == CloudSyncScheduler.DEVICE_JOB_ID;
+            boolean trashJob = params.getJobId() == CloudSyncScheduler.TRASH_PERIODIC_JOB_ID
+                    || params.getJobId() == CloudSyncScheduler.TRASH_SOON_JOB_ID;
             try {
                 CloudSyncService service = new CloudSyncService(this);
                 if (deviceJob) service.syncDeviceManagement();
+                else if (trashJob) service.syncTrashSignals();
                 else service.syncNow();
             } catch (OutOfMemoryError error) {
                 retry = false;
                 String message = "检查内容较大且当前系统内存不足，本次后台同步已安全停止。请稍后重试。";
-                repo.putSetting(deviceJob ? "last_device_sync_error" : "last_sync_error", message);
-                if (!deviceJob) notifyFailure(message);
+                repo.putSetting(deviceJob ? "last_device_sync_error" : trashJob ? "last_trash_sync_error" : "last_sync_error", message);
+                if (!deviceJob && !trashJob) notifyFailure(error, message);
             } catch (Exception error) {
-                String message = error.getMessage() == null ? error.getClass().getSimpleName()
-                        : error.getMessage();
+                String message = SyncErrorFormatter.format(error);
                 // A manual operation may meet its own background channel. That is not a failure.
                 if (!message.contains("同步正在运行")) {
                     retry = true;
-                    repo.putSetting(deviceJob ? "last_device_sync_error" : "last_sync_error", message);
-                    if (!deviceJob) notifyFailure(message);
+                    repo.putSetting(deviceJob ? "last_device_sync_error" : trashJob ? "last_trash_sync_error" : "last_sync_error", message);
+                    if (!deviceJob && !trashJob) notifyFailure(error, message);
                 }
             }
             jobFinished(params, retry);
-        }, params.getJobId() == CloudSyncScheduler.DEVICE_JOB_ID
-                ? "safety-ledger-device-sync" : "safety-ledger-content-sync").start();
+        }, params.getJobId() == CloudSyncScheduler.DEVICE_JOB_ID ? "safety-ledger-device-sync"
+                : (params.getJobId() == CloudSyncScheduler.TRASH_PERIODIC_JOB_ID
+                        || params.getJobId() == CloudSyncScheduler.TRASH_SOON_JOB_ID) ? "safety-ledger-trash-sync" : "safety-ledger-content-sync").start();
         return true;
     }
 
@@ -63,13 +66,13 @@ public final class CloudSyncJobService extends JobService {
         }
     }
 
-    private void notifyFailure(String message) {
+    private void notifyFailure(Throwable error, String message) {
         if (Build.VERSION.SDK_INT >= 33
                 && checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS)
                 != PackageManager.PERMISSION_GRANTED) return;
         Notification notification = new Notification.Builder(this, SafetyLedgerApp.SYNC_CHANNEL)
                 .setSmallIcon(R.drawable.ic_app)
-                .setContentTitle("安全检查台账同步失败")
+                .setContentTitle(SyncErrorFormatter.notificationTitle(error))
                 .setContentText(message)
                 .setStyle(new Notification.BigTextStyle().bigText(message))
                 .setAutoCancel(true)

@@ -10,17 +10,22 @@ public final class BackupService{
     private final Context context;public BackupService(Context c){context=c.getApplicationContext();}
     public void exportData(OutputStream destination,char[]password)throws Exception{
         if(password.length<8)throw new IllegalArgumentException("密码至少 8 位");
-        exportInternal(destination,password,MAGIC,true);
+        exportInternal(destination,password,MAGIC,true,null);
     }
     /** Cloud transport only needs the business JPEGs; untouched originals stay on the source phone. */
     public void exportCloudSnapshot(OutputStream destination,char[]password)throws Exception{
         if(password.length<8)throw new IllegalArgumentException("密码至少 8 位");
-        exportInternal(destination,password,MAGIC,false);
+        exportInternal(destination,password,MAGIC,false,null);
     }
     public void exportPortable(OutputStream destination)throws Exception{
-        exportInternal(destination,PORTABLE_KEY.clone(),PORTABLE_MAGIC,true);
+        exportInternal(destination,PORTABLE_KEY.clone(),PORTABLE_MAGIC,true,null);
     }
-    private void exportInternal(OutputStream destination,char[]password,byte[]magic,boolean includeOriginals)throws Exception{
+    public void exportInspectionRecovery(OutputStream destination,char[]password,String inspectionId)throws Exception{
+        if(password.length<8)throw new IllegalArgumentException("密码至少 8 位");
+        if(inspectionId==null||inspectionId.isBlank())throw new IllegalArgumentException("检查记录无效");
+        exportInternal(destination,password,MAGIC,false,inspectionId);
+    }
+    private void exportInternal(OutputStream destination,char[]password,byte[]magic,boolean includeOriginals,String onlyInspectionId)throws Exception{
         File tmp=File.createTempFile("safety-backup-",".zip",context.getCacheDir());
         try{
             LedgerDatabase h=((SafetyLedgerApp)context).db();
@@ -40,7 +45,8 @@ public final class BackupService{
                 entry(z,"manifest.properties",properties(manifest));
                 file(z,"database.sqlite",dbFile);
                 File media=new File(context.getFilesDir(),"business_media");
-                zipDir(z,media,"business_media/",includeOriginals);
+                if(onlyInspectionId==null) zipDir(z,media,"business_media/",includeOriginals);
+                else zipDir(z,new File(media,onlyInspectionId),"business_media/"+onlyInspectionId+"/",includeOriginals);
             }
             encrypt(tmp,destination,password,magic);
         }finally{

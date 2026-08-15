@@ -31,6 +31,7 @@ public final class PdfExporter {
     private static final int WIDTH = 595;
     private static final int HEIGHT = 842;
     private static final int MARGIN = 24;
+    private static final int FORM_ITEM_SLOTS = 9;
     private final Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final LedgerRepository repo;
 
@@ -132,8 +133,9 @@ public final class PdfExporter {
         final float signatureY = HEIGHT - 31 - signatureHeight;
         final float detailY = signatureY - detailHeight;
         int itemCount = Math.max(1, record.items.size());
+        int layoutRows = record.items.isEmpty() ? 1 : Math.max(FORM_ITEM_SLOTS, itemCount);
         float itemArea = detailY - y;
-        float itemHeight = itemArea / itemCount;
+        float itemHeight = itemArea / layoutRows;
         float font = Math.max(5.2f, Math.min(10.5f, itemHeight * .22f));
         int maximumLines = Math.max(1, (int) (itemHeight / (font * 1.2f)));
 
@@ -161,6 +163,12 @@ public final class PdfExporter {
                         item.problem, font, maximumLines, Paint.Align.LEFT);
                 y += itemHeight;
             }
+            for (int blank = record.items.size(); blank < FORM_ITEM_SLOTS; blank++) {
+                for (int column = 0; column < columns.length - 1; column++) {
+                    rect(canvas, columns[column], y, columns[column + 1] - columns[column], itemHeight);
+                }
+                y += itemHeight;
+            }
         }
 
         drawInspectionSummary(canvas, record, detailY, detailHeight);
@@ -185,7 +193,14 @@ public final class PdfExporter {
                                 + problems.size() + " 项。",
                 split + 6, y + 4, WIDTH - MARGIN - split - 12, 10, 2, Paint.Align.LEFT);
         text(canvas, MARGIN + 6, y + 49, "整改意见：", 11, Paint.Align.LEFT, true);
-        String details = problems.isEmpty() ? "无" : String.join("；", problems);
+        String details;
+        if (problems.isEmpty()) {
+            details = "无";
+        } else {
+            List<String> problemNumbers = new ArrayList<>();
+            for (InspectionItem item : record.items) if ("FAIL".equals(item.result)) problemNumbers.add(String.valueOf(item.order));
+            details = "第 " + String.join("、", problemNumbers) + " 项发现问题，具体问题及整改要求详见上表。";
+        }
         wrapped(canvas, details, split + 6, y + 36,
                 WIDTH - MARGIN - split - 12, 9, 3, Paint.Align.LEFT);
         if (!record.rectification.isBlank()) {
@@ -288,7 +303,9 @@ public final class PdfExporter {
 
     private String formTitle(Inspection record) {
         String value = record.templateName == null ? "安全检查" : record.templateName.trim();
-        return value.endsWith("记录表") ? value : value + "记录表";
+        if (value.endsWith("记录表")) return value;
+        if (value.endsWith("记录")) return value + "表";
+        return value + "记录表";
     }
 
     private String displayDate(Inspection record) {
@@ -302,7 +319,7 @@ public final class PdfExporter {
 
     private String rectificationStatus(String status) {
         return "RECTIFIED".equals(status) || "COMPLETED".equals(status)
-                ? "已整改完成" : "尚未确认完成";
+                ? "☑ 已整改完成" : "□ 尚未确认完成";
     }
 
     private Bitmap decodeForPdf(String path, int maxWidth, int maxHeight, boolean preserveAlpha) {

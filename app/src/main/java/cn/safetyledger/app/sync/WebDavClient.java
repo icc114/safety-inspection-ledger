@@ -78,7 +78,7 @@ public final class WebDavClient {
             return new SyncProvider.ConnectionResult(true,
                     "同步空间建目录、上传、下载和删除校验全部成功");
         } catch (Exception error) {
-            return new SyncProvider.ConnectionResult(false, readable(error));
+            return new SyncProvider.ConnectionResult(false, SyncErrorFormatter.format(error));
         }
     }
 
@@ -89,6 +89,7 @@ public final class WebDavClient {
         mkcol(devicesUrl(space));
         mkcol(deviceControlUrl(space));
         mkcol(adminRecoveryUrl(space));
+        mkcol(trashUrl(space));
     }
 
     public List<String> listSnapshots(String space) throws Exception {
@@ -205,6 +206,48 @@ public final class WebDavClient {
             ResponseBody body=response.body();if(body==null)throw new java.io.IOException("云端返回空恢复文件");
             try(InputStream input=body.byteStream();FileOutputStream output=new FileOutputStream(target)){copy(input,output);}
         }
+    }
+
+    public List<String> listTrashMetadata(String space) throws Exception {
+        ResponseInfo response=execute("PROPFIND",trashUrl(space),PROPFIND,"1");
+        if(!response.successDav())throw failure("无法读取云端回收站",response);
+        return davNames(response.body,".trash.json");
+    }
+
+    public void uploadTrashMetadata(String space,String inspectionId,String json)throws Exception{
+        putBytes(trashFileUrl(space,inspectionId+".trash.json"),json.getBytes(StandardCharsets.UTF_8));
+    }
+    public String downloadTrashMetadata(String space,String inspectionId)throws Exception{
+        return new String(getBytes(trashFileUrl(space,inspectionId+".trash.json")),StandardCharsets.UTF_8);
+    }
+    public void uploadTrashRecovery(String space,String inspectionId,File source)throws Exception{
+        RequestBody body=RequestBody.create(BINARY,source);
+        try(Response response=http.newCall(request(trashFileUrl(space,inspectionId+".safetydata")).put(body).build()).execute()){
+            if(!response.isSuccessful())throw failure("上传云端回收站恢复包失败",response);
+        }
+    }
+    public void downloadTrashRecovery(String space,String inspectionId,File target)throws Exception{
+        try(Response response=http.newCall(request(trashFileUrl(space,inspectionId+".safetydata")).get().build()).execute()){
+            if(!response.isSuccessful())throw failure("下载云端回收站恢复包失败",response);
+            ResponseBody body=response.body();if(body==null)throw new java.io.IOException("云端回收站恢复包为空");
+            try(InputStream input=body.byteStream();FileOutputStream output=new FileOutputStream(target)){copy(input,output);}
+        }
+    }
+    public void deleteTrashEntry(String space,String inspectionId)throws Exception{
+        delete(trashFileUrl(space,inspectionId+".trash.json"));delete(trashFileUrl(space,inspectionId+".safetydata"));
+    }
+
+    private List<String> davNames(byte[] body,String suffix)throws Exception{
+        String xmlText=new String(body,StandardCharsets.UTF_8);String upper=xmlText.toUpperCase(java.util.Locale.ROOT);
+        if(upper.contains("<!DOCTYPE")||upper.contains("<!ENTITY"))throw new java.io.IOException("服务器返回了不安全的 XML DTD/ENTITY，已拒绝解析");
+        DocumentBuilderFactory factory=DocumentBuilderFactory.newInstance();factory.setNamespaceAware(true);
+        setXmlFeatureSafely(factory,"http://apache.org/xml/features/disallow-doctype-decl",true);
+        setXmlFeatureSafely(factory,"http://xml.org/sax/features/external-general-entities",false);
+        setXmlFeatureSafely(factory,"http://xml.org/sax/features/external-parameter-entities",false);
+        try{factory.setXIncludeAware(false);}catch(RuntimeException|AbstractMethodError ignored){}
+        try{factory.setExpandEntityReferences(false);}catch(RuntimeException|AbstractMethodError ignored){}
+        Document document=factory.newDocumentBuilder().parse(new java.io.ByteArrayInputStream(body));NodeList hrefs=document.getElementsByTagNameNS("*","href");
+        List<String> names=new ArrayList<>();for(int i=0;i<hrefs.getLength();i++){String href=hrefs.item(i).getTextContent();int slash=href.lastIndexOf('/');String name=URLDecoder.decode(slash>=0?href.substring(slash+1):href,StandardCharsets.UTF_8.name());if(name.endsWith(suffix)&&!names.contains(name))names.add(name);}return names;
     }
 
     public void download(String space, String name, File target) throws Exception {
@@ -336,9 +379,11 @@ public final class WebDavClient {
     /** Small device name/role/logout metadata. */
     private String deviceControlUrl(String space) { return spaceUrl(space) + "device-control/"; }
     private String adminRecoveryUrl(String space) { return spaceUrl(space) + "admin-recovery/"; }
+    private String trashUrl(String space) { return spaceUrl(space) + "trash/"; }
     private String fileUrl(String space, String name) { return devicesUrl(space) + segment(name); }
     private String controlFileUrl(String space, String name) { return deviceControlUrl(space) + segment(name); }
     private String recoveryFileUrl(String space, String name) { return adminRecoveryUrl(space) + segment(name); }
+    private String trashFileUrl(String space, String name) { return trashUrl(space) + segment(name); }
     private String segment(String value) {
         try {
             return URLEncoder.encode(value, "UTF-8").replace("+", "%20");

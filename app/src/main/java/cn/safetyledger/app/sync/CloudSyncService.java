@@ -27,6 +27,8 @@ import org.json.JSONObject;
 public final class CloudSyncService {
     private static final AtomicBoolean CONTENT_RUNNING = new AtomicBoolean(false);
     private static final AtomicBoolean DEVICE_RUNNING = new AtomicBoolean(false);
+    private static final AtomicBoolean TRASH_RUNNING = new AtomicBoolean(false);
+    private static final long TRASH_RETENTION_MS = 30L*24L*60L*60L*1000L;
 
     public interface ProgressListener {
         void onProgress(String message);
@@ -54,6 +56,7 @@ public final class CloudSyncService {
             progress(listener, "正在连接云端…");
             WebDavClient client = client(config);
             prepare(client, config);
+            syncTrashSignalsInternal(client,config,false);
 
             String deviceId = ensureDeviceId();
             if (client.isDeviceLoggedOut(config.space, deviceId)) {
@@ -111,10 +114,12 @@ public final class CloudSyncService {
                     || "LOGGED_OUT".equals(deviceRole(deviceId))) {
                 return finishForcedLogout(client, config, deviceId, listener);
             }
+            syncTrashSignalsInternal(client,config,false);
             applyTombstones();
 
             progress(listener, "正在上传本机最新数据…");
             uploadSnapshot(backup, client, config, deviceId);
+            runAutoArchiveAfterSuccessfulSync();
 
             long now = System.currentTimeMillis();
             repo.raw().execSQL("DELETE FROM sync_queue");
@@ -407,65 +412,88 @@ public final class CloudSyncService {
         try { return loadConfig() != null; } catch (Exception ignored) { return false; }
     }
 
-    public DeleteResult archiveAndPermanentlyDelete(String inspectionId,char[] entered,ProgressListener listener)throws Exception{
-        Config config=null;
-        try{
-            config=requireConfig();
-            if(!samePassword(entered,config.spacePassword))throw new SecurityException("云同步空间密码错误");
-            if(repo.inspection(inspectionId)==null)throw new IllegalArgumentException("检查记录不存在");
-            WebDavClient client=client(config);prepare(client,config);String deviceId=ensureDeviceId();
-            File recovery=File.createTempFile("safety-admin-recovery-",".safetydata",context.getCacheDir());
-            try{
-                progress(listener,"正在建立管理员恢复副本…");
-                try(FileOutputStream output=new FileOutputStream(recovery)){
-                    new BackupService(context).exportCloudSnapshot(output,config.spacePassword.clone());
-                }
-                long now=System.currentTimeMillis();
-                String name=inspectionId+"__"+now+"__"+deviceId+".safetydata";
-                client.uploadAdminRecovery(config.space,name,recovery);
-                progress(listener,"恢复副本已保存，正在彻底删除本机记录…");
-                new MediaService(context).deleteInspectionMedia(inspectionId);repo.permanentDelete(inspectionId);
-                return new DeleteResult(name,now);
-            }finally{recovery.delete();}
-        }finally{
-            if(entered!=null)Arrays.fill(entered,'\0');
-            if(config!=null)Arrays.fill(config.spacePassword,'\0');
+    public TrashSyncResult syncTrashSignals() throws Exception {
+        if(!TRASH_RUNNING.compareAndSet(false,true))throw new IllegalStateException("回收站状态同步正在运行，请稍后再试");
+        Config config=null;try{config=requireConfig();WebDavClient client=client(config);prepare(client,config);return syncTrashSignalsInternal(client,config,true);}finally{if(config!=null)Arrays.fill(config.spacePassword,'\0');TRASH_RUNNING.set(false);}
+    }
+
+    private TrashSyncResult syncTrashSignalsInternal(WebDavClient client,Config config,boolean scheduleRestore)throws Exception{
+        int deleted=0,restores=0,purged=0;long now=System.currentTimeMillis();
+        for(String file:client.listTrashMetadata(config.space)){
+            String id=file.substring(0,file.length()-".trash.json".length());JSONObject json;
+            try{json=new JSONObject(client.downloadTrashMetadata(config.space,id));}catch(Exception malformed){continue;}
+            long expires=json.optLong("expiresAt",0L);String state=json.optString("state","DELETED");
+            if(expires>0&&now>=expires){
+                String role=deviceRole(ensureDeviceId());if("OWNER".equals(role)||"ADMIN".equals(role)){client.deleteTrashEntry(config.space,id);purged++;}
+                continue;
+            }
+            if("DELETED".equals(state)){
+                long deletedAt=json.optLong("deletedAt",now);
+                if(repo.inspection(id)!=null){new MediaService(context).deleteInspectionMedia(id);repo.permanentDeleteAt(id,deletedAt);deleted++;}
+            }else if("RESTORED".equals(state)){
+                repo.clearInspectionTombstone(id);restores++;
+            }
         }
+        repo.putSetting("last_trash_sync_at",String.valueOf(now));repo.putSetting("last_trash_sync_error","");
+        if(scheduleRestore&&restores>0)CloudSyncScheduler.scheduleSoon(context);
+        return new TrashSyncResult(deleted,restores,purged,now);
+    }
+
+    public DeleteResult archiveAndPermanentlyDelete(String inspectionId,char[] entered,ProgressListener listener)throws Exception{
+        Config config=null;try{
+            config=requireConfig();if(!samePassword(entered,config.spacePassword))throw new SecurityException("云同步空间密码错误");
+            cn.safetyledger.app.data.Entities.Inspection inspection=repo.inspection(inspectionId);if(inspection==null)throw new IllegalArgumentException("检查记录不存在");
+            WebDavClient client=client(config);prepare(client,config);String deviceId=ensureDeviceId();File recovery=File.createTempFile("safety-trash-",".safetydata",context.getCacheDir());
+            try{
+                progress(listener,"正在生成本条记录恢复包…");try(FileOutputStream output=new FileOutputStream(recovery)){new BackupService(context).exportInspectionRecovery(output,config.spacePassword.clone(),inspectionId);}
+                long now=System.currentTimeMillis();long expires=now+TRASH_RETENTION_MS;
+                JSONObject meta=new JSONObject();meta.put("version",2);meta.put("inspectionId",inspectionId);meta.put("templateName",inspection.templateName);meta.put("inspectionDate",inspection.date);meta.put("inspectionTime",inspection.time);meta.put("inspectionType",inspection.type);meta.put("location",inspection.location);meta.put("deletedAt",now);meta.put("expiresAt",expires);meta.put("deletedBy",deviceId);meta.put("state","DELETED");
+                progress(listener,"正在写入云端回收站…");client.uploadTrashRecovery(config.space,inspectionId,recovery);client.uploadTrashMetadata(config.space,inspectionId,meta.toString());
+                new MediaService(context).deleteInspectionMedia(inspectionId);repo.permanentDeleteAt(inspectionId,now);CloudSyncScheduler.scheduleTrashSoon(context);
+                return new DeleteResult(inspectionId+".trash.json",now);
+            }finally{recovery.delete();}
+        }finally{if(entered!=null)Arrays.fill(entered,'\0');if(config!=null)Arrays.fill(config.spacePassword,'\0');}
     }
 
     public List<RecoveryEntry> listAdminRecovery()throws Exception{
-        Config config=null;
-        try{
-            config=requireConfig();String current=ensureDeviceId();String role=deviceRole(current);
-            if(!("OWNER".equals(role)||"ADMIN".equals(role)))throw new SecurityException("只有管理员设备可以查看恢复库");
-            WebDavClient client=client(config);prepare(client,config);List<RecoveryEntry> out=new ArrayList<>();
-            for(String name:client.listAdminRecovery(config.space)){
-                String base=name.substring(0,name.length()-".safetydata".length());String[] parts=base.split("__",3);
-                if(parts.length<2)continue;long deleted=0;try{deleted=Long.parseLong(parts[1]);}catch(Exception ignored){}
-                out.add(new RecoveryEntry(name,parts[0],deleted));
+        Config config=null;try{
+            config=requireConfig();String current=ensureDeviceId();String role=deviceRole(current);if(!("OWNER".equals(role)||"ADMIN".equals(role)))throw new SecurityException("只有管理员设备可以查看云端回收站");
+            WebDavClient client=client(config);prepare(client,config);syncTrashSignalsInternal(client,config,false);List<RecoveryEntry> out=new ArrayList<>();
+            for(String file:client.listTrashMetadata(config.space)){
+                String id=file.substring(0,file.length()-".trash.json".length());try{JSONObject j=new JSONObject(client.downloadTrashMetadata(config.space,id));if(!"DELETED".equals(j.optString("state","DELETED")))continue;out.add(new RecoveryEntry(file,id,j.optLong("deletedAt",0),j.optString("inspectionDate",""),j.optString("inspectionTime",""),j.optString("templateName","检查记录"),j.optString("location",""),j.optString("inspectionType",""),j.optLong("expiresAt",0),false));}catch(Exception ignored){}
             }
+            for(String name:client.listAdminRecovery(config.space)){String base=name.substring(0,name.length()-".safetydata".length());String[] parts=base.split("__",3);if(parts.length<2)continue;long deletedAt=0;try{deletedAt=Long.parseLong(parts[1]);}catch(Exception ignored){}out.add(new RecoveryEntry(name,parts[0],deletedAt,"","","旧版恢复记录","","",0,true));}
             out.sort((a,b)->Long.compare(b.deletedAt(),a.deletedAt()));return out;
         }finally{if(config!=null)Arrays.fill(config.spacePassword,'\0');}
     }
 
     public RestoreResult restoreAdminRecovery(String recoveryName)throws Exception{
-        Config config=null;
-        try{
-            config=requireConfig();String current=ensureDeviceId();String role=deviceRole(current);
-            if(!("OWNER".equals(role)||"ADMIN".equals(role)))throw new SecurityException("只有管理员设备可以恢复已删除记录");
-            String base=recoveryName.endsWith(".safetydata")?recoveryName.substring(0,recoveryName.length()-11):recoveryName;
-            String[] parts=base.split("__",3);if(parts.length<2)throw new IllegalArgumentException("恢复文件名称无效");
-            String inspectionId=parts[0];WebDavClient client=client(config);prepare(client,config);
-            File incoming=File.createTempFile("safety-admin-restore-",".safetydata",context.getCacheDir());
+        Config config=null;try{
+            config=requireConfig();String current=ensureDeviceId();String role=deviceRole(current);if(!("OWNER".equals(role)||"ADMIN".equals(role)))throw new SecurityException("只有管理员设备可以恢复已删除记录");
+            WebDavClient client=client(config);prepare(client,config);BackupService backup=new BackupService(context);String inspectionId;File incoming=File.createTempFile("safety-trash-restore-",".safetydata",context.getCacheDir());
             try{
-                client.downloadAdminRecovery(config.space,recoveryName,incoming);BackupService backup=new BackupService(context);
-                try(FileInputStream input=new FileInputStream(incoming)){
-                    BackupService.RestorePackage restore=backup.decryptAndValidate(input,config.spacePassword.clone());
-                    backup.restoreInspection(restore,inspectionId);
+                if(recoveryName.endsWith(".trash.json")){
+                    inspectionId=recoveryName.substring(0,recoveryName.length()-".trash.json".length());client.downloadTrashRecovery(config.space,inspectionId,incoming);
+                }else{
+                    String base=recoveryName.endsWith(".safetydata")?recoveryName.substring(0,recoveryName.length()-11):recoveryName;String[] parts=base.split("__",3);if(parts.length<2)throw new IllegalArgumentException("恢复文件名称无效");inspectionId=parts[0];client.downloadAdminRecovery(config.space,recoveryName,incoming);
                 }
-                repo.clearInspectionTombstoneAndRestore(inspectionId);return new RestoreResult(inspectionId,System.currentTimeMillis());
+                try(FileInputStream input=new FileInputStream(incoming)){BackupService.RestorePackage restore=backup.decryptAndValidate(input,config.spacePassword.clone());backup.restoreInspection(restore,inspectionId);}
+                repo.clearInspectionTombstoneAndRestore(inspectionId);long now=System.currentTimeMillis();
+                if(recoveryName.endsWith(".trash.json")){
+                    JSONObject meta=new JSONObject(client.downloadTrashMetadata(config.space,inspectionId));meta.put("state","RESTORED");meta.put("restoredAt",now);meta.put("restoredBy",current);meta.put("expiresAt",Math.max(meta.optLong("expiresAt",0),now+7L*24L*60L*60L*1000L));client.uploadTrashMetadata(config.space,inspectionId,meta.toString());
+                }
+                uploadSnapshot(backup,client,config,current);CloudSyncScheduler.scheduleTrashSoon(context);return new RestoreResult(inspectionId,now);
             }finally{incoming.delete();}
         }finally{if(config!=null)Arrays.fill(config.spacePassword,'\0');}
+    }
+
+    private void runAutoArchiveAfterSuccessfulSync(){
+        if(!"1".equals(repo.setting("auto_archive_enabled","0")))return;
+        String cutoff=java.time.LocalDate.now().minusMonths(6).toString();long released=0;int records=0;
+        try(Cursor c=repo.raw().rawQuery("SELECT id FROM inspections WHERE deleted_at IS NULL AND inspection_date<? AND status IN ('RECTIFIED','COMPLETED')",new String[]{cutoff})){
+            MediaService media=new MediaService(context);while(c.moveToNext()){long bytes=media.releaseOriginalCopies(c.getString(0));if(bytes>0){released+=bytes;records++;}}
+        }
+        repo.putSetting("last_auto_archive_at",String.valueOf(System.currentTimeMillis()));repo.putSetting("last_auto_archive_records",String.valueOf(records));repo.putSetting("last_auto_archive_bytes",String.valueOf(released));
     }
 
     private static boolean samePassword(char[] a,char[] b){
@@ -665,7 +693,8 @@ public final class CloudSyncService {
     public record CurrentLogoutResult(String deviceId, long completedAt) {}
     public record ResetResult(int deletedSnapshots, String ownerDeviceId, long completedAt) {}
     public record DeleteResult(String recoveryName,long completedAt) {}
-    public record RecoveryEntry(String name,String inspectionId,long deletedAt) {}
+    public record RecoveryEntry(String name,String inspectionId,long deletedAt,String date,String time,String templateName,String location,String inspectionType,long expiresAt,boolean legacy) {}
+    public record TrashSyncResult(int deleted,int restored,int purged,long completedAt) {}
     public record RestoreResult(String inspectionId,long completedAt) {}
 
     private static final class Config {

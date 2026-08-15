@@ -24,16 +24,17 @@ import android.widget.EditText;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
 import android.widget.Spinner;
+import android.widget.Switch;
 import android.widget.TextView;
 
 import cn.safetyledger.app.backup.BackupService;
 import cn.safetyledger.app.data.LedgerRepository;
-import cn.safetyledger.app.security.PasswordHash;
 import cn.safetyledger.app.security.SecretStore;
 import cn.safetyledger.app.sync.CloudSyncScheduler;
 import cn.safetyledger.app.sync.CloudSyncService;
 import cn.safetyledger.app.sync.SyncProvider;
 import cn.safetyledger.app.sync.WebDavClient;
+import cn.safetyledger.app.sync.SyncErrorFormatter;
 
 import java.io.InputStream;
 import java.io.OutputStream;
@@ -110,7 +111,7 @@ public final class SettingsActivity extends Activity {
             }
         }));
         card.addView(Ui.divider(this));
-        card.addView(menuRow("回收站", "恢复误删记录或使用密码永久删除", () ->
+        card.addView(menuRow("回收站", "本机恢复、云端30天回收站和管理员恢复", () ->
                 Ui.start(this, TrashActivity.class)));
         return card;
     }
@@ -275,17 +276,22 @@ public final class SettingsActivity extends Activity {
     private LinearLayout securityCard() {
         LinearLayout card = Ui.card(this);
         card.addView(Ui.sectionTitle(this, "5", "安全与本地存储", null));
-        Button password = Ui.secondaryButton(this, "设置 / 修改永久删除密码");
-        password.setOnClickListener(view -> setDeletePassword());
-        card.addView(password);
-        TextView archiveState = Ui.text(this, "自动归档：关闭（不会自动删除本机记录）", 14, true);
-        archiveState.setTextColor(Ui.BLUE_DARK);
-        card.addView(archiveState);
-        TextView archive = Ui.text(this,
-                "“超过六个月自动归档”原本用于手机空间不足时，将已完成且已在 PC/云端完整校验的旧记录转为归档副本，再按用户选择释放手机上的原始照片。当前版本不执行自动归档、不自动删除任何记录或照片；待 PC 客户端和归档校验全部完成后再提供可选开关。",
+        TextView deletion = Ui.text(this,
+                "永久删除不再设置额外的本机密码。启用云同步后，从回收站永久删除时统一验证“云同步空间密码”；云端回收站保留 30 天，管理员可在期限内恢复。",
                 13, false);
-        archive.setTextColor(Ui.MUTED);
+        deletion.setTextColor(Ui.MUTED); card.addView(deletion); card.addView(Ui.gap(this,8));
+        Switch archive = new Switch(this);
+        archive.setText("超过 6 个月自动归档（仅清理未处理原图副本）");
+        archive.setTextSize(14); archive.setChecked("1".equals(repo.setting("auto_archive_enabled","0")));
+        archive.setOnCheckedChangeListener((button,checked)->{
+            repo.putSetting("auto_archive_enabled",checked?"1":"0");
+            Ui.toast(this,checked?"自动归档已开启":"自动归档已关闭");
+        });
         card.addView(archive);
+        TextView note = Ui.text(this,
+                "开启后，仅在一次云同步成功之后处理：对超过 6 个月且已完成/已整改的记录，删除手机中重复保存的“未处理原始照片副本”；检查记录、水印照片、整改/复查照片和签名全部保留，不会自动删除检查记录。",
+                12, false);
+        note.setTextColor(Ui.MUTED);card.addView(note);
         return card;
     }
 
@@ -553,29 +559,6 @@ public final class SettingsActivity extends Activity {
                 .show();
     }
 
-    private void setDeletePassword() {
-        EditText password = Ui.input(this, "新密码（至少 6 位）");
-        maskPassword(password);
-        new AlertDialog.Builder(this)
-                .setTitle("本机永久删除密码")
-                .setView(password)
-                .setPositiveButton("保存", (dialog, which) -> {
-                    char[] value = password.getText().toString().toCharArray();
-                    if (value.length < 6) {
-                        Ui.toast(this, "密码至少 6 位");
-                        return;
-                    }
-                    try {
-                        repo.putSetting("delete_password_hash", PasswordHash.create(value));
-                        Ui.toast(this, "永久删除密码已设置");
-                    } catch (Exception error) {
-                        Ui.toast(this, "密码设置失败");
-                    }
-                })
-                .setNegativeButton("取消", null)
-                .show();
-    }
-
     private void saveAndEnable() {
         String type = (String) provider.getSelectedItem();
         String url = endpoint.getText().toString().trim();
@@ -709,8 +692,6 @@ public final class SettingsActivity extends Activity {
             if (repo.setting("device_id", "").isBlank()) {
                 repo.putSetting("device_id", UUID.randomUUID().toString());
             }
-            repo.putSetting("delete_password_hash",
-                    PasswordHash.create(spacePassword.toCharArray()));
             savedServerPassword = password;
             savedToken = tokenValue;
             savedSpacePassword = spacePassword;
@@ -805,13 +786,13 @@ public final class SettingsActivity extends Activity {
                     if (openDevicesAfter) manageDevices();
                 });
             } catch (Exception error) {
-                String message = error.getMessage() == null ? error.getClass().getSimpleName()
-                        : error.getMessage();
+                String message = readableError(error);
                 repo.putSetting("last_sync_error", message);
                 runOnUiThread(() -> {
                     syncStatus.setText("同步状态：失败 · " + message);
                     if (!message.contains("已有同步任务正在运行")) syncNotification(message);
-                    new AlertDialog.Builder(this).setTitle("同步失败")
+                    new AlertDialog.Builder(this)
+                            .setTitle(message.startsWith("网络连接问题：") ? "网络连接问题" : "同步失败")
                             .setMessage(message).setPositiveButton("确定", null).show();
                 });
             }
@@ -854,11 +835,11 @@ public final class SettingsActivity extends Activity {
                             .setPositiveButton("知道了", null).show();
                 });
             } catch (Exception error) {
-                String message = error.getMessage() == null ? error.getClass().getSimpleName()
-                        : error.getMessage();
+                String message = readableError(error);
                 runOnUiThread(() -> {
                     syncStatus.setText("同步状态：云端重建失败 · " + message);
-                    new AlertDialog.Builder(this).setTitle("云端重建失败")
+                    new AlertDialog.Builder(this)
+                            .setTitle(message.startsWith("网络连接问题：") ? "网络连接问题" : "云端重建失败")
                             .setMessage(message).setPositiveButton("确定", null).show();
                 });
             }
@@ -1118,17 +1099,7 @@ public final class SettingsActivity extends Activity {
         return dialog;
     }
 
-    private String readableError(Throwable error) {
-        Throwable current = error;
-        String message = null;
-        while (current != null) {
-            if (current.getMessage() != null && !current.getMessage().isBlank()) {
-                message = current.getMessage();
-            }
-            current = current.getCause();
-        }
-        return message == null ? error.getClass().getSimpleName() : message;
-    }
+    private String readableError(Throwable error) { return SyncErrorFormatter.format(error); }
 
     private void syncNotification(String message) {
         if (Build.VERSION.SDK_INT >= 33
@@ -1138,7 +1109,7 @@ public final class SettingsActivity extends Activity {
         }
         Notification notification = new Notification.Builder(this, SafetyLedgerApp.SYNC_CHANNEL)
                 .setSmallIcon(R.drawable.ic_app)
-                .setContentTitle("安全检查台账同步失败")
+                .setContentTitle(message.startsWith("网络连接问题：") ? "安全检查台账同步失败 · 网络问题" : "安全检查台账同步失败")
                 .setContentText(message)
                 .setAutoCancel(true)
                 .build();

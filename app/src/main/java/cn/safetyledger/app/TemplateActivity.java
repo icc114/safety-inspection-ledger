@@ -4,6 +4,7 @@ import android.app.Activity;
 import android.app.AlertDialog;
 import android.graphics.Color;
 import android.os.Bundle;
+import android.text.InputFilter;
 import android.view.ViewGroup;
 import android.widget.Button;
 import android.widget.EditText;
@@ -18,6 +19,12 @@ import cn.safetyledger.app.data.LedgerRepository;
 import java.util.List;
 
 public final class TemplateActivity extends Activity {
+    private static final int MAX_TEMPLATE_ITEMS = 9;
+    private static final int MAX_TEMPLATE_NAME = 16;
+    private static final int MAX_TEMPLATE_TYPE = 16;
+    private static final int MAX_ITEM_CATEGORY = 12;
+    private static final int MAX_ITEM_CONTENT = 40;
+    private static final int MAX_ITEM_STANDARD = 24;
     private LedgerRepository repo;
     private LinearLayout list;
     private String selectedId;
@@ -106,8 +113,12 @@ public final class TemplateActivity extends Activity {
 
     private void editTemplate(Template template) {
         LinearLayout form = dialogForm();
-        EditText name = Ui.input(this, "模板名称，例如：车棚检查记录");
-        EditText category = Ui.input(this, "检查类型，例如：车棚检查");
+        EditText name = Ui.input(this, "模板名称，例如：安全检查记录");
+        EditText category = Ui.input(this, "检查类型，例如：安全检查");
+        name.setSingleLine(true);
+        category.setSingleLine(true);
+        name.setFilters(new InputFilter[]{new InputFilter.LengthFilter(MAX_TEMPLATE_NAME)});
+        category.setFilters(new InputFilter[]{new InputFilter.LengthFilter(MAX_TEMPLATE_TYPE)});
         if (template != null) {
             name.setText(template.name);
             category.setText(template.category);
@@ -141,11 +152,22 @@ public final class TemplateActivity extends Activity {
         Button back = Ui.compactButton(this, "‹ 模板列表", false);
         Button add = Ui.compactButton(this, "+ 新增检查项", true);
         back.setOnClickListener(view -> showList());
-        add.setOnClickListener(view -> editItem(template, null));
+        add.setOnClickListener(view -> {
+            if (repo.templateItems(template.id).size() >= MAX_TEMPLATE_ITEMS) {
+                Ui.toast(this, "每个模板最多 9 个检查项目，以保证导出 A4 第1页包含完整检查表和签名");
+                return;
+            }
+            editItem(template, null);
+        });
         heading.addView(back, new LinearLayout.LayoutParams(Ui.dp(this, 104), Ui.dp(this, 40)));
         heading.addView(Ui.text(this, template.name, 18, true), Ui.weight(1));
         heading.addView(add, new LinearLayout.LayoutParams(Ui.dp(this, 118), Ui.dp(this, 40)));
         list.addView(heading);
+        TextView limitNote = Ui.text(this,
+                "版式限制：最多 9 个检查项目；检查内容最多 40 字，检查标准最多 24 字。这样可保证正式 PDF 第1页保留完整检查表与签名，第2页起只放检查/整改照片。",
+                12, false);
+        limitNote.setTextColor(Ui.MUTED);
+        list.addView(limitNote);
         list.addView(Ui.gap(this, 7));
         List<TemplateItem> items = repo.templateItems(template.id);
         if (items.isEmpty()) {
@@ -204,9 +226,15 @@ public final class TemplateActivity extends Activity {
 
     private void editItem(Template template, TemplateItem item) {
         LinearLayout form = dialogForm();
-        EditText category = Ui.input(this, "检查类别");
-        EditText content = Ui.input(this, "检查内容");
-        EditText standard = Ui.input(this, "检查标准");
+        EditText category = Ui.input(this, "检查类别（最多12字）");
+        EditText content = Ui.input(this, "检查内容（最多40字）");
+        EditText standard = Ui.input(this, "检查标准（最多24字）");
+        category.setSingleLine(true);
+        content.setSingleLine(true);
+        standard.setSingleLine(true);
+        category.setFilters(new InputFilter[]{new InputFilter.LengthFilter(MAX_ITEM_CATEGORY)});
+        content.setFilters(new InputFilter[]{new InputFilter.LengthFilter(MAX_ITEM_CONTENT)});
+        standard.setFilters(new InputFilter[]{new InputFilter.LengthFilter(MAX_ITEM_STANDARD)});
         if (item != null) {
             category.setText(item.category);
             content.setText(item.content);
@@ -225,6 +253,10 @@ public final class TemplateActivity extends Activity {
                     String contentValue = content.getText().toString().trim();
                     if (categoryValue.isBlank() || contentValue.isBlank()) {
                         Ui.toast(this, "检查类别和检查内容不能为空");
+                        return;
+                    }
+                    if (item == null && repo.templateItems(template.id).size() >= MAX_TEMPLATE_ITEMS) {
+                        Ui.toast(this, "当前模板已达到 9 个检查项目上限");
                         return;
                     }
                     int order = item == null ? repo.templateItems(template.id).size() + 1 : item.order;

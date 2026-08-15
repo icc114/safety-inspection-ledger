@@ -11,6 +11,7 @@ import android.location.LocationManager;
 import android.net.Uri;
 import android.os.Bundle;
 import android.provider.MediaStore;
+import android.text.InputFilter;
 import android.view.Gravity;
 import android.view.View;
 import android.view.ViewGroup;
@@ -19,7 +20,7 @@ import android.widget.EditText;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
-import android.widget.Switch;
+import android.widget.CheckBox;
 import android.widget.TextView;
 
 import cn.safetyledger.app.data.Entities.Inspection;
@@ -43,7 +44,7 @@ public final class RecordDetailActivity extends Activity {
     private LinearLayout signaturesBox;
     private EditText rectification;
     private EditText recheck;
-    private Switch confirmed;
+    private CheckBox confirmed;
     private Uri cameraUri;
     private String pendingCategory = "RECTIFICATION";
 
@@ -113,7 +114,7 @@ public final class RecordDetailActivity extends Activity {
 
     private LinearLayout summaryCard() {
         LinearLayout card = Ui.card(this);
-        TextView title = Ui.text(this, model.templateName + "记录表", 22, true);
+        TextView title = Ui.text(this, formTitle(model.templateName), 22, true);
         title.setGravity(Gravity.CENTER);
         card.addView(title);
         card.addView(Ui.gap(this, 7));
@@ -222,7 +223,8 @@ public final class RecordDetailActivity extends Activity {
     private LinearLayout rectificationCard() {
         LinearLayout card = Ui.card(this);
         card.addView(Ui.sectionTitle(this, "4", "整改记录", "整改完成后补录照片并确认"));
-        rectification = Ui.input(this, "填写具体整改情况");
+        rectification = Ui.input(this, "填写具体整改情况（最多70字）");
+        rectification.setFilters(new InputFilter[]{new InputFilter.LengthFilter(70)});
         rectification.setText(model.rectification);
         rectification.setMinLines(3);
         rectification.setGravity(Gravity.TOP);
@@ -243,7 +245,7 @@ public final class RecordDetailActivity extends Activity {
         recheck.setMinLines(2);
         card.addView(Ui.gap(this, 8));
         card.addView(recheck);
-        confirmed = new Switch(this);
+        confirmed = new CheckBox(this);
         confirmed.setText("整改确认：已整改完成");
         confirmed.setTextSize(16);
         confirmed.setTextColor(Ui.TEXT);
@@ -418,4 +420,11 @@ public final class RecordDetailActivity extends Activity {
             default -> "检查照片";
         };
     }
+    private String formTitle(String value) {
+        String name = value == null || value.isBlank() ? "安全检查" : value.trim();
+        if (name.endsWith("记录表")) return name;
+        if (name.endsWith("记录")) return name + "表";
+        return name + "记录表";
+    }
+
 }

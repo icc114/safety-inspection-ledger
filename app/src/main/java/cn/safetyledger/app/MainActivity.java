@@ -13,6 +13,7 @@ import android.location.LocationManager;
 import android.net.Uri;
 import android.os.Bundle;
 import android.provider.MediaStore;
+import android.text.InputFilter;
 import android.view.Gravity;
 import android.view.View;
 import android.view.ViewGroup;
@@ -137,7 +138,7 @@ public class MainActivity extends Activity {
 
     private LinearLayout basicCard() {
         LinearLayout card = Ui.card(this);
-        TextView title = Ui.text(this, model.templateName + "记录表", 23, true);
+        TextView title = Ui.text(this, formTitle(model.templateName), 23, true);
         title.setGravity(Gravity.CENTER);
         card.addView(title);
         card.addView(Ui.gap(this, 8));
@@ -328,7 +329,8 @@ public class MainActivity extends Activity {
             problemArea.setBackground(Ui.shape(this, Color.rgb(255, 249, 240), Color.rgb(244, 190, 110), 0));
             TextView problemTitle = Ui.text(this, "现场情况、问题及整改要求", 14, true);
             problemTitle.setTextColor(Color.rgb(155, 83, 20));
-            EditText problem = Ui.input(this, "请填写发现的问题和整改要求");
+            EditText problem = Ui.input(this, "请填写发现的问题和整改要求（最多40字）");
+            problem.setFilters(new InputFilter[]{new InputFilter.LengthFilter(40)});
             problem.setText(item.problem);
             problem.setMinLines(2);
             problem.setGravity(Gravity.TOP);
@@ -620,4 +622,11 @@ public class MainActivity extends Activity {
         }
         super.onPause();
     }
+    private String formTitle(String value) {
+        String name = value == null || value.isBlank() ? "安全检查" : value.trim();
+        if (name.endsWith("记录表")) return name;
+        if (name.endsWith("记录")) return name + "表";
+        return name + "记录表";
+    }
+
 }

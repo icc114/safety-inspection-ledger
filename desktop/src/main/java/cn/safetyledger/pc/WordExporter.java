@@ -19,7 +19,7 @@ import java.util.List;
  * as Android PdfExporter. Photos remain as original files beside the Word document.
  */
 public final class WordExporter {
-    public static final int LAYOUT_VERSION = 2;
+    public static final int LAYOUT_VERSION = 3;
 
     private static final String FONT = "Microsoft YaHei";
     private static final int A4_WIDTH = 11906;
@@ -79,13 +79,15 @@ public final class WordExporter {
 
     private static void addItems(XWPFDocument doc, ArchiveService.Record record) {
         int[] widths = {1760, 660, 4340, 1660, 2520};
-        int itemCount = Math.max(1, record.items == null ? 0 : record.items.size());
-        XWPFTable table = table(doc, itemCount + 1, 5, widths);
+        int realCount = record.items == null ? 0 : record.items.size();
+        int itemCount = Math.max(1, realCount);
+        int layoutRows = realCount == 0 ? 1 : Math.max(9, realCount);
+        XWPFTable table = table(doc, layoutRows + 1, 5, widths);
         String[] heads = {"检查类别", "序号", "检查内容及标准", "检查结果", "现场情况/问题"};
         exactRow(table.getRow(0), 680);
         for (int i = 0; i < heads.length; i++) cell(table.getRow(0).getCell(i), heads[i], 11, true, ParagraphAlignment.CENTER);
 
-        int rowHeight = 10200 / itemCount;
+        int rowHeight = 10200 / layoutRows;
         int itemFont = Math.max(6, Math.min(11, (int) Math.round((rowHeight / 20.0) * 0.22)));
         if (record.items == null || record.items.isEmpty()) {
             XWPFTableRow row = table.getRow(1);
@@ -107,6 +109,7 @@ public final class WordExporter {
             cell(row.getCell(3), result(item.result), Math.min(11, itemFont + 1), false, ParagraphAlignment.CENTER);
             cell(row.getCell(4), blank(item.problem, ""), itemFont, false, ParagraphAlignment.LEFT);
         }
+        for (int r = record.items.size(); r < layoutRows; r++) exactRow(table.getRow(r + 1), rowHeight);
     }
 
     private static void addSummary(XWPFDocument doc, ArchiveService.Record record) {
@@ -127,7 +130,13 @@ public final class WordExporter {
         String situation = problems.isEmpty()
                 ? "共检查 " + total + " 项，全部选择“是”，未发现问题。"
                 : "共检查 " + total + " 项，“是” " + yes + " 项，“否” " + problems.size() + " 项。";
-        String opinion = problems.isEmpty() ? "无" : String.join("；", problems);
+        String opinion;
+        if (problems.isEmpty()) opinion = "无";
+        else {
+            List<String> numbers = new ArrayList<>();
+            for (ArchiveService.Item item : record.items) if ("FAIL".equals(item.result)) numbers.add(String.valueOf(item.order));
+            opinion = "第 " + String.join("、", numbers) + " 项发现问题，具体问题及整改要求详见上表。";
+        }
         String rectification = record.rectification == null || record.rectification.isBlank()
                 ? "" : record.rectification + "（" + rectificationStatus(record.status) + "）";
 
@@ -208,7 +217,7 @@ public final class WordExporter {
         XWPFRun run = p.createRun();
         run.setBold(bold); run.setFontSize(size); run.setFontFamily(FONT);
         CTRPr rPr = run.getCTR().isSetRPr() ? run.getCTR().getRPr() : run.getCTR().addNewRPr();
-        CTFonts fonts = rPr.isSetRFonts() ? rPr.getRFonts() : rPr.addNewRFonts();
+        CTFonts fonts = rPr.addNewRFonts();
         fonts.setAscii(FONT); fonts.setHAnsi(FONT); fonts.setEastAsia(FONT);
         run.setText(value == null ? "" : value);
         return run;
@@ -271,10 +280,12 @@ public final class WordExporter {
 
     private static String formTitle(ArchiveService.Record record) {
         String value = record.templateName == null ? "安全检查" : record.templateName.trim();
-        return value.endsWith("记录表") ? value : value + "记录表";
+        if (value.endsWith("记录表")) return value;
+        if (value.endsWith("记录")) return value + "表";
+        return value + "记录表";
     }
     private static String displayDate(ArchiveService.Record record) { return blank(record.date, "") + (record.time == null || record.time.isBlank() ? "" : " " + record.time); }
     private static String result(String value) { return "PASS".equals(value) ? "☑ 是\n□ 否" : "FAIL".equals(value) ? "□ 是\n☑ 否" : "□ 是\n□ 否"; }
-    private static String rectificationStatus(String status) { return "RECTIFIED".equals(status) || "COMPLETED".equals(status) ? "已整改完成" : "尚未确认完成"; }
+    private static String rectificationStatus(String status) { return "RECTIFIED".equals(status) || "COMPLETED".equals(status) ? "☑ 已整改完成" : "□ 尚未确认完成"; }
     private static String blank(String value, String fallback) { return value == null || value.isBlank() ? fallback : value; }
 }

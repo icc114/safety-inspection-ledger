@@ -127,12 +127,14 @@ public final class ArchiveService {
         Path check=folder.resolve("检查照片"),rect=folder.resolve("整改照片"),recheck=folder.resolve("复查照片");Files.createDirectories(check);Files.createDirectories(rect);Files.createDirectories(recheck);
         int a=0,b=0,c=0;for(Media m:r.media){if(!Files.isRegularFile(m.source))continue;Path target;String stamp=formatTime(m.capturedAt);if("RECTIFICATION".equals(m.category))target=rect.resolve(String.format(Locale.ROOT,"%03d_整改照片_%s.jpg",++b,stamp));else if("RECHECK".equals(m.category))target=recheck.resolve(String.format(Locale.ROOT,"%03d_复查照片_%s.jpg",++c,stamp));else target=check.resolve(String.format(Locale.ROOT,"%03d_检查照片_%s.jpg",++a,stamp));Files.copy(m.source,target,StandardCopyOption.REPLACE_EXISTING);}
         Path sigDir=folder.resolve("签名");Files.createDirectories(sigDir);for(var e:r.signatures.entrySet())if(Files.isRegularFile(e.getValue())){Path target=sigDir.resolve(e.getKey()+extension(e.getValue()));Files.copy(e.getValue(),target,StandardCopyOption.REPLACE_EXISTING);e.setValue(target);}
-        Path main=folder.resolve("检查记录.docx"),hash=folder.resolve(".system-docx.sha256");Path output=main;
+        Path main=folder.resolve("检查记录.docx"),hash=folder.resolve(".system-docx.sha256"),layout=folder.resolve(".word-layout-version");Path output=main;
+        boolean layoutOld=!Files.isRegularFile(layout)||!String.valueOf(WordExporter.LAYOUT_VERSION).equals(Files.readString(layout).trim());
         if(Files.isRegularFile(main)&&Files.isRegularFile(hash)){
             String expected=Files.readString(hash).trim();String actual=DataPackageCodec.sha256(main);
             if(!actual.equalsIgnoreCase(expected))output=folder.resolve("检查记录-系统更新-"+LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss"))+".docx");
+            else if(layoutOld) output=main;
         }
-        WordExporter.write(r,output);String digest=DataPackageCodec.sha256(output);if(output.equals(main))Files.writeString(hash,digest,StandardCharsets.UTF_8,StandardOpenOption.CREATE,StandardOpenOption.TRUNCATE_EXISTING);
+        WordExporter.write(r,output);String digest=DataPackageCodec.sha256(output);if(output.equals(main)){Files.writeString(hash,digest,StandardCharsets.UTF_8,StandardOpenOption.CREATE,StandardOpenOption.TRUNCATE_EXISTING);Files.writeString(layout,String.valueOf(WordExporter.LAYOUT_VERSION),StandardCharsets.UTF_8,StandardOpenOption.CREATE,StandardOpenOption.TRUNCATE_EXISTING);}
         Files.writeString(folder.resolve("record.json"),gson.toJson(r),StandardCharsets.UTF_8,StandardOpenOption.CREATE,StandardOpenOption.TRUNCATE_EXISTING);
         Files.writeString(folder.resolve("同步来源.txt"),"来源："+sourceName+"\n最后同步："+LocalDateTime.now()+"\n",StandardCharsets.UTF_8,StandardOpenOption.CREATE,StandardOpenOption.TRUNCATE_EXISTING);
         Path deleted=folder.resolve("已从移动端删除.txt");if(r.deleted)Files.writeString(deleted,"该记录已从移动端同步删除，但电脑本地资料库保留历史副本。\n",StandardCharsets.UTF_8,StandardOpenOption.CREATE,StandardOpenOption.TRUNCATE_EXISTING);else Files.deleteIfExists(deleted);
