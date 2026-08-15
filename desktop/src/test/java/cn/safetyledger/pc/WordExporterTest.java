@@ -46,8 +46,10 @@ class WordExporterTest {
                 assertTrue(rowText(doc.getTables().get(1).getRow(1)).contains("灭火器是否完好"));
                 assertTrue(rowText(doc.getTables().get(1).getRow(9)).isBlank());
 
-                assertTrue(doc.getTables().get(2).getText().contains("检查情况："));
+                assertFalse(doc.getTables().get(2).getText().contains("检查情况："));
                 assertTrue(doc.getTables().get(2).getText().contains("整改意见："));
+                assertTrue(doc.getTables().get(2).getText().contains("1. 1具灭火器过期"));
+                assertTrue(doc.getTables().get(2).getText().contains("整改记录："));
                 assertTrue(doc.getTables().get(3).getText().contains("检查人："));
                 assertTrue(doc.getTables().get(3).getText().contains("被检查人："));
                 assertTrue(doc.getFooterList().stream().anyMatch(f -> f.getText().contains("第1页/共3页")));

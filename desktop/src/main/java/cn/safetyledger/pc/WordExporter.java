@@ -19,7 +19,7 @@ import java.util.List;
  * as Android PdfExporter. Photos remain as original files beside the Word document.
  */
 public final class WordExporter {
-    public static final int LAYOUT_VERSION = 3;
+    public static final int LAYOUT_VERSION = 4;
 
     private static final String FONT = "Microsoft YaHei";
     private static final int A4_WIDTH = 11906;
@@ -87,7 +87,7 @@ public final class WordExporter {
         exactRow(table.getRow(0), 680);
         for (int i = 0; i < heads.length; i++) cell(table.getRow(0).getCell(i), heads[i], 11, true, ParagraphAlignment.CENTER);
 
-        int rowHeight = 10200 / layoutRows;
+        int rowHeight = 10560 / layoutRows;
         int itemFont = Math.max(6, Math.min(11, (int) Math.round((rowHeight / 20.0) * 0.22)));
         if (record.items == null || record.items.isEmpty()) {
             XWPFTableRow row = table.getRow(1);
@@ -114,38 +114,28 @@ public final class WordExporter {
 
     private static void addSummary(XWPFDocument doc, ArchiveService.Record record) {
         int[] widths = {1760, 9180};
-        XWPFTable table = table(doc, 3, 2, widths);
+        XWPFTable table = table(doc, 2, 2, widths);
         hideInsideHorizontalBorder(table);
-        for (XWPFTableRow row : table.getRows()) exactRow(row, 680);
+        for (XWPFTableRow row : table.getRows()) exactRow(row, 840);
 
-        int yes = 0;
         List<String> problems = new ArrayList<>();
         if (record.items != null) {
             for (ArchiveService.Item item : record.items) {
-                if ("PASS".equals(item.result)) yes++;
-                if ("FAIL".equals(item.result)) problems.add(item.order + ". " + blank(item.problem, ""));
+                if (!"FAIL".equals(item.result)) continue;
+                String problem = item.problem == null ? "" : item.problem.trim();
+                problems.add(item.order + ". " + (problem.isBlank() ? "需整改" : problem));
             }
         }
-        int total = record.items == null ? 0 : record.items.size();
-        String situation = problems.isEmpty()
-                ? "共检查 " + total + " 项，全部选择“是”，未发现问题。"
-                : "共检查 " + total + " 项，“是” " + yes + " 项，“否” " + problems.size() + " 项。";
-        String opinion;
-        if (problems.isEmpty()) opinion = "无";
-        else {
-            List<String> numbers = new ArrayList<>();
-            for (ArchiveService.Item item : record.items) if ("FAIL".equals(item.result)) numbers.add(String.valueOf(item.order));
-            opinion = "第 " + String.join("、", numbers) + " 项发现问题，具体问题及整改要求详见上表。";
-        }
-        String rectification = record.rectification == null || record.rectification.isBlank()
-                ? "" : record.rectification + "（" + rectificationStatus(record.status) + "）";
+        String opinion = problems.isEmpty() ? "无" : String.join("；", problems);
+        String rectificationValue = record.rectification == null ? "" : record.rectification.trim();
+        String status = rectificationStatus(record.status);
+        String rectification = rectificationValue.isBlank()
+                ? status : rectificationValue + "（" + status + "）";
 
-        cell(table.getRow(0).getCell(0), "检查情况：", 11, true, ParagraphAlignment.LEFT);
-        cell(table.getRow(0).getCell(1), situation, 10, false, ParagraphAlignment.LEFT);
-        cell(table.getRow(1).getCell(0), "整改意见：", 11, true, ParagraphAlignment.LEFT);
-        cell(table.getRow(1).getCell(1), opinion, 9, false, ParagraphAlignment.LEFT);
-        cell(table.getRow(2).getCell(0), rectification.isBlank() ? "" : "整改记录：", 11, true, ParagraphAlignment.LEFT);
-        cell(table.getRow(2).getCell(1), rectification, 9, false, ParagraphAlignment.LEFT);
+        cell(table.getRow(0).getCell(0), "整改意见：", 11, true, ParagraphAlignment.LEFT);
+        cell(table.getRow(0).getCell(1), opinion, 9, false, ParagraphAlignment.LEFT);
+        cell(table.getRow(1).getCell(0), "整改记录：", 11, true, ParagraphAlignment.LEFT);
+        cell(table.getRow(1).getCell(1), rectification, 9, false, ParagraphAlignment.LEFT);
     }
 
     private static void addSignatures(XWPFDocument doc, ArchiveService.Record record) {

@@ -128,7 +128,7 @@ public final class PdfExporter {
                 new int[]{1, 1, 1, 1, 1}, 11);
         y += 34;
 
-        final float detailHeight = 102;
+        final float detailHeight = 90;
         final float signatureHeight = 78;
         final float signatureY = HEIGHT - 31 - signatureHeight;
         final float detailY = signatureY - detailHeight;
@@ -147,20 +147,20 @@ public final class PdfExporter {
                     "当前模板没有检查项目", 11, Paint.Align.CENTER, false);
         } else {
             for (InspectionItem item : record.items) {
-                cell(canvas, columns[0], y, columns[1] - columns[0], itemHeight,
-                        item.category, font + .5f, maximumLines, Paint.Align.CENTER);
+                fittedCell(canvas, columns[0], y, columns[1] - columns[0], itemHeight,
+                        item.category, font + .5f, 7.0f, Paint.Align.CENTER);
                 cell(canvas, columns[1], y, columns[2] - columns[1], itemHeight,
                         String.valueOf(item.order), font + 1, 1, Paint.Align.CENTER);
                 String description = item.content;
                 if (!item.standard.isBlank() && !item.standard.equals(item.content)) {
                     description += "\n标准：" + item.standard;
                 }
-                cell(canvas, columns[2], y, columns[3] - columns[2], itemHeight,
-                        description, font, maximumLines, Paint.Align.LEFT);
+                fittedCell(canvas, columns[2], y, columns[3] - columns[2], itemHeight,
+                        description, font, 6.8f, Paint.Align.LEFT);
                 cell(canvas, columns[3], y, columns[4] - columns[3], itemHeight,
                         result(item.result), font + .5f, Math.min(2, maximumLines), Paint.Align.CENTER);
-                cell(canvas, columns[4], y, columns[5] - columns[4], itemHeight,
-                        item.problem, font, maximumLines, Paint.Align.LEFT);
+                fittedCell(canvas, columns[4], y, columns[5] - columns[4], itemHeight,
+                        item.problem, font, 6.8f, Paint.Align.LEFT);
                 y += itemHeight;
             }
             for (int blank = record.items.size(); blank < FORM_ITEM_SLOTS; blank++) {
@@ -179,35 +179,27 @@ public final class PdfExporter {
         rect(canvas, MARGIN, y, WIDTH - 2f * MARGIN, height);
         float split = MARGIN + 88;
         line(canvas, split, y, split, y + height);
-        int yes = 0;
+
         List<String> problems = new ArrayList<>();
         for (InspectionItem item : record.items) {
-            if ("PASS".equals(item.result)) yes++;
-            if ("FAIL".equals(item.result)) problems.add(item.order + ". " + item.problem);
+            if (!"FAIL".equals(item.result)) continue;
+            String problem = item.problem == null ? "" : item.problem.trim();
+            problems.add(item.order + ". " + (problem.isBlank() ? "需整改" : problem));
         }
-        text(canvas, MARGIN + 6, y + 17, "检查情况：", 11, Paint.Align.LEFT, true);
-        wrapped(canvas,
-                problems.isEmpty()
-                        ? "共检查 " + record.items.size() + " 项，全部选择“是”，未发现问题。"
-                        : "共检查 " + record.items.size() + " 项，“是” " + yes + " 项，“否” "
-                                + problems.size() + " 项。",
-                split + 6, y + 4, WIDTH - MARGIN - split - 12, 10, 2, Paint.Align.LEFT);
-        text(canvas, MARGIN + 6, y + 49, "整改意见：", 11, Paint.Align.LEFT, true);
-        String details;
-        if (problems.isEmpty()) {
-            details = "无";
-        } else {
-            List<String> problemNumbers = new ArrayList<>();
-            for (InspectionItem item : record.items) if ("FAIL".equals(item.result)) problemNumbers.add(String.valueOf(item.order));
-            details = "第 " + String.join("、", problemNumbers) + " 项发现问题，具体问题及整改要求详见上表。";
-        }
-        wrapped(canvas, details, split + 6, y + 36,
-                WIDTH - MARGIN - split - 12, 9, 3, Paint.Align.LEFT);
-        if (!record.rectification.isBlank()) {
-            text(canvas, MARGIN + 6, y + 83, "整改记录：", 11, Paint.Align.LEFT, true);
-            wrapped(canvas, record.rectification + "（" + rectificationStatus(record.status) + "）",
-                    split + 6, y + 69, WIDTH - MARGIN - split - 12, 9, 2, Paint.Align.LEFT);
-        }
+        String opinion = problems.isEmpty() ? "无" : String.join("；", problems);
+        String rectification = record.rectification == null ? "" : record.rectification.trim();
+        String status = rectificationStatus(record.status);
+        String rectificationText = rectification.isBlank()
+                ? status : rectification + "（" + status + "）";
+
+        float half = height / 2f;
+        text(canvas, MARGIN + 6, y + 25, "整改意见：", 11, Paint.Align.LEFT, true);
+        fittedWrapped(canvas, opinion, split + 6, y + 3,
+                WIDTH - MARGIN - split - 12, half - 6, 9.5f, 7.0f, Paint.Align.LEFT);
+
+        text(canvas, MARGIN + 6, y + half + 25, "整改记录：", 11, Paint.Align.LEFT, true);
+        fittedWrapped(canvas, rectificationText, split + 6, y + half + 3,
+                WIDTH - MARGIN - split - 12, half - 6, 9.5f, 7.0f, Paint.Align.LEFT);
     }
 
     private void drawSignatures(Canvas canvas, Inspection record, float y, float height) {
@@ -358,6 +350,50 @@ public final class PdfExporter {
         rect(canvas, x, y, width, height);
         wrapped(canvas, value, x + 3, y + 2, width - 6, size,
                 maximumLines, alignment);
+    }
+
+    private void fittedCell(Canvas canvas, float x, float y, float width, float height,
+                            String value, float maximumSize, float minimumSize,
+                            Paint.Align alignment) {
+        rect(canvas, x, y, width, height);
+        fittedWrapped(canvas, value, x + 3, y + 2, width - 6, height - 4,
+                maximumSize, minimumSize, alignment);
+    }
+
+    private void fittedWrapped(Canvas canvas, String value, float x, float y, float width,
+                               float height, float maximumSize, float minimumSize,
+                               Paint.Align alignment) {
+        float size = maximumSize;
+        int lineCount = wrappedLineCount(value, width, size);
+        int maximumLines = Math.max(1, (int) (height / (size * 1.18f)));
+        while (lineCount > maximumLines && size > minimumSize + .01f) {
+            size = Math.max(minimumSize, size - .35f);
+            lineCount = wrappedLineCount(value, width, size);
+            maximumLines = Math.max(1, (int) (height / (size * 1.18f)));
+        }
+        wrapped(canvas, value, x, y, width, size, maximumLines, alignment);
+    }
+
+    private int wrappedLineCount(String value, float width, float size) {
+        if (value == null || value.isEmpty()) return 1;
+        paint.setTextSize(size);
+        paint.setTypeface(Typeface.create("sans", Typeface.NORMAL));
+        int lines = 0;
+        for (String paragraph : value.split("\n", -1)) {
+            StringBuilder line = new StringBuilder();
+            for (int offset = 0; offset < paragraph.length();) {
+                int codePoint = paragraph.codePointAt(offset);
+                String character = new String(Character.toChars(codePoint));
+                if (paint.measureText(line + character) > width && line.length() > 0) {
+                    lines++;
+                    line.setLength(0);
+                }
+                line.append(character);
+                offset += Character.charCount(codePoint);
+            }
+            lines++;
+        }
+        return Math.max(1, lines);
     }
 
     private void row(Canvas canvas, float y, float height, float[] positions,

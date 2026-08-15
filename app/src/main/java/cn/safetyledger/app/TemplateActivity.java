@@ -23,8 +23,8 @@ public final class TemplateActivity extends Activity {
     private static final int MAX_TEMPLATE_NAME = 16;
     private static final int MAX_TEMPLATE_TYPE = 16;
     private static final int MAX_ITEM_CATEGORY = 12;
-    private static final int MAX_ITEM_CONTENT = 40;
-    private static final int MAX_ITEM_STANDARD = 24;
+    private static final int MAX_ITEM_CONTENT = 100;
+    private static final int MAX_ITEM_STANDARD = 60;
     private LedgerRepository repo;
     private LinearLayout list;
     private String selectedId;
@@ -164,7 +164,7 @@ public final class TemplateActivity extends Activity {
         heading.addView(add, new LinearLayout.LayoutParams(Ui.dp(this, 118), Ui.dp(this, 40)));
         list.addView(heading);
         TextView limitNote = Ui.text(this,
-                "版式限制：最多 9 个检查项目；检查内容最多 40 字，检查标准最多 24 字。这样可保证正式 PDF 第1页保留完整检查表与签名，第2页起只放检查/整改照片。",
+                "版式限制：最多 9 个检查项目；检查内容最多 100 字，检查标准最多 60 字。正式 PDF 会根据单元格文字量自动调整字号，优先保证第1页检查表、整改意见、整改记录和签名完整，第2页起只放检查/整改照片。",
                 12, false);
         limitNote.setTextColor(Ui.MUTED);
         list.addView(limitNote);
@@ -227,11 +227,15 @@ public final class TemplateActivity extends Activity {
     private void editItem(Template template, TemplateItem item) {
         LinearLayout form = dialogForm();
         EditText category = Ui.input(this, "检查类别（最多12字）");
-        EditText content = Ui.input(this, "检查内容（最多40字）");
-        EditText standard = Ui.input(this, "检查标准（最多24字）");
+        EditText content = Ui.input(this, "检查内容（最多100字）");
+        EditText standard = Ui.input(this, "检查标准（最多60字）");
         category.setSingleLine(true);
-        content.setSingleLine(true);
-        standard.setSingleLine(true);
+        content.setSingleLine(false);
+        content.setMinLines(2);
+        content.setMaxLines(4);
+        standard.setSingleLine(false);
+        standard.setMinLines(2);
+        standard.setMaxLines(3);
         category.setFilters(new InputFilter[]{new InputFilter.LengthFilter(MAX_ITEM_CATEGORY)});
         content.setFilters(new InputFilter[]{new InputFilter.LengthFilter(MAX_ITEM_CONTENT)});
         standard.setFilters(new InputFilter[]{new InputFilter.LengthFilter(MAX_ITEM_STANDARD)});
