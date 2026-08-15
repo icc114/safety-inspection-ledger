@@ -41,12 +41,16 @@ jobs:
         run: mvn -f desktop/pom.xml -B test package
       - name: Commit verified source
         run: |
+          # The patch script also refreshes release artifact labels, but this Actions token
+          # intentionally has no workflow-write permission. Revert those two metadata-only
+          # files here; source changes are committed below after all tests pass.
+          git checkout -- .github/workflows/android-build.yml .github/workflows/android-release.yml
           if git diff --quiet; then
             echo 'Source already patched; nothing to commit.'
             exit 0
           fi
           git config user.name 'github-actions[bot]'
-          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add app desktop .github/workflows/android-build.yml .github/workflows/android-release.yml
+          git config user.email '41898282+icc114@users.noreply.github.com'
+          git add app desktop
           git commit -m 'Android 1.2.19 simplify first-page rectification layout'
           git push origin HEAD:agent/pc-word-pdf-layout-v012
