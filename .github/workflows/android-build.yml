@@ -1,9 +1,6 @@
 name: Android APK Build
 
 on:
-  push:
-    branches: ['**']
-  pull_request:
   workflow_dispatch:
 
 permissions:
@@ -31,11 +28,11 @@ jobs:
       - name: Test, lint and build debug APK
         run: ./gradlew --no-daemon testDebugUnitTest lintDebug assembleDebug
       - name: Name debug APK
-        run: cp app/build/outputs/apk/debug/app-debug.apk '安全检查台账-1.2.19-debug-不可作为长期升级包.apk'
+        run: cp app/build/outputs/apk/debug/app-debug.apk '安全检查台账-1.2.24-debug-不可作为长期升级包.apk'
       - name: Upload debug APK artifact
         uses: actions/upload-artifact@v4
         with:
-          name: 安全检查台账-1.2.19-debug
-          path: 安全检查台账-1.2.19-debug-不可作为长期升级包.apk
+          name: 安全检查台账-1.2.24-debug
+          path: 安全检查台账-1.2.24-debug-不可作为长期升级包.apk
           if-no-files-found: error
           retention-days: 30
