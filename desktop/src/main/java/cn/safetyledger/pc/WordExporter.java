@@ -19,7 +19,7 @@ import java.util.List;
  * as Android PdfExporter. Photos remain as original files beside the Word document.
  */
 public final class WordExporter {
-    public static final int LAYOUT_VERSION = 4;
+    public static final int LAYOUT_VERSION = 5;
 
     private static final String FONT = "Microsoft YaHei";
     private static final int A4_WIDTH = 11906;
@@ -81,14 +81,14 @@ public final class WordExporter {
         int[] widths = {1760, 660, 4340, 1660, 2520};
         int realCount = record.items == null ? 0 : record.items.size();
         int itemCount = Math.max(1, realCount);
-        int layoutRows = realCount == 0 ? 1 : Math.max(9, realCount);
+        int layoutRows = realCount == 0 ? 1 : Math.max(12, realCount);
         XWPFTable table = table(doc, layoutRows + 1, 5, widths);
         String[] heads = {"检查类别", "序号", "检查内容及标准", "检查结果", "现场情况/问题"};
         exactRow(table.getRow(0), 680);
         for (int i = 0; i < heads.length; i++) cell(table.getRow(0).getCell(i), heads[i], 11, true, ParagraphAlignment.CENTER);
 
-        int rowHeight = 10560 / layoutRows;
-        int itemFont = Math.max(6, Math.min(11, (int) Math.round((rowHeight / 20.0) * 0.22)));
+        int rowHeight = 10440 / layoutRows;
+        int itemFont = Math.max(7, Math.min(10, (int) Math.floor((rowHeight / 20.0) * 0.20)));
         if (record.items == null || record.items.isEmpty()) {
             XWPFTableRow row = table.getRow(1);
             exactRow(row, 10200);
@@ -116,7 +116,7 @@ public final class WordExporter {
         int[] widths = {1760, 9180};
         XWPFTable table = table(doc, 2, 2, widths);
         hideInsideHorizontalBorder(table);
-        for (XWPFTableRow row : table.getRows()) exactRow(row, 840);
+        for (XWPFTableRow row : table.getRows()) exactRow(row, 900);
 
         List<String> problems = new ArrayList<>();
         if (record.items != null) {

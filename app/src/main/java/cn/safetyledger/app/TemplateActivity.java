@@ -19,7 +19,7 @@ import cn.safetyledger.app.data.LedgerRepository;
 import java.util.List;
 
 public final class TemplateActivity extends Activity {
-    private static final int MAX_TEMPLATE_ITEMS = 9;
+    private static final int MAX_TEMPLATE_ITEMS = 12;
     private static final int MAX_TEMPLATE_NAME = 16;
     private static final int MAX_TEMPLATE_TYPE = 16;
     private static final int MAX_ITEM_CATEGORY = 12;
@@ -154,7 +154,7 @@ public final class TemplateActivity extends Activity {
         back.setOnClickListener(view -> showList());
         add.setOnClickListener(view -> {
             if (repo.templateItems(template.id).size() >= MAX_TEMPLATE_ITEMS) {
-                Ui.toast(this, "每个模板最多 9 个检查项目，以保证导出 A4 第1页包含完整检查表和签名");
+                Ui.toast(this, "每个模板最多 12 个检查项目，以保证导出 A4 第1页包含完整检查表、整改意见、整改记录和签名");
                 return;
             }
             editItem(template, null);
@@ -164,7 +164,7 @@ public final class TemplateActivity extends Activity {
         heading.addView(add, new LinearLayout.LayoutParams(Ui.dp(this, 118), Ui.dp(this, 40)));
         list.addView(heading);
         TextView limitNote = Ui.text(this,
-                "版式限制：最多 9 个检查项目；检查内容最多 100 字，检查标准最多 60 字。正式 PDF 会根据单元格文字量自动调整字号，优先保证第1页检查表、整改意见、整改记录和签名完整，第2页起只放检查/整改照片。",
+                "版式限制：最多 12 个检查项目；检查内容最多 100 字，检查标准最多 60 字。第1页固定保留检查表、整改意见、整改记录和三方签名；单元格会按文字量自动缩放字号，所有检查/整改/复查照片从第2页开始。",
                 12, false);
         limitNote.setTextColor(Ui.MUTED);
         list.addView(limitNote);
@@ -260,7 +260,7 @@ public final class TemplateActivity extends Activity {
                         return;
                     }
                     if (item == null && repo.templateItems(template.id).size() >= MAX_TEMPLATE_ITEMS) {
-                        Ui.toast(this, "当前模板已达到 9 个检查项目上限");
+                        Ui.toast(this, "当前模板已达到 12 个检查项目上限");
                         return;
                     }
                     int order = item == null ? repo.templateItems(template.id).size() + 1 : item.order;

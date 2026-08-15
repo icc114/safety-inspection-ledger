@@ -31,7 +31,7 @@ public final class PdfExporter {
     private static final int WIDTH = 595;
     private static final int HEIGHT = 842;
     private static final int MARGIN = 24;
-    private static final int FORM_ITEM_SLOTS = 9;
+    private static final int FORM_ITEM_SLOTS = 12;
     private final Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final LedgerRepository repo;
 
@@ -255,7 +255,7 @@ public final class PdfExporter {
             float x = MARGIN + column * (width + gap);
             float y = 66 + row * (height + 10);
             rect(canvas, x, y, width, height);
-            Bitmap bitmap = decodeForPdf(media.localPath, 900, 1100, false);
+            Bitmap bitmap = decodeForPdf(media.localPath, 720, 900, false);
             if (bitmap != null) {
                 canvas.drawBitmap(bitmap, null,
                         fit(bitmap, x + 3, y + 3, width - 6, height - 28), paint);

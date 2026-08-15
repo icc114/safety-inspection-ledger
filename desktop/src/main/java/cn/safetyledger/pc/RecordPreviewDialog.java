@@ -49,7 +49,7 @@ public final class RecordPreviewDialog extends JDialog {
         setLayout(new BorderLayout(8, 8));
         JPanel header = new JPanel(new BorderLayout(8, 8));
         header.setBorder(new EmptyBorder(14, 16, 6, 16));
-        JLabel title = new JLabel(blank(record.templateName, "安全检查") + "记录");
+        JLabel title = new JLabel(formTitle(record.templateName));
         title.setFont(title.getFont().deriveFont(Font.BOLD, 22f));
         header.add(title, BorderLayout.NORTH);
 
@@ -247,6 +247,13 @@ public final class RecordPreviewDialog extends JDialog {
 
     private static String blank(String value, String fallback) {
         return value == null || value.isBlank() ? fallback : value;
+    }
+
+    private static String formTitle(String value) {
+        String title = blank(value, "安全检查").trim();
+        if (title.endsWith("记录表")) return title;
+        if (title.endsWith("记录")) return title + "表";
+        return title + "记录表";
     }
 
     private static String shortId(String id) {

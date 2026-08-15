@@ -10,7 +10,7 @@ import java.nio.file.Path;
 import static org.junit.jupiter.api.Assertions.*;
 
 class WordExporterTest {
-    @Test void wordFormUsesFixedNineSlotA4FirstPageStructure() throws Exception {
+    @Test void wordFormUsesFixedTwelveSlotA4FirstPageStructure() throws Exception {
         ArchiveService.Record record = new ArchiveService.Record();
         record.id = "test-record";
         record.templateName = "安全检查记录";
@@ -41,10 +41,10 @@ class WordExporterTest {
                 assertTrue(doc.getTables().get(0).getText().contains("检查地点："));
                 assertFalse(doc.getTables().get(0).getText().contains("检查类型"));
 
-                // Header + nine fixed item slots. Adding the ninth item must not shrink earlier rows.
-                assertEquals(10, doc.getTables().get(1).getRows().size());
+                // Header + twelve fixed item slots. Adding items up to twelve must not change earlier row heights.
+                assertEquals(13, doc.getTables().get(1).getRows().size());
                 assertTrue(rowText(doc.getTables().get(1).getRow(1)).contains("灭火器是否完好"));
-                assertTrue(rowText(doc.getTables().get(1).getRow(9)).isBlank());
+                assertTrue(rowText(doc.getTables().get(1).getRow(12)).isBlank());
 
                 assertFalse(doc.getTables().get(2).getText().contains("检查情况："));
                 assertTrue(doc.getTables().get(2).getText().contains("整改意见："));

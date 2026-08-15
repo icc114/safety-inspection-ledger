@@ -29,6 +29,7 @@ import cn.safetyledger.app.data.Entities.Page;
 import cn.safetyledger.app.data.Entities.Template;
 import cn.safetyledger.app.data.LedgerRepository;
 import cn.safetyledger.app.pdf.PdfExporter;
+import cn.safetyledger.app.sync.CloudSyncScheduler;
 
 import java.io.OutputStream;
 import java.time.DayOfWeek;
@@ -590,6 +591,7 @@ public final class LedgerActivity extends Activity {
     @Override
     protected void onResume() {
         super.onResume();
+        CloudSyncScheduler.scheduleTrashSoon(this);
         if (records != null) {
             refreshTypeFilter();
             syncCalendar();
