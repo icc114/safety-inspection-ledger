@@ -1,0 +1,64 @@
+name: Diagnose Android 1.2.20 patch
+
+on:
+  push:
+    branches:
+      - agent/v1220-complete-android-pc
+
+permissions:
+  contents: read
+
+jobs:
+  diagnose:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: Apply Android-only 1.2.20 patch
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          def rep(path, old, new):
+              p=Path(path); s=p.read_text(encoding='utf-8')
+              if old not in s: raise SystemExit(f'missing {old!r} in {path}')
+              p.write_text(s.replace(old,new),encoding='utf-8')
+          p='app/src/main/java/cn/safetyledger/app/TemplateActivity.java'
+          rep(p,'private static final int MAX_TEMPLATE_ITEMS = 9;','private static final int MAX_TEMPLATE_ITEMS = 12;')
+          rep(p,'每个模板最多 9 个检查项目，以保证导出 A4 第1页包含完整检查表和签名','每个模板最多 12 个检查项目，以保证导出 A4 第1页包含完整检查表、整改意见、整改记录和签名')
+          rep(p,'版式限制：最多 9 个检查项目；检查内容最多 100 字，检查标准最多 60 字。正式 PDF 会根据单元格文字量自动调整字号，优先保证第1页检查表、整改意见、整改记录和签名完整，第2页起只放检查/整改照片。','版式限制：最多 12 个检查项目；检查内容最多 100 字，检查标准最多 60 字。第1页固定保留检查表、整改意见、整改记录和三方签名；单元格会按文字量自动缩放字号，所有检查/整改/复查照片从第2页开始。')
+          rep(p,'当前模板已达到 9 个检查项目上限','当前模板已达到 12 个检查项目上限')
+          p='app/src/main/java/cn/safetyledger/app/pdf/PdfExporter.java'
+          rep(p,'private static final int FORM_ITEM_SLOTS = 9;','private static final int FORM_ITEM_SLOTS = 12;')
+          rep(p,'Bitmap bitmap = decodeForPdf(media.localPath, 900, 1100, false);','Bitmap bitmap = decodeForPdf(media.localPath, 720, 900, false);')
+          p='app/src/main/java/cn/safetyledger/app/LedgerActivity.java'
+          rep(p,'import cn.safetyledger.app.pdf.PdfExporter;','import cn.safetyledger.app.pdf.PdfExporter;\nimport cn.safetyledger.app.sync.CloudSyncScheduler;')
+          rep(p,'    private void render() {','    @Override\n    protected void onResume() {\n        super.onResume();\n        if (repo != null) {\n            CloudSyncScheduler.scheduleTrashSoon(this);\n            refreshTypeFilter();\n            load();\n        }\n    }\n\n    private void render() {')
+          p='app/build.gradle'
+          rep(p,'versionCode 22','versionCode 23')
+          rep(p,"versionName '1.2.19'","versionName '1.2.20'")
+          PY
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: gradle
+      - uses: android-actions/setup-android@v3
+      - run: sdkmanager 'platform-tools' 'platforms;android-35' 'build-tools;35.0.0'
+      - run: chmod +x gradlew
+      - name: Run Gradle and capture full output
+        shell: bash
+        run: |
+          set +e
+          ./gradlew --no-daemon testDebugUnitTest lintDebug assembleDebug --stacktrace 2>&1 | tee android-v1220-build.log
+          code=${PIPESTATUS[0]}
+          echo "$code" > android-v1220-exit-code.txt
+          exit 0
+      - uses: actions/upload-artifact@v4
+        with:
+          name: android-v1220-build-diagnostics
+          path: |
+            android-v1220-build.log
+            android-v1220-exit-code.txt
+          retention-days: 7
