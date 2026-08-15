@@ -8,6 +8,7 @@ on:
       - 'tools/fix_v1218_build.py'
       - 'tools/fix_pc_word_compile.py'
       - 'tools/fix_a4_summary_limits.py'
+      - 'desktop/src/test/java/cn/safetyledger/pc/WordExporterTest.java'
       - '.github/workflows/apply-v1218-pc012.yml'
   workflow_dispatch:
 
