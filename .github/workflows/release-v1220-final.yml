@@ -11,9 +11,9 @@ permissions:
 
 jobs:
   android-release:
-    if: contains(github.event.head_commit.message, 'Finalize Android 1.2.20 and PC 0.1.3') || github.event_name == 'workflow_dispatch'
+    if: contains(github.event.head_commit.message, 'Build final 1.2.20 and PC 0.1.3 artifacts') || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
-    timeout-minutes: 35
+    timeout-minutes: 40
     env:
       SAFETY_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
       SAFETY_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
@@ -21,6 +21,33 @@ jobs:
       EXPECTED_CERT_SHA256: "0E:D4:37:B3:AB:D1:2F:BC:62:88:91:C8:1C:FF:15:06:72:D0:AD:A7:8C:C6:6D:11:72:08:59:EC:C9:F5:28:15"
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Apply Android 1.2.20 product fixes
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          def rep(path, old, new):
+              p=Path(path); s=p.read_text(encoding='utf-8')
+              if old not in s: raise SystemExit(f'missing expected text in {path}: {old[:100]!r}')
+              p.write_text(s.replace(old,new),encoding='utf-8')
+          p='app/src/main/java/cn/safetyledger/app/TemplateActivity.java'
+          rep(p,'private static final int MAX_TEMPLATE_ITEMS = 9;','private static final int MAX_TEMPLATE_ITEMS = 12;')
+          rep(p,'每个模板最多 9 个检查项目，以保证导出 A4 第1页包含完整检查表和签名','每个模板最多 12 个检查项目，以保证导出 A4 第1页包含完整检查表、整改意见、整改记录和签名')
+          rep(p,'版式限制：最多 9 个检查项目；检查内容最多 100 字，检查标准最多 60 字。正式 PDF 会根据单元格文字量自动调整字号，优先保证第1页检查表、整改意见、整改记录和签名完整，第2页起只放检查/整改照片。','版式限制：最多 12 个检查项目；检查内容最多 100 字，检查标准最多 60 字。第1页固定保留检查表、整改意见、整改记录和三方签名；单元格会按文字量自动缩放字号，所有检查/整改/复查照片从第2页开始。')
+          rep(p,'当前模板已达到 9 个检查项目上限','当前模板已达到 12 个检查项目上限')
+          p='app/src/main/java/cn/safetyledger/app/pdf/PdfExporter.java'
+          rep(p,'private static final int FORM_ITEM_SLOTS = 9;','private static final int FORM_ITEM_SLOTS = 12;')
+          rep(p,'Bitmap bitmap = decodeForPdf(media.localPath, 900, 1100, false);','Bitmap bitmap = decodeForPdf(media.localPath, 720, 900, false);')
+          p='app/src/main/java/cn/safetyledger/app/LedgerActivity.java'
+          rep(p,'import cn.safetyledger.app.pdf.PdfExporter;','import cn.safetyledger.app.pdf.PdfExporter;\nimport cn.safetyledger.app.sync.CloudSyncScheduler;')
+          rep(p,'    protected void onResume() {\n        super.onResume();\n        if (records != null) {','    protected void onResume() {\n        super.onResume();\n        CloudSyncScheduler.scheduleTrashSoon(this);\n        if (records != null) {')
+          p='app/build.gradle'
+          rep(p,'versionCode 22','versionCode 23')
+          rep(p,"versionName '1.2.19'","versionName '1.2.20'")
+          PY
       - name: Verify permanent signing secrets
         env:
           KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
@@ -36,7 +63,7 @@ jobs:
         run: |
           keytool -list -v -keystore "$SAFETY_KEYSTORE_PATH" -storepass "$SAFETY_KEYSTORE_PASSWORD" -alias "$SAFETY_KEY_ALIAS" > "$RUNNER_TEMP/key-info.txt"
           grep -F "SHA256: $EXPECTED_CERT_SHA256" "$RUNNER_TEMP/key-info.txt" >/dev/null || (echo 'Wrong permanent signing key' && exit 1)
-      - uses: actions/setup-java@v4
+      - uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: '17'
@@ -61,12 +88,45 @@ jobs:
           retention-days: 30
 
   windows-pc:
-    if: contains(github.event.head_commit.message, 'Finalize Android 1.2.20 and PC 0.1.3') || github.event_name == 'workflow_dispatch'
+    if: contains(github.event.head_commit.message, 'Build final 1.2.20 and PC 0.1.3 artifacts') || github.event_name == 'workflow_dispatch'
     runs-on: windows-latest
-    timeout-minutes: 35
+    timeout-minutes: 40
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-java@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Apply PC 0.1.3 product fixes
+        shell: pwsh
+        run: |
+          @'
+          from pathlib import Path
+          def rep(path, old, new):
+              p=Path(path); s=p.read_text(encoding='utf-8')
+              if old not in s: raise SystemExit(f'missing expected text in {path}: {old[:100]!r}')
+              p.write_text(s.replace(old,new),encoding='utf-8')
+          p='desktop/src/main/java/cn/safetyledger/pc/WordExporter.java'
+          rep(p,'public static final int LAYOUT_VERSION = 4;','public static final int LAYOUT_VERSION = 5;')
+          rep(p,'int layoutRows = realCount == 0 ? 1 : Math.max(9, realCount);','int layoutRows = realCount == 0 ? 1 : Math.max(12, realCount);')
+          rep(p,'int rowHeight = 10560 / layoutRows;','int rowHeight = 10440 / layoutRows;')
+          rep(p,'int itemFont = Math.max(6, Math.min(11, (int) Math.round((rowHeight / 20.0) * 0.22)));','int itemFont = Math.max(7, Math.min(10, (int) Math.floor((rowHeight / 20.0) * 0.20)));')
+          rep(p,'for (XWPFTableRow row : table.getRows()) exactRow(row, 840);','for (XWPFTableRow row : table.getRows()) exactRow(row, 900);')
+          p='desktop/src/test/java/cn/safetyledger/pc/WordExporterTest.java'
+          rep(p,'wordFormUsesFixedNineSlotA4FirstPageStructure','wordFormUsesFixedTwelveSlotA4FirstPageStructure')
+          rep(p,'// Header + nine fixed item slots. Adding the ninth item must not shrink earlier rows.','// Header + twelve fixed item slots. Adding items up to twelve must not change earlier row heights.')
+          rep(p,'assertEquals(10, doc.getTables().get(1).getRows().size());','assertEquals(13, doc.getTables().get(1).getRows().size());')
+          rep(p,'assertTrue(rowText(doc.getTables().get(1).getRow(9)).isBlank());','assertTrue(rowText(doc.getTables().get(1).getRow(12)).isBlank());')
+          p='desktop/src/main/java/cn/safetyledger/pc/SafetyLedgerDesktop.java'
+          rep(p,'private void showError(String title,Throwable error){String msg=error.getMessage()==null?error.getClass().getSimpleName():error.getMessage();setStatus(title+"："+msg);JOptionPane.showMessageDialog(this,msg,title,JOptionPane.ERROR_MESSAGE);}', 'private void showError(String title,Throwable error){String msg=friendlyError(error);setStatus(title+"："+msg);JOptionPane.showMessageDialog(this,msg,title,JOptionPane.ERROR_MESSAGE);}\n    private static String friendlyError(Throwable error){String fallback=error==null?"未知错误":error.getClass().getSimpleName();for(Throwable current=error;current!=null;current=current.getCause()){String m=current.getMessage();if(m!=null&&!m.isBlank())fallback=m;String s=m==null?"":m.toLowerCase(Locale.ROOT);if(current instanceof java.net.ConnectException||current instanceof java.net.UnknownHostException||current instanceof java.net.http.HttpTimeoutException||s.contains("failed to connect")||s.contains("timed out")||s.contains("timeout")||s.contains("unable to resolve")||s.contains("network is unreachable")||s.contains("no route to host"))return "网络连接问题：暂时无法连接云同步服务器。请检查电脑网络、VPN/代理和云同步地址后重试；电脑本地资料不会因此丢失。";}return fallback;}')
+          p='desktop/src/main/java/cn/safetyledger/pc/RecordPreviewDialog.java'
+          rep(p,'JLabel title = new JLabel(blank(record.templateName, "安全检查") + "记录");','JLabel title = new JLabel(formTitle(record.templateName));')
+          rep(p,'    private static String shortId(String id) {','    private static String formTitle(String value) {\n        String title = blank(value, "安全检查").trim();\n        if (title.endsWith("记录表")) return title;\n        if (title.endsWith("记录")) return title + "表";\n        return title + "记录表";\n    }\n\n    private static String shortId(String id) {')
+          p='desktop/pom.xml'
+          rep(p,'<version>0.1.2</version>','<version>0.1.3</version>')
+          rep(p,'<finalName>safety-ledger-pc-0.1.2-all</finalName>','<finalName>safety-ledger-pc-0.1.3-all</finalName>')
+          '@ | Set-Content -Encoding UTF8 "$env:RUNNER_TEMP\patch_pc.py"
+          python "$env:RUNNER_TEMP\patch_pc.py"
+      - uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: '17'
