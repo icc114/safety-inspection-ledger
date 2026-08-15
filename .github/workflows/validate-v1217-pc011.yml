@@ -26,7 +26,7 @@ jobs:
         run: |
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add app desktop .github/workflows/windows-pc-build.yml
+          git add app desktop
           git commit -m 'Android 1.2.17 import compatibility and PC 0.1.1 preview'
           git push origin HEAD:agent/pc-preview-v011
 
