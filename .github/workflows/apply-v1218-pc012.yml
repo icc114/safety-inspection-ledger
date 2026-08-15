@@ -7,6 +7,7 @@ on:
       - 'tools/apply_v1218_sync_trash.py'
       - 'tools/fix_v1218_build.py'
       - 'tools/fix_pc_word_compile.py'
+      - 'tools/fix_a4_summary_limits.py'
       - '.github/workflows/apply-v1218-pc012.yml'
   workflow_dispatch:
 
@@ -27,6 +28,7 @@ jobs:
           python3 tools/apply_v1218_sync_trash.py
           python3 tools/fix_v1218_build.py
           python3 tools/fix_pc_word_compile.py
+          python3 tools/fix_a4_summary_limits.py
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
