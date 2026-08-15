@@ -24,8 +24,8 @@ function New-RandomSecret([int]$Bytes = 24) {
 Write-Host "==================================================" -ForegroundColor DarkCyan
 Write-Host "Safety Ledger - one-time Android release signing setup" -ForegroundColor Cyan
 Write-Host "==================================================" -ForegroundColor DarkCyan
-Write-Host "This script creates ONE private signing key on this PC and stores a copy in GitHub Actions Secrets." -ForegroundColor Yellow
-Write-Host "Do not regenerate the key for future versions. Keep the backup folder offline and private." -ForegroundColor Yellow
+Write-Host "This creates ONE permanent private signing key for all future Android releases." -ForegroundColor Yellow
+Write-Host "Do not regenerate the key in future versions." -ForegroundColor Yellow
 Write-Host ""
 
 $keytool = Find-Tool "keytool.exe" @(
@@ -39,12 +39,14 @@ if (-not $keytool) {
 
 $gh = Find-Tool "gh.exe" @("C:\Program Files\GitHub CLI\gh.exe")
 if (-not $gh) {
-    throw "GitHub CLI gh.exe was not found. Install GitHub CLI first, then run: gh auth login"
+    throw "GitHub CLI gh.exe was not found. Install GitHub CLI first."
 }
 
 & $gh auth status
 if ($LASTEXITCODE -ne 0) {
-    throw "GitHub CLI is not logged in. Run: gh auth login"
+    Write-Host "GitHub CLI is not logged in. A browser login will open now." -ForegroundColor Yellow
+    & $gh auth login --hostname github.com --git-protocol https --web
+    if ($LASTEXITCODE -ne 0) { throw "GitHub login failed." }
 }
 
 New-Item -ItemType Directory -Force -Path $BackupDirectory | Out-Null
@@ -53,9 +55,9 @@ $recovery = Join-Path $BackupDirectory "SIGNING-RECOVERY-KEEP-PRIVATE.txt"
 
 if (Test-Path $keystore) {
     Write-Host "Existing signing key found: $keystore" -ForegroundColor Green
-    Write-Host "For safety this script will NOT create a second key." -ForegroundColor Yellow
+    Write-Host "This script will NOT create a second key." -ForegroundColor Yellow
     if (-not (Test-Path $recovery)) {
-        throw "The keystore exists but the recovery text is missing. Do not regenerate; recover the original passwords first."
+        throw "The keystore exists but recovery text is missing. Do not regenerate; recover the original passwords."
     }
     $pairs = @{}
     Get-Content $recovery | ForEach-Object {
@@ -107,7 +109,9 @@ $keyPassword | & $gh secret set ANDROID_KEY_PASSWORD --repo $Repository
 if ($LASTEXITCODE -ne 0) { throw "Failed to save GitHub Actions secrets." }
 
 Write-Host ""
-Write-Host "Signing setup complete." -ForegroundColor Green
+Write-Host "SIGNING SETUP COMPLETE." -ForegroundColor Green
 Write-Host "Private backup folder: $BackupDirectory" -ForegroundColor Green
-Write-Host "Do NOT upload this folder to GitHub, cloud drives, chat groups, or public file sharing." -ForegroundColor Yellow
-Write-Host "Next: open GitHub Actions -> Android Stable Signed Release -> Run workflow." -ForegroundColor Cyan
+Write-Host "Keep that folder in at least one additional OFFLINE private backup." -ForegroundColor Yellow
+Write-Host "Do NOT upload the JKS or recovery file to GitHub, cloud drives, chat groups, or public sharing." -ForegroundColor Yellow
+Write-Host ""
+Write-Host "Next: GitHub -> Actions -> Android Stable Signed Release -> Run workflow." -ForegroundColor Cyan
