@@ -29,7 +29,7 @@ public final class SafetyLedgerDesktop extends JFrame {
     private PcConfig config;
 
     public SafetyLedgerDesktop(){
-        super("安全检查台账 PC");config=PcConfig.load();buildUi();loadFields();refreshTable();
+        super("安全检查台账 PC");config=PcConfig.load();buildUi();loadFields();migrateWordLayout();refreshTable();
         setSize(1050,680);setLocationRelativeTo(null);setDefaultCloseOperation(WindowConstants.DISPOSE_ON_CLOSE);
         addWindowListener(new WindowAdapter(){@Override public void windowClosed(WindowEvent e){scheduler.shutdownNow();}});
         scheduler.scheduleWithFixedDelay(()->{if(!config.endpoint.isBlank()&&!config.password.isBlank())sync(false);},20,120,TimeUnit.SECONDS);
@@ -55,6 +55,10 @@ public final class SafetyLedgerDesktop extends JFrame {
     }
 
     private void loadFields(){endpoint.setText(config.endpoint);space.setText(config.space);password.setText(config.password);archive.setText(config.archiveRoot);}
+    private void migrateWordLayout(){
+        try{int changed=WordLayoutMigrator.migrate(config.archivePath());if(changed>0)setStatus("已按手机 PDF 版式更新 "+changed+" 份 Word 检查单");}
+        catch(Exception e){setStatus("Word 检查单版式更新失败："+e.getMessage());}
+    }
     private boolean saveConfig(){
         try{config.endpoint=endpoint.getText().trim();config.space=space.getText().trim();config.password=new String(password.getPassword());config.archiveRoot=archive.getText().trim();if(config.space.isBlank())config.space="safety-ledger";if(config.archiveRoot.isBlank())throw new IllegalArgumentException("请选择电脑本地资料库文件夹");Files.createDirectories(config.archivePath());config.save();setStatus("设置已保存");return true;}catch(Exception e){showError("保存失败",e);return false;}
     }

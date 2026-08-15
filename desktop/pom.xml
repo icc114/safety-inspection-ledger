@@ -2,7 +2,7 @@
   <modelVersion>4.0.0</modelVersion>
   <groupId>cn.safetyledger</groupId>
   <artifactId>safety-ledger-pc</artifactId>
-  <version>0.1.1</version>
+  <version>0.1.2</version>
   <name>Safety Ledger PC</name>
   <properties>
     <maven.compiler.release>17</maven.compiler.release>
@@ -34,7 +34,7 @@
       <plugin>
         <groupId>org.apache.maven.plugins</groupId><artifactId>maven-shade-plugin</artifactId><version>3.6.0</version>
         <executions><execution><phase>package</phase><goals><goal>shade</goal></goals><configuration>
-          <finalName>safety-ledger-pc-0.1.1-all</finalName>
+          <finalName>safety-ledger-pc-0.1.2-all</finalName>
           <createDependencyReducedPom>false</createDependencyReducedPom>
           <transformers><transformer implementation="org.apache.maven.plugins.shade.resource.ManifestResourceTransformer">
             <mainClass>cn.safetyledger.pc.SafetyLedgerDesktop</mainClass>
