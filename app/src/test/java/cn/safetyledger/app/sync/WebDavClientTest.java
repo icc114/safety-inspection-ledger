@@ -75,4 +75,15 @@ public final class WebDavClientTest {
                 authorization.get());
         assertTrue(!authorization.get().contains("very-secret-password"));
     }
+
+    @Test public void chineseSpaceNameIsEncodedToAsciiHeaderAndPathNamespace() {
+        WebDavClient client = new WebDavClient(server.url("/dav/").toString(),
+                "", "", "", "2026安全检查", "Sjs123456");
+        SyncProvider.ConnectionResult result = client.testReadWrite("2026安全检查");
+        assertTrue(result.message(), result.success());
+        assertEquals("u-MjAyNuWuieWFqOajgOafpQ", syncSpace.get());
+        assertTrue("HTTP header must not contain raw Chinese", !syncSpace.get().contains("安全检查"));
+        assertTrue("WebDAV path must use the same safe namespace",
+                objects.keySet().stream().noneMatch(path -> path.contains("安全检查")));
+    }
 }
