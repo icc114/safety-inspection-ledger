@@ -29,7 +29,7 @@ jobs:
           java-version: '17'
           cache: maven
       - name: Compile standalone Android-PC data tool
-        run: javac tools/SafetyDataTool.java
+        run: javac -encoding UTF-8 tools/SafetyDataTool.java
       - name: Test and build PC client
         run: mvn -B -f desktop/pom.xml test package
       - name: Build portable Windows app image
