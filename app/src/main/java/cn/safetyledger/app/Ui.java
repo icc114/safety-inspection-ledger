@@ -8,6 +8,7 @@ import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
 import android.os.Build;
 import android.provider.MediaStore;
+import android.text.method.PasswordTransformationMethod;
 import android.view.Gravity;
 import android.view.View;
 import android.view.ViewGroup;
@@ -126,7 +127,7 @@ public final class Ui {
     }
 
     public static EditText input(Context context, String hint) {
-        EditText editText = new EditText(context);
+        EditText editText = new PersistentEditText(context);
         editText.setHint(hint);
         editText.setHintTextColor(Color.rgb(148, 163, 184));
         editText.setTextColor(TEXT);
@@ -135,6 +136,23 @@ public final class Ui {
         editText.setPadding(dp(context, 12), dp(context, 10), dp(context, 12), dp(context, 10));
         editText.setBackground(shape(context, Color.WHITE, LINE, 10));
         return editText;
+    }
+
+    /**
+     * Some vendor Android builds clear a password transformation when setSingleLine(true)
+     * is called after the field has already been marked as a password. SettingsActivity
+     * intentionally applies single-line mode after creating all cloud fields, so preserve
+     * the transformation and never expose a saved/typed password as plain text.
+     */
+    private static final class PersistentEditText extends EditText {
+        PersistentEditText(Context context) { super(context); }
+
+        @Override
+        public void setSingleLine(boolean singleLine) {
+            boolean password = getTransformationMethod() instanceof PasswordTransformationMethod;
+            super.setSingleLine(singleLine);
+            if (password) setTransformationMethod(PasswordTransformationMethod.getInstance());
+        }
     }
 
     public static LinearLayout row(Context context) {
