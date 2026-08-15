@@ -1,0 +1,43 @@
+name: Patch final network popup
+
+on:
+  push:
+    branches: [agent/pc-word-pdf-layout-v012]
+    paths:
+      - 'tools/patch_network_popup_after_v1218.py'
+      - '.github/workflows/patch-network-popup.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  verify:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/pc-word-pdf-layout-v012
+      - name: Apply popup patch
+        run: python3 tools/patch_network_popup_after_v1218.py
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: gradle
+      - uses: android-actions/setup-android@v3
+      - name: Install Android SDK
+        run: sdkmanager 'platform-tools' 'platforms;android-35' 'build-tools;35.0.0'
+      - name: Verify Android
+        run: |
+          chmod +x gradlew
+          ./gradlew --no-daemon testDebugUnitTest lintDebug assembleDebug
+      - name: Commit verified popup patch
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add app/src/main/java/cn/safetyledger/app/SettingsActivity.java
+          git commit -m 'Show Cloudflare timeouts as network problems' || exit 0
+          git push origin HEAD:agent/pc-word-pdf-layout-v012
