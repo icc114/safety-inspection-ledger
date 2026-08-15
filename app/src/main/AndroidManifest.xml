@@ -1,9 +1,39 @@
+<?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
     <uses-permission android:name="android.permission.CAMERA" />
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
-    <application android:theme="@style/Theme.SafetyLedger" android:label="安全检查台账" android:allowBackup="false" android:supportsRtl="true">
-        <provider android:name="androidx.core.content.FileProvider" android:authorities="${applicationId}.files" android:exported="false" android:grantUriPermissions="true"><meta-data android:name="android.support.FILE_PROVIDER_PATHS" android:resource="@xml/file_paths" /></provider>
-        <activity android:name=".MainActivity" android:screenOrientation="unspecified" android:exported="true"><intent-filter><action android:name="android.intent.action.MAIN"/><category android:name="android.intent.category.LAUNCHER"/></intent-filter></activity>
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+    <uses-feature android:name="android.hardware.camera" android:required="false" />
+    <uses-feature android:name="android.hardware.location.gps" android:required="false" />
+    <application
+        android:name=".SafetyLedgerApp"
+        android:allowBackup="false"
+        android:fullBackupContent="false"
+        android:dataExtractionRules="@xml/data_extraction_rules"
+        android:icon="@drawable/ic_app"
+        android:label="安全检查台账"
+        android:theme="@style/AppTheme"
+        android:usesCleartextTraffic="false">
+        <service
+            android:name=".sync.CloudSyncJobService"
+            android:exported="false"
+            android:permission="android.permission.BIND_JOB_SERVICE" />
+        <activity android:name=".PhotoPreviewActivity" />
+        <activity android:name=".SignatureActivity" android:configChanges="orientation|screenSize" android:screenOrientation="sensorLandscape" />
+        <activity android:name=".TrashActivity" />
+        <activity android:name=".SettingsActivity" />
+        <activity android:name=".TemplateActivity" />
+        <activity android:name=".RecordDetailActivity" />
+        <activity android:name=".LedgerActivity" android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+        <activity android:name=".MainActivity" />
     </application>
 </manifest>

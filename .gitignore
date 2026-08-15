@@ -1,4 +1,13 @@
 .gradle/
-**/build/
+.idea/
 local.properties
+**/build/
+*.iml
+*.apk
+work/
+outputs/
+tools/android-signing-backup/
 *.jks
+*.keystore
+
+desktop/target/
