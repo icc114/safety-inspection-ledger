@@ -60,15 +60,11 @@ public final class ArchiveService {
                 }
             }
         }
-        // A synchronized Android snapshot may contain only the tombstone after the business
-        // row has already been physically removed. Preserve the Windows archive and mark its
-        // existing folder instead of silently losing the deletion state.
         for (Map.Entry<String,Long> deleted : collectedTombstones.entrySet()) {
             String relative = index.getProperty(deleted.getKey() + ".path", "");
             if (relative.isBlank()) continue;
             long newestRecord = longValue(index.getProperty(deleted.getKey() + ".updated"), -1);
             Path oldFolder = root.resolve(relative).normalize();
-            // A later administrator restore must win over an older deletion marker from a stale peer.
             if (newestRecord > deleted.getValue()) {
                 if (oldFolder.startsWith(root)) Files.deleteIfExists(oldFolder.resolve("已从移动端删除.txt"));
                 continue;
@@ -88,8 +84,10 @@ public final class ArchiveService {
         for (String key:index.stringPropertyNames()) if (key.endsWith(".path")) {
             String id=key.substring(0,key.length()-5);Path folder=root.resolve(index.getProperty(key));Path json=folder.resolve("record.json");
             if(!Files.isRegularFile(json))continue;
-            try { Record r=gson.fromJson(Files.readString(json,StandardCharsets.UTF_8),Record.class); out.add(new IndexEntry(id,r.date,r.time,r.templateName,r.location,r.status,folder)); }
-            catch(Exception ignored){}
+            try {
+                Record r=gson.fromJson(Files.readString(json,StandardCharsets.UTF_8),Record.class);
+                out.add(new IndexEntry(id,r.date,r.time,r.templateName,r.type,r.location,r.status,folder));
+            } catch(Exception ignored){}
         }
         out.sort(Comparator.comparing((IndexEntry e)->e.date).thenComparing(e->e.time).reversed()); return out;
     }
@@ -157,5 +155,8 @@ public final class ArchiveService {
     }
     public static final class Item { public String category="",content="",standard="",result="",problem="";public int order; }
     public static final class Media { public String id="",category="",location="";public long capturedAt;public transient Path source; }
-    public static final class IndexEntry { public final String id,date,time,title,location,status;public final Path folder;IndexEntry(String id,String date,String time,String title,String location,String status,Path folder){this.id=id;this.date=date;this.time=time;this.title=title;this.location=location;this.status=status;this.folder=folder;} }
+    public static final class IndexEntry {
+        public final String id,date,time,title,type,location,status;public final Path folder;
+        IndexEntry(String id,String date,String time,String title,String type,String location,String status,Path folder){this.id=id;this.date=date;this.time=time;this.title=title;this.type=type;this.location=location;this.status=status;this.folder=folder;}
+    }
 }
