@@ -5,10 +5,12 @@ on:
     branches: ['**']
     paths:
       - 'desktop/**'
+      - 'tools/SafetyDataTool.java'
       - '.github/workflows/windows-pc-build.yml'
   pull_request:
     paths:
       - 'desktop/**'
+      - 'tools/SafetyDataTool.java'
       - '.github/workflows/windows-pc-build.yml'
   workflow_dispatch:
 
@@ -26,6 +28,8 @@ jobs:
           distribution: temurin
           java-version: '17'
           cache: maven
+      - name: Compile standalone Android-PC data tool
+        run: javac tools/SafetyDataTool.java
       - name: Test and build PC client
         run: mvn -B -f desktop/pom.xml test package
       - name: Build portable Windows app image
