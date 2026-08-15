@@ -247,11 +247,14 @@ public final class SettingsActivity extends Activity {
     private LinearLayout securityCard() {
         LinearLayout card = Ui.card(this);
         card.addView(Ui.sectionTitle(this, "5", "安全与本地存储", null));
-        Button password = Ui.secondaryButton(this, "未使用云同步：设置本机永久删除密码");
+        Button password = Ui.secondaryButton(this, "设置 / 修改永久删除密码");
         password.setOnClickListener(view -> setDeletePassword());
         card.addView(password);
+        TextView archiveState = Ui.text(this, "自动归档：关闭（不会自动删除本机记录）", 14, true);
+        archiveState.setTextColor(Ui.BLUE_DARK);
+        card.addView(archiveState);
         TextView archive = Ui.text(this,
-                "未整改完成的记录不会自动清理。超过六个月的自动归档与释放空间功能将在云端文件能够真实校验后启用，当前保持关闭以避免资料丢失。",
+                "“超过六个月自动归档”原本用于手机空间不足时，将已完成且已在 PC/云端完整校验的旧记录转为归档副本，再按用户选择释放手机上的原始照片。当前版本不执行自动归档、不自动删除任何记录或照片；待 PC 客户端和归档校验全部完成后再提供可选开关。",
                 13, false);
         archive.setTextColor(Ui.MUTED);
         card.addView(archive);
@@ -287,7 +290,7 @@ public final class SettingsActivity extends Activity {
 
     private void loadProvider() {
         try (Cursor cursor = repo.raw().rawQuery(
-                "SELECT provider_type,endpoint,username,encrypted_secret,token_ciphertext,sync_space,encryption_secret FROM sync_providers WHERE enabled=1 ORDER BY updated_at DESC LIMIT 1",
+                "SELECT provider_type,endpoint,username,encrypted_secret,token_ciphertext,sync_space,encryption_secret,enabled FROM sync_providers ORDER BY enabled DESC,updated_at DESC LIMIT 1",
                 null)) {
             if (!cursor.moveToFirst()) {
                 syncEnabledStatus.setText("云同步：未启用");
@@ -296,16 +299,34 @@ public final class SettingsActivity extends Activity {
             }
             String type = cursor.getString(0);
             String displayType = "Cloudflare".equals(type) ? "Cloudflare" : "WebDAV / NAS";
+            boolean enabled = cursor.getInt(7) == 1;
             setProviderSelection(displayType);
-            syncEnabledStatus.setText("云同步：已启用 · " + displayType);
-            syncEnabledStatus.setTextColor(Color.rgb(22, 128, 57));
-            if (syncSaveButton != null) syncSaveButton.setText("已启用 · 保存修改");
+            syncEnabledStatus.setText(enabled ? "云同步：已启用 · " + displayType
+                    : "云同步：未启用 · 已保留上次配置");
+            syncEnabledStatus.setTextColor(enabled ? Color.rgb(22, 128, 57) : Ui.MUTED);
+            if (syncSaveButton != null) syncSaveButton.setText(enabled ? "已启用 · 保存修改" : "保存并启用");
             endpoint.setText(cursor.getString(1));
             user.setText(cursor.getString(2));
             SecretStore store = new SecretStore();
-            savedServerPassword = store.decrypt(cursor.getString(3));
-            savedToken = store.decrypt(cursor.getString(4));
-            savedSpacePassword = store.decrypt(cursor.getString(6));
+            try {
+                savedServerPassword = store.decrypt(cursor.getString(3));
+                savedToken = store.decrypt(cursor.getString(4));
+                savedSpacePassword = store.decrypt(cursor.getString(6));
+            } catch (SecretStore.ResetRequiredException invalidated) {
+                repo.raw().execSQL("UPDATE sync_providers SET encrypted_secret='',token_ciphertext='',encryption_secret='',enabled=0 WHERE id='active-provider'");
+                CloudSyncScheduler.cancel(this);
+                savedServerPassword = "";
+                savedToken = "";
+                savedSpacePassword = "";
+                syncEnabledStatus.setText("云同步：未启用 · 本机安全密钥已重置");
+                syncEnabledStatus.setTextColor(Ui.DANGER);
+                syncStatus.setText("同步状态：请重新输入同步密码，然后点击保存并启用");
+                if (syncSaveButton != null) syncSaveButton.setText("保存并启用");
+                new AlertDialog.Builder(this)
+                        .setTitle("本机安全密钥已重置")
+                        .setMessage("手机系统使旧的本机加密密钥失效。APP 已自动清理无法解密的云端凭据；检查记录、照片、签名和模板均未删除。请重新输入同步密码后点击“保存并启用”。")
+                        .setPositiveButton("知道了", null).show();
+            }
             secret.setText("");
             token.setText("");
             encryption.setText("");

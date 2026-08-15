@@ -190,7 +190,7 @@ public final class LedgerActivity extends Activity {
         card.addView(Ui.gap(this, 4));
         LinearLayout filters = Ui.row(this);
         type = spinner(types());
-        statusFilter = spinner(new String[]{"全部状态", "待整改", "整改中", "已整改完成", "检查完成"});
+        statusFilter = spinner(new String[]{"全部状态", "草稿", "待整改", "整改中", "已整改完成", "检查完成"});
         filters.addView(type, new LinearLayout.LayoutParams(0, Ui.dp(this, 42), 1));
         filters.addView(Ui.horizontalGap(this, 6));
         filters.addView(statusFilter, new LinearLayout.LayoutParams(0, Ui.dp(this, 42), 1));
@@ -280,7 +280,22 @@ public final class LedgerActivity extends Activity {
         LinkedHashSet<String> values = new LinkedHashSet<>();
         values.add("全部检查类型");
         for (Template template : templates) values.add(template.category);
+        values.addAll(repo.inspectionTypes());
         return values.toArray(new String[0]);
+    }
+
+    private void refreshTypeFilter() {
+        if (type == null) return;
+        String previous = type.getSelectedItem() == null ? "全部检查类型"
+                : String.valueOf(type.getSelectedItem());
+        String[] values = types();
+        type.setAdapter(new ArrayAdapter<>(this,
+                android.R.layout.simple_spinner_dropdown_item, values));
+        int selectedIndex = 0;
+        for (int i = 0; i < values.length; i++) {
+            if (previous.equals(values[i])) { selectedIndex = i; break; }
+        }
+        type.setSelection(selectedIndex, false);
     }
 
     private void syncCalendar() {
@@ -379,7 +394,7 @@ public final class LedgerActivity extends Activity {
 
     private String selectedStatus() {
         if (statusFilter == null || statusFilter.getSelectedItemPosition() == 0) return null;
-        return new String[]{null, "PENDING_RECTIFICATION", "RECTIFYING", "RECTIFIED", "COMPLETED"}
+        return new String[]{null, "DRAFT", "PENDING_RECTIFICATION", "RECTIFYING", "RECTIFIED", "COMPLETED"}
                 [statusFilter.getSelectedItemPosition()];
     }
 
@@ -576,6 +591,7 @@ public final class LedgerActivity extends Activity {
     protected void onResume() {
         super.onResume();
         if (records != null) {
+            refreshTypeFilter();
             syncCalendar();
             load();
         }
