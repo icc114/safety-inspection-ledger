@@ -173,7 +173,15 @@ public final class BackupService{
             d.execSQL("UPDATE sync_providers SET enabled=0,encrypted_secret='',token_ciphertext='',encryption_secret=''");
         }
         if(tableExists(d,"main","app_settings")){
-            d.delete("app_settings","key IN ('device_id','cloud_role','device_role','last_sync_at','last_sync_error')",null);
+            // Current schema uses setting_key; very old experimental backups may use key.
+            // Resolve the real column before deleting device-specific state so a valid
+            // cross-device .safetydata import can never fail with "no such column: key".
+            Set<String> settingColumns=columns(d,"main","app_settings");
+            String keyColumn=settingColumns.contains("setting_key")?"setting_key":settingColumns.contains("key")?"key":null;
+            if(keyColumn!=null){
+                String[] localOnly={"device_id","cloud_role","device_role","last_sync_at","last_sync_error"};
+                d.delete("app_settings",keyColumn+" IN (?,?,?,?,?)",localOnly);
+            }
         }
         if(tableExists(d,"main","sync_devices")) d.delete("sync_devices",null,null);
     }
