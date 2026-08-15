@@ -1,12 +1,12 @@
 package cn.safetyledger.app.backup;
 
-import android.content.*;import android.database.Cursor;import android.database.sqlite.SQLiteDatabase;import android.os.*;import cn.safetyledger.app.SafetyLedgerApp;import cn.safetyledger.app.data.LedgerDatabase;import java.io.*;import java.nio.charset.StandardCharsets;import java.nio.file.*;import java.security.*;import java.util.*;import java.util.zip.*;import javax.crypto.*;import javax.crypto.spec.*;
+import android.content.*;import android.database.Cursor;import android.database.sqlite.SQLiteDatabase;import android.os.*;import cn.safetyledger.app.SafetyLedgerApp;import cn.safetyledger.app.data.LedgerDatabase;import java.io.*;import java.nio.ByteBuffer;import java.nio.charset.StandardCharsets;import java.nio.file.*;import java.security.*;import java.util.*;import java.util.zip.*;import javax.crypto.*;import javax.crypto.spec.*;
 
 public final class BackupService{
     private static final byte[] MAGIC="SAFETYDATA".getBytes(StandardCharsets.US_ASCII);
     private static final byte[] PORTABLE_MAGIC="SAFETYLOCAL2".getBytes(StandardCharsets.US_ASCII);
     private static final char[] PORTABLE_KEY="safety-ledger-portable-backup-v2".toCharArray();
-    private static final int FORMAT=1,ITERATIONS=310000;
+    private static final int FORMAT=2,PAYLOAD_FORMAT=1,ITERATIONS=310000,CHUNK_SIZE=256*1024,GCM_TAG_BYTES=16;
     private final Context context;public BackupService(Context c){context=c.getApplicationContext();}
     public void exportData(OutputStream destination,char[]password)throws Exception{
         if(password.length<8)throw new IllegalArgumentException("密码至少 8 位");
@@ -24,7 +24,7 @@ public final class BackupService{
             File dbFile=context.getDatabasePath(LedgerDatabase.NAME);
             Properties manifest=new Properties();
             manifest.setProperty("format","safetydata");
-            manifest.setProperty("formatVersion","1");
+            manifest.setProperty("formatVersion",String.valueOf(PAYLOAD_FORMAT));
             manifest.setProperty("container","safety-ledger-portable");
             manifest.setProperty("appPackage","cn.safetyledger.app");
             manifest.setProperty("portableCompatibility","android-windows");
@@ -67,7 +67,7 @@ public final class BackupService{
             Properties m=new Properties();
             try(InputStream in=new FileInputStream(manifestFile)){m.load(in);}
             if(!"safetydata".equals(m.getProperty("format")))throw new IOException("不是 APP 数据备份");
-            if(Integer.parseInt(m.getProperty("formatVersion","0"))>FORMAT)throw new IOException("备份格式版本过新");
+            if(Integer.parseInt(m.getProperty("formatVersion","0"))>PAYLOAD_FORMAT)throw new IOException("备份格式版本过新");
             if(Integer.parseInt(m.getProperty("schemaVersion","0"))>LedgerDatabase.VERSION)throw new IOException("数据库版本过新，请先升级 APP");
             if(!sha(dbFile).equals(m.getProperty("databaseSha256")))throw new IOException("数据库完整性校验失败");
             SQLiteDatabase test=SQLiteDatabase.openDatabase(dbFile.getAbsolutePath(),null,SQLiteDatabase.OPEN_READONLY);
@@ -152,8 +152,60 @@ public final class BackupService{
             d.delete("app_settings","key IN ('device_id','cloud_role','device_role','last_sync_at','last_sync_error')",null);
         }
     }
-    private void encrypt(File plain,OutputStream out,char[]pw,byte[]magic)throws Exception{byte[]salt=random(16),iv=random(12);SecretKey key=derive(pw,salt);Cipher c=Cipher.getInstance("AES/GCM/NoPadding");c.init(Cipher.ENCRYPT_MODE,key,new GCMParameterSpec(128,iv));out.write(magic);out.write(FORMAT);out.write(salt);out.write(iv);try(CipherOutputStream co=new CipherOutputStream(out,c)){Files.copy(plain.toPath(),co);}}
-    private void decrypt(InputStream in,File out,char[]pw,byte[]expectedMagic)throws Exception{byte[]magic=readExactly(in,expectedMagic.length);if(!Arrays.equals(magic,expectedMagic))throw new IOException("文件不是 .safetydata APP 数据备份（PDF 不可导入）");int version=in.read();if(version<1||version>FORMAT)throw new IOException("不支持的备份格式版本");byte[]salt=readExactly(in,16),iv=readExactly(in,12);Cipher c=Cipher.getInstance("AES/GCM/NoPadding");c.init(Cipher.DECRYPT_MODE,derive(pw,salt),new GCMParameterSpec(128,iv));try(CipherInputStream ci=new CipherInputStream(in,c);OutputStream o=new FileOutputStream(out)){copy(ci,o);}catch(IOException e){throw new SecurityException("密码错误或备份完整性校验失败",e);}}
+    private void encrypt(File plain,OutputStream out,char[]pw,byte[]magic)throws Exception{
+        byte[]salt=random(16),baseNonce=random(12);SecretKey key=derive(pw,salt);
+        out.write(magic);out.write(FORMAT);out.write(salt);out.write(baseNonce);
+        DataOutputStream data=new DataOutputStream(out);
+        byte[]buffer=new byte[CHUNK_SIZE];long counter=0;
+        try(InputStream input=new BufferedInputStream(new FileInputStream(plain),65536)){
+            for(int n;(n=input.read(buffer))>=0;){
+                if(n==0)continue;
+                Cipher cipher=Cipher.getInstance("AES/GCM/NoPadding");
+                cipher.init(Cipher.ENCRYPT_MODE,key,new GCMParameterSpec(128,chunkNonce(baseNonce,counter)));
+                cipher.updateAAD(chunkAad(magic,counter,n));
+                byte[]encrypted=cipher.doFinal(buffer,0,n);
+                data.writeInt(n);data.write(encrypted);counter++;
+            }
+        }
+        data.writeInt(0);data.flush();
+    }
+    private void decrypt(InputStream in,File out,char[]pw,byte[]expectedMagic)throws Exception{
+        byte[]magic=readExactly(in,expectedMagic.length);if(!Arrays.equals(magic,expectedMagic))throw new IOException("文件不是 .safetydata APP 数据备份（PDF 不可导入）");
+        int version=in.read();if(version<1||version>FORMAT)throw new IOException("不支持的备份格式版本");
+        byte[]salt=readExactly(in,16),iv=readExactly(in,12);SecretKey key=derive(pw,salt);
+        if(version==1){decryptLegacy(in,out,key,iv);return;}
+        decryptChunked(in,out,key,iv,expectedMagic);
+    }
+    private void decryptLegacy(InputStream in,File out,SecretKey key,byte[]iv)throws Exception{
+        Cipher cipher=Cipher.getInstance("AES/GCM/NoPadding");cipher.init(Cipher.DECRYPT_MODE,key,new GCMParameterSpec(128,iv));
+        try(CipherInputStream ci=new CipherInputStream(in,cipher);OutputStream o=new BufferedOutputStream(new FileOutputStream(out),65536)){copy(ci,o);}catch(IOException e){throw new SecurityException("密码错误、旧备份过大或备份完整性校验失败",e);}
+    }
+    private void decryptChunked(InputStream in,File out,SecretKey key,byte[]baseNonce,byte[]magic)throws Exception{
+        DataInputStream data=new DataInputStream(in);long counter=0;
+        try(OutputStream output=new BufferedOutputStream(new FileOutputStream(out),65536)){
+            while(true){
+                int plainLength;
+                try{plainLength=data.readInt();}catch(EOFException e){throw new EOFException("备份文件被截断");}
+                if(plainLength==0)break;
+                if(plainLength<0||plainLength>CHUNK_SIZE)throw new IOException("备份分块长度非法");
+                byte[]encrypted=readExactly(data,plainLength+GCM_TAG_BYTES);
+                try{
+                    Cipher cipher=Cipher.getInstance("AES/GCM/NoPadding");
+                    cipher.init(Cipher.DECRYPT_MODE,key,new GCMParameterSpec(128,chunkNonce(baseNonce,counter)));
+                    cipher.updateAAD(chunkAad(magic,counter,plainLength));
+                    byte[]plain=cipher.doFinal(encrypted);
+                    if(plain.length!=plainLength)throw new SecurityException("备份分块长度校验失败");
+                    output.write(plain);counter++;
+                }catch(GeneralSecurityException e){throw new SecurityException("密码错误或备份完整性校验失败",e);}
+            }
+        }
+    }
+    private byte[]chunkNonce(byte[]base,long counter){
+        byte[]nonce=base.clone();long seed=ByteBuffer.wrap(base,4,8).getLong();ByteBuffer.wrap(nonce,4,8).putLong(seed+counter);return nonce;
+    }
+    private byte[]chunkAad(byte[]magic,long counter,int plainLength)throws IOException{
+        ByteArrayOutputStream bytes=new ByteArrayOutputStream(magic.length+12);DataOutputStream data=new DataOutputStream(bytes);data.write(magic);data.writeLong(counter);data.writeInt(plainLength);data.flush();return bytes.toByteArray();
+    }
     private SecretKey derive(char[]pw,byte[]salt)throws Exception{PBEKeySpec s=new PBEKeySpec(pw,salt,ITERATIONS,256);byte[]k=SecretKeyFactory.getInstance("PBKDF2WithHmacSHA256").generateSecret(s).getEncoded();s.clearPassword();return new SecretKeySpec(k,"AES");}
     private byte[]random(int n){byte[]b=new byte[n];new SecureRandom().nextBytes(b);return b;}private byte[]properties(Properties p)throws IOException{ByteArrayOutputStream b=new ByteArrayOutputStream();p.store(b,"Safety Ledger portable backup");return b.toByteArray();}
     private void entry(ZipOutputStream z,String name,byte[]b)throws IOException{z.putNextEntry(new ZipEntry(name));z.write(b);z.closeEntry();}private void file(ZipOutputStream z,String name,File f)throws IOException{z.putNextEntry(new ZipEntry(name));Files.copy(f.toPath(),z);z.closeEntry();}private void zipDir(ZipOutputStream z,File dir,String prefix)throws IOException{if(!dir.isDirectory())return;File[]fs=dir.listFiles();if(fs==null)return;for(File f:fs)if(f.isDirectory())zipDir(z,f,prefix+f.getName()+"/");else file(z,prefix+f.getName(),f);}

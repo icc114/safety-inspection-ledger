@@ -91,9 +91,11 @@ public final class CloudSyncService {
                         changed += backup.mergeRestore(restore);
                     }
                     peers++;
-                } catch (Exception peerError) {
+                } catch (Throwable peerError) {
                     skipped++;
-                    String detail = readable(peerError);
+                    String detail = peerError instanceof OutOfMemoryError
+                            ? "旧版云端快照过大，已跳过；请将该设备升级到 1.2.14 后重新同步"
+                            : readable(peerError);
                     if (detail.length() > 90) detail = detail.substring(0, 90) + "…";
                     warnings.add(shortDevice(name) + "：" + detail);
                 } finally {
