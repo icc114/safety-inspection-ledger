@@ -101,4 +101,5 @@ jobs:
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git add app desktop docs .github/workflows/android-build.yml .github/workflows/android-release.yml .github/workflows/windows-pc-build.yml
           git commit -m 'Finalize Android 1.2.20 and PC 0.1.3'
-          git push
+          git pull --rebase origin agent/v1220-complete-android-pc
+          git push origin HEAD:agent/v1220-complete-android-pc
