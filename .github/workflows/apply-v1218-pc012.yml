@@ -1,0 +1,45 @@
+name: Apply Android 1.2.18 and PC 0.1.2
+
+on:
+  push:
+    branches: [agent/pc-word-pdf-layout-v012]
+    paths:
+      - 'tools/apply_v1218_sync_trash.py'
+      - '.github/workflows/apply-v1218-pc012.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  verify:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/pc-word-pdf-layout-v012
+      - name: Apply patch
+        run: python3 tools/apply_v1218_sync_trash.py
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: gradle
+      - uses: android-actions/setup-android@v3
+      - name: Install Android SDK
+        run: sdkmanager 'platform-tools' 'platforms;android-35' 'build-tools;35.0.0'
+      - name: Android test lint build
+        run: |
+          chmod +x gradlew
+          ./gradlew --no-daemon testDebugUnitTest lintDebug assembleDebug
+      - name: PC test package
+        run: mvn -B -f desktop/pom.xml test package
+      - name: Commit verified source
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add app desktop .github/workflows/windows-pc-build.yml
+          git commit -m 'Android 1.2.18 efficient cloud trash and PC 0.1.2 Word layout' || exit 0
+          git push origin HEAD:agent/pc-word-pdf-layout-v012
