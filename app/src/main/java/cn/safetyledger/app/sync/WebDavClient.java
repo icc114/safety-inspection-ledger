@@ -137,6 +137,10 @@ public final class WebDavClient {
         }
     }
 
+    public void deleteSnapshot(String space, String name) throws Exception {
+        delete(fileUrl(space, name));
+    }
+
     private void mkcol(String url) throws Exception {
         ResponseInfo response = execute("MKCOL", url, new byte[0], null);
         if (!(response.code == 200 || response.code == 201 || response.code == 204

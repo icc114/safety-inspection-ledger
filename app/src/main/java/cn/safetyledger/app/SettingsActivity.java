@@ -173,8 +173,8 @@ public final class SettingsActivity extends Activity {
         });
         card.addView(save);
         card.addView(Ui.gap(this, 6));
-        Button manage = Ui.secondaryButton(this, "管理已配对设备 / 设置角色");
-        manage.setOnClickListener(view -> manageDevices());
+        Button manage = Ui.secondaryButton(this, "刷新并管理已配对设备 / 设置角色");
+        manage.setOnClickListener(view -> refreshAndManageDevices());
         card.addView(manage);
         return card;
     }
@@ -246,6 +246,15 @@ public final class SettingsActivity extends Activity {
         actions.addView(Ui.horizontalGap(this, 5));
         actions.addView(now, Ui.weight(1));
         card.addView(actions);
+        card.addView(Ui.gap(this, 7));
+        Button resetCloud = Ui.dangerButton(this, "清空云端旧测试设备 / 重新建立同步空间");
+        resetCloud.setOnClickListener(view -> confirmResetCloudSpace());
+        card.addView(resetCloud);
+        TextView resetNote = Ui.text(this,
+                "仅在准备废弃旧测试设备时使用：删除当前同步空间里的设备快照，但不会删除本机检查记录、照片、签名或模板。重建后本机成为首位管理员，其他正式设备再次同步后会重新加入。",
+                12, false);
+        resetNote.setTextColor(Ui.MUTED);
+        card.addView(resetNote);
         return card;
     }
 
@@ -711,10 +720,19 @@ public final class SettingsActivity extends Activity {
     }
 
     private void syncNow() {
-        syncStatus.setText("同步状态：正在下载、合并并上传…");
+        runSync(false);
+    }
+
+    private void refreshAndManageDevices() {
+        syncStatus.setText("同步状态：正在刷新云端设备列表…");
+        runSync(true);
+    }
+
+    private void runSync(boolean openDevicesAfter) {
         new Thread(() -> {
             try {
-                CloudSyncService.Result result = new CloudSyncService(this).syncNow();
+                CloudSyncService.Result result = new CloudSyncService(this).syncNow(message ->
+                        runOnUiThread(() -> syncStatus.setText("同步状态：" + message)));
                 runOnUiThread(() -> {
                     String role = "FIELD".equals(result.role()) ? "工作人员" : "管理员";
                     String type = (String) provider.getSelectedItem();
@@ -723,10 +741,21 @@ public final class SettingsActivity extends Activity {
                     if (syncSaveButton != null) syncSaveButton.setText("已启用 · 保存修改");
                     String time = DateFormat.getTimeInstance(DateFormat.SHORT)
                             .format(new Date(result.completedAt()));
-                    syncStatus.setText("同步状态：成功 · " + time + " · 本机角色 " + role);
+                    String suffix = result.skippedSnapshots() > 0
+                            ? " · 跳过旧快照 " + result.skippedSnapshots() + " 个" : "";
+                    syncStatus.setText("同步状态：成功 · " + time + " · 本机角色 " + role + suffix);
                     Ui.toast(this, "同步完成：接收 " + result.peerDevices()
-                            + " 台设备，合并 " + result.changedRows() + " 项数据");
+                            + " 台设备，合并 " + result.changedRows() + " 项数据" + suffix);
                     deviceRole.setSelection("FIELD".equals(result.role()) ? 1 : 0);
+                    if (result.skippedSnapshots() > 0 && !result.warning().isBlank()) {
+                        new AlertDialog.Builder(this)
+                                .setTitle("同步完成，但发现旧设备快照")
+                                .setMessage("其他可用设备已经正常同步；以下旧/损坏快照已跳过，不再阻塞同步：\n\n"
+                                        + result.warning()
+                                        + "\n\n如果这些都是之前测试版留下的，可使用下方“清空云端旧测试设备 / 重新建立同步空间”。")
+                                .setPositiveButton("知道了", null).show();
+                    }
+                    if (openDevicesAfter) manageDevices();
                 });
             } catch (Exception error) {
                 String message = error.getMessage() == null ? error.getClass().getSimpleName()
@@ -734,12 +763,59 @@ public final class SettingsActivity extends Activity {
                 repo.putSetting("last_sync_error", message);
                 runOnUiThread(() -> {
                     syncStatus.setText("同步状态：失败 · " + message);
-                    syncNotification(message);
+                    if (!message.contains("已有同步任务正在运行")) syncNotification(message);
                     new AlertDialog.Builder(this).setTitle("同步失败")
                             .setMessage(message).setPositiveButton("确定", null).show();
                 });
             }
-        }, "manual-cloud-sync").start();
+        }, openDevicesAfter ? "refresh-paired-devices" : "manual-cloud-sync").start();
+    }
+
+    private void confirmResetCloudSpace() {
+        EditText confirmation = Ui.input(this, "请输入：清空云端");
+        confirmation.setSingleLine(true);
+        new AlertDialog.Builder(this)
+                .setTitle("重新建立云端同步空间")
+                .setMessage("这会删除当前同步空间中所有设备上传的 .safetydata 云端快照，并清空本机的旧配对设备列表。\n\n不会删除本机检查记录、照片、签名或模板。\n\n适合正式投入使用前清理旧测试版设备。其他仍需使用的正式手机之后再次“立即同步”即可重新加入。")
+                .setView(confirmation)
+                .setPositiveButton("确认清空", (dialog, which) -> {
+                    if (!"清空云端".equals(confirmation.getText().toString().trim())) {
+                        Ui.toast(this, "未输入“清空云端”，已取消");
+                        return;
+                    }
+                    resetCloudSpace();
+                })
+                .setNegativeButton("取消", null)
+                .show();
+    }
+
+    private void resetCloudSpace() {
+        syncStatus.setText("同步状态：正在重新建立云端同步空间…");
+        new Thread(() -> {
+            try {
+                CloudSyncService.ResetResult result = new CloudSyncService(this).resetCloudSpace(message ->
+                        runOnUiThread(() -> syncStatus.setText("同步状态：" + message)));
+                runOnUiThread(() -> {
+                    deviceRole.setSelection(0);
+                    String time = DateFormat.getTimeInstance(DateFormat.SHORT)
+                            .format(new Date(result.completedAt()));
+                    syncStatus.setText("同步状态：云端已重建 · " + time + " · 本机角色 管理员");
+                    new AlertDialog.Builder(this)
+                            .setTitle("云端同步空间已重新建立")
+                            .setMessage("已清理 " + result.deletedSnapshots()
+                                    + " 个旧设备快照。\n\n本机已成为首位管理员。现在让另一台正式手机使用完全相同的同步空间名称和同步密码点击“立即同步”；随后回到本机点“刷新并管理已配对设备 / 设置角色”，即可看到并管理它。")
+                            .setPositiveButton("知道了", null).show();
+                });
+            } catch (Exception error) {
+                String message = error.getMessage() == null ? error.getClass().getSimpleName()
+                        : error.getMessage();
+                runOnUiThread(() -> {
+                    syncStatus.setText("同步状态：云端重建失败 · " + message);
+                    new AlertDialog.Builder(this).setTitle("云端重建失败")
+                            .setMessage(message).setPositiveButton("确定", null).show();
+                });
+            }
+        }, "reset-cloud-space").start();
     }
 
     private void manageDevices() {
@@ -754,7 +830,9 @@ public final class SettingsActivity extends Activity {
                 roles.add(cursor.getString(2));
                 String seen = DateFormat.getDateTimeInstance(DateFormat.SHORT, DateFormat.SHORT)
                         .format(new Date(cursor.getLong(3)));
-                labels.add(cursor.getString(1) + "\n" + roleName(cursor.getString(2))
+                String currentMark = cursor.getString(0).equals(repo.setting("device_id", ""))
+                        ? "（本机）" : "";
+                labels.add(cursor.getString(1) + currentMark + "\n" + roleName(cursor.getString(2))
                         + " · 最后同步 " + seen);
             }
         }
