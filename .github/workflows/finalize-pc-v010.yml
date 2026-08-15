@@ -1,0 +1,41 @@
+name: Finalize PC 0.1.0
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [agent/v1216-pc-client]
+    paths:
+      - 'tools/fix_pc_runtime.py'
+      - 'desktop/src/test/**'
+      - '.github/workflows/finalize-pc-v010.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  finalize:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/v1216-pc-client
+      - name: Apply runtime fixes
+        shell: pwsh
+        run: python tools/fix_pc_runtime.py
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: maven
+      - name: Test and package
+        run: mvn -B -f desktop/pom.xml test package
+      - name: Commit verified PC source
+        shell: bash
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add desktop
+          git commit -m 'Harden PC archive runtime and portable data compatibility' || exit 0
+          git push origin HEAD:agent/v1216-pc-client
