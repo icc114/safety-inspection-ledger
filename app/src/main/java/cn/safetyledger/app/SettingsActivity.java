@@ -62,6 +62,7 @@ public final class SettingsActivity extends Activity {
     private Button syncSaveButton;
     private TextView syncEnabledStatus;
     private TextView syncStatus;
+    private TextView deviceSyncStatus;
     private String savedServerPassword = "";
     private String savedToken = "";
     private String savedSpacePassword = "";
@@ -162,26 +163,40 @@ public final class SettingsActivity extends Activity {
         card.addView(fieldLabel("本机角色"));
         card.addView(deviceRole, new LinearLayout.LayoutParams(-1, Ui.dp(this, 48)));
         TextView note = Ui.text(this,
-                "首次创建同步空间的设备自动成为管理员；使用相同同步空间名称和密码加入的手机默认为工作人员。管理员可接收全部设备记录并管理已配对设备。Windows 客户端仍需后续交付。",
+                "设备管理与检查内容已经分开：这里只同步设备名称、角色、最后在线时间和登出状态，不上传或下载检查记录、照片、签名。首台设备为管理员，后加入设备默认为工作人员。",
                 13, false);
         note.setTextColor(Ui.MUTED);
         card.addView(note);
         Button save = Ui.compactButton(this, "保存设备名称", true);
         save.setOnClickListener(view -> {
             repo.putSetting("device_name", deviceName.getText().toString().trim());
-            Ui.toast(this, "设备名称已保存；角色由云端配对结果自动识别");
+            Ui.toast(this, "设备名称已保存；点“同步设备信息”即可立即更新到其他设备");
         });
         card.addView(save);
         card.addView(Ui.gap(this, 6));
-        Button manage = Ui.secondaryButton(this, "管理已配对设备");
-        manage.setOnClickListener(view -> refreshAndManageDevices());
-        card.addView(manage);
+        deviceSyncStatus = Ui.text(this, "设备同步：尚未同步", 13, true);
+        deviceSyncStatus.setTextColor(Ui.MUTED);
+        String lastDeviceSync = repo.setting("last_device_sync_at", "");
+        if (!lastDeviceSync.isBlank()) {
+            try { deviceSyncStatus.setText("设备同步：已同步 · " + DateFormat.getTimeInstance(DateFormat.SHORT).format(new Date(Long.parseLong(lastDeviceSync)))); }
+            catch (Exception ignored) {}
+        }
+        card.addView(deviceSyncStatus);
+        LinearLayout deviceActions = Ui.row(this);
+        Button syncDevices = Ui.compactButton(this, "同步设备信息", true);
+        Button manage = Ui.compactButton(this, "管理已配对设备", false);
+        syncDevices.setOnClickListener(view -> syncDeviceInfo(false));
+        manage.setOnClickListener(view -> manageDevices());
+        deviceActions.addView(syncDevices, Ui.weight(1));
+        deviceActions.addView(Ui.horizontalGap(this, 5));
+        deviceActions.addView(manage, Ui.weight(1));
+        card.addView(deviceActions);
         return card;
     }
 
     private LinearLayout cloudCard() {
         LinearLayout card = Ui.card(this);
-        card.addView(Ui.sectionTitle(this, "4", "云同步", "服务提供商可切换，失败不影响本地填报"));
+        card.addView(Ui.sectionTitle(this, "4", "检查内容同步", "仅同步模板、检查记录、照片、签名和整改内容"));
         provider = spinner(new String[]{"Cloudflare", "WebDAV / NAS"});
         endpoint = Ui.input(this, "Cloudflare Worker / WebDAV 服务地址");
         space = Ui.input(this, "同步空间名称");
@@ -230,7 +245,7 @@ public final class SettingsActivity extends Activity {
         explanation.setTextColor(Ui.MUTED);
         card.addView(explanation);
         TextView syncStrategy = Ui.text(this,
-                "自动同步策略：本机记录、照片、签名等有变更后约 2–5 分钟合并后台同步；无本地变更时约每 2 小时检查一次云端。设备管理只读取云端设备目录，不再执行全量记录/照片同步。",
+                "检查内容与设备管理完全分开。本机检查记录、照片、签名等有变更后约 2–5 分钟合并后台同步；无本地变更时约每 2 小时检查一次其他设备的检查内容。设备角色变化不会触发整包照片同步。",
                 12, false);
         syncStrategy.setTextColor(Ui.MUTED);
         card.addView(syncStrategy);
@@ -241,7 +256,7 @@ public final class SettingsActivity extends Activity {
         LinearLayout actions = Ui.row(this);
         Button test = Ui.compactButton(this, "测试连接", false);
         syncSaveButton = Ui.compactButton(this, "保存并启用", true);
-        Button now = Ui.compactButton(this, "立即同步", false);
+        Button now = Ui.compactButton(this, "同步检查内容", false);
         test.setOnClickListener(view -> testConnection(false));
         syncSaveButton.setOnClickListener(view -> saveAndEnable());
         now.setOnClickListener(view -> syncNow());
@@ -602,9 +617,9 @@ public final class SettingsActivity extends Activity {
             syncEnabledStatus.setText("云同步：已启用 · " + type);
             syncEnabledStatus.setTextColor(Color.rgb(22, 128, 57));
             syncSaveButton.setText("已启用 · 保存修改");
-            syncStatus.setText("同步状态：配置已保存，正在首次同步…");
-            Ui.toast(this, "云同步已启用，正在同步");
-            syncNow();
+            syncStatus.setText("检查内容：配置已保存；有检查变更时自动同步，也可手动同步");
+            Ui.toast(this, "云同步已启用；正在单独登记设备信息");
+            syncDeviceInfo(false);
         }
     }
 
@@ -728,28 +743,30 @@ public final class SettingsActivity extends Activity {
         runSync(false);
     }
 
-    private void refreshAndManageDevices() {
-        syncStatus.setText("同步状态：正在读取云端设备列表…");
+    private void syncDeviceInfo(boolean openAfter) {
+        if (deviceSyncStatus != null) deviceSyncStatus.setText("设备同步：正在同步设备名称和角色…");
         new Thread(() -> {
             try {
-                CloudSyncService.DiscoveryResult result = new CloudSyncService(this).discoverDevices();
+                CloudSyncService.DiscoveryResult result = new CloudSyncService(this).syncDeviceManagement();
                 runOnUiThread(() -> {
-                    String time = DateFormat.getTimeInstance(DateFormat.SHORT)
-                            .format(new Date(result.completedAt()));
-                    syncStatus.setText("同步状态：设备列表已刷新 · " + time
-                            + " · 云端其他设备 " + result.remoteDevices() + " 台 · 未执行全量同步");
-                    manageDevices();
+                    String time = DateFormat.getTimeInstance(DateFormat.SHORT).format(new Date(result.completedAt()));
+                    if ("LOGGED_OUT".equals(result.role())) {
+                        if (deviceSyncStatus != null) deviceSyncStatus.setText("设备同步：本设备已被管理员登出");
+                        syncEnabledStatus.setText("云同步：未启用");
+                        return;
+                    }
+                    if (deviceSyncStatus != null) deviceSyncStatus.setText("设备同步：成功 · " + time + " · 其他设备 " + result.remoteDevices() + " 台");
+                    deviceRole.setSelection("FIELD".equals(result.role()) ? 1 : 0);
+                    if (openAfter) manageDevices();
                 });
             } catch (Exception error) {
-                String message = error.getMessage() == null ? error.getClass().getSimpleName()
-                        : error.getMessage();
+                String message = readableError(error);
                 runOnUiThread(() -> {
-                    syncStatus.setText("同步状态：设备列表刷新失败 · " + message);
-                    new AlertDialog.Builder(this).setTitle("刷新设备列表失败")
-                            .setMessage(message).setPositiveButton("确定", null).show();
+                    if (deviceSyncStatus != null) deviceSyncStatus.setText("设备同步：失败 · " + message);
+                    new AlertDialog.Builder(this).setTitle("设备信息同步失败").setMessage(message).setPositiveButton("确定", null).show();
                 });
             }
-        }, "quick-device-discovery").start();
+        }, "device-management-sync").start();
     }
 
     private void runSync(boolean openDevicesAfter) {
@@ -960,13 +977,27 @@ public final class SettingsActivity extends Activity {
                         return;
                     }
                     String role = which == 0 ? "ADMIN" : "FIELD";
-                    repo.raw().execSQL("UPDATE sync_devices SET role=?,updated_at=? WHERE device_id=?",
-                            new Object[]{role, System.currentTimeMillis(), deviceId});
-                    repo.queueDeviceRole(deviceId);
-                    Ui.toast(this, "设备已设为" + roleName(role) + "，已加入后台同步队列");
+                    updateDeviceRoleDirect(deviceId, role);
                 })
                 .setNegativeButton("取消", null)
                 .show();
+    }
+
+    private void updateDeviceRoleDirect(String deviceId, String role) {
+        if (deviceSyncStatus != null) deviceSyncStatus.setText("设备同步：正在更新设备角色…");
+        new Thread(() -> {
+            try {
+                CloudSyncService.DeviceRoleResult result = new CloudSyncService(this).updateDeviceRole(deviceId, role);
+                runOnUiThread(() -> {
+                    String time = DateFormat.getTimeInstance(DateFormat.SHORT).format(new Date(result.completedAt()));
+                    if (deviceSyncStatus != null) deviceSyncStatus.setText("设备同步：角色已更新 · " + time);
+                    Ui.toast(this, "设备已设为" + roleName(result.role()) + "；未同步检查照片或记录");
+                });
+            } catch (Exception error) {
+                String message = readableError(error);
+                runOnUiThread(() -> new AlertDialog.Builder(this).setTitle("设备角色更新失败").setMessage(message).setPositiveButton("确定", null).show());
+            }
+        }, "device-role-update").start();
     }
 
     private void confirmRemoteDeviceLogout(String deviceId, String label) {

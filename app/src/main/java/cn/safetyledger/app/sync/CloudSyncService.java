@@ -18,12 +18,15 @@ import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicBoolean;
 
+import org.json.JSONObject;
+
 /**
  * Provider-neutral snapshot synchronization. Every device owns one encrypted snapshot;
  * a sync downloads and merges all peer snapshots before uploading its new aggregate view.
  */
 public final class CloudSyncService {
-    private static final AtomicBoolean RUNNING = new AtomicBoolean(false);
+    private static final AtomicBoolean CONTENT_RUNNING = new AtomicBoolean(false);
+    private static final AtomicBoolean DEVICE_RUNNING = new AtomicBoolean(false);
 
     public interface ProgressListener {
         void onProgress(String message);
@@ -42,8 +45,8 @@ public final class CloudSyncService {
     }
 
     public Result syncNow(ProgressListener listener) throws Exception {
-        if (!RUNNING.compareAndSet(false, true)) {
-            throw new IllegalStateException("已有同步任务正在运行，请等待当前同步完成后再试");
+        if (!CONTENT_RUNNING.compareAndSet(false, true)) {
+            throw new IllegalStateException("检查内容同步正在运行，请等待当前同步完成后再试");
         }
         Config config = null;
         try {
@@ -126,36 +129,100 @@ public final class CloudSyncService {
             return new Result(peers, changed, skipped, deviceRole(deviceId), now, warning);
         } finally {
             if (config != null) Arrays.fill(config.spacePassword, '\0');
-            RUNNING.set(false);
+            CONTENT_RUNNING.set(false);
         }
     }
 
     /**
-     * Lightweight paired-device discovery. It only reads the WebDAV/R2 device directory and
-     * registers unknown snapshot owners locally. It deliberately does not download/decrypt any
-     * inspection/photo snapshot, so opening device management stays fast even with large data.
+     * Independent device-management synchronization. Only small JSON metadata and logout markers
+     * are transferred; no inspection database, photo, signature or .safetydata file is touched.
      */
-    public DiscoveryResult discoverDevices() throws Exception {
+    public DiscoveryResult syncDeviceManagement() throws Exception {
+        if (!DEVICE_RUNNING.compareAndSet(false, true)) {
+            throw new IllegalStateException("设备信息同步正在运行，请稍后再试");
+        }
         Config config = null;
         try {
             config = requireConfig();
             WebDavClient client = client(config);
             prepare(client, config);
             String currentId = ensureDeviceId();
-            List<String> snapshots = client.listSnapshots(config.space);
-            registerCurrentDevice(currentId, snapshots.isEmpty());
-            long now = System.currentTimeMillis();
-            int remoteDevices = 0;
-            for (String name : snapshots) {
-                if (!name.endsWith(".safetydata")) continue;
-                String id = name.substring(0, name.length() - ".safetydata".length());
-                if (id.equals(currentId)) continue;
-                registerDiscoveredDevice(id, now);
-                remoteDevices++;
+            if (client.isDeviceLoggedOut(config.space, currentId)) {
+                disableLocalSync(true, currentId);
+                long now = System.currentTimeMillis();
+                repo.raw().execSQL("UPDATE sync_devices SET role='LOGGED_OUT',updated_at=? WHERE device_id=?",
+                        new Object[]{now, currentId});
+                return new DiscoveryResult(0, now, "LOGGED_OUT");
             }
-            return new DiscoveryResult(remoteDevices, now);
+
+            List<String> profiles = client.listDeviceProfiles(config.space);
+            boolean ownProfile = profiles.contains(currentId + ".device.json");
+            long now = System.currentTimeMillis();
+
+            // Pull authoritative role/name metadata first so this device cannot overwrite an
+            // administrator role change with stale local state.
+            for (String file : profiles) {
+                String id = file.substring(0, file.length() - ".device.json".length());
+                try {
+                    JSONObject json = new JSONObject(client.downloadDeviceProfile(config.space, id));
+                    applyDeviceProfile(id, json, now);
+                } catch (Exception ignored) {
+                    // One malformed old control file must not block the rest of device management.
+                }
+            }
+
+            if (!ownProfile && deviceRole(currentId) == null) {
+                registerCurrentDevice(currentId, profiles.isEmpty());
+            } else if (deviceRole(currentId) == null) {
+                registerCurrentDevice(currentId, false);
+            }
+            String role = deviceRole(currentId);
+            if ("LOGGED_OUT".equals(role)) {
+                disableLocalSync(true, currentId);
+                return new DiscoveryResult(Math.max(0, profiles.size() - 1), now, role);
+            }
+
+            // Publish only this phone's presence/name and its already-authorized role.
+            String name = repo.setting("device_name", android.os.Build.MANUFACTURER + " " + android.os.Build.MODEL);
+            client.uploadDeviceProfile(config.space, currentId,
+                    deviceProfileJson(currentId, name, role == null ? "FIELD" : role, now));
+            repo.raw().execSQL("UPDATE sync_devices SET display_name=?,last_seen_at=?,updated_at=? WHERE device_id=?",
+                    new Object[]{name, now, now, currentId});
+            updateLocalRoleSettings(currentId);
+            repo.putSetting("last_device_sync_at", String.valueOf(now));
+            repo.putSetting("last_device_sync_error", "");
+
+            int remote = 0;
+            try (Cursor cursor = repo.raw().rawQuery("SELECT count(*) FROM sync_devices WHERE device_id<>?",
+                    new String[]{currentId})) { if (cursor.moveToFirst()) remote = cursor.getInt(0); }
+            return new DiscoveryResult(remote, now, deviceRole(currentId));
         } finally {
             if (config != null) Arrays.fill(config.spacePassword, '\0');
+            DEVICE_RUNNING.set(false);
+        }
+    }
+
+    /** Backward-compatible name used by the settings screen. */
+    public DiscoveryResult discoverDevices() throws Exception { return syncDeviceManagement(); }
+
+    public DeviceRoleResult updateDeviceRole(String targetDeviceId, String role) throws Exception {
+        if (!("ADMIN".equals(role) || "FIELD".equals(role))) throw new IllegalArgumentException("设备角色无效");
+        if (!DEVICE_RUNNING.compareAndSet(false, true)) throw new IllegalStateException("设备信息同步正在运行，请稍后再试");
+        Config config = null;
+        try {
+            config = requireConfig(); WebDavClient client = client(config); prepare(client, config);
+            String currentId = ensureDeviceId(); String currentRole = deviceRole(currentId);
+            if (!("OWNER".equals(currentRole) || "ADMIN".equals(currentRole))) throw new SecurityException("只有管理员可以修改设备角色");
+            if (targetDeviceId == null || targetDeviceId.isBlank() || targetDeviceId.equals(currentId)) throw new IllegalArgumentException("请选择其他设备");
+            String targetRole = deviceRole(targetDeviceId);
+            if ("OWNER".equals(targetRole)) throw new SecurityException("首位管理员不能降级");
+            String name = deviceName(targetDeviceId); long now = System.currentTimeMillis();
+            repo.raw().execSQL("UPDATE sync_devices SET role=?,updated_at=? WHERE device_id=?", new Object[]{role, now, targetDeviceId});
+            client.uploadDeviceProfile(config.space, targetDeviceId, deviceProfileJson(targetDeviceId, name, role, now));
+            return new DeviceRoleResult(targetDeviceId, role, now);
+        } finally {
+            if (config != null) Arrays.fill(config.spacePassword, '\0');
+            DEVICE_RUNNING.set(false);
         }
     }
 
@@ -165,8 +232,8 @@ public final class CloudSyncService {
      * only its cloud credentials; local inspection records/photos remain untouched.
      */
     public DeviceLogoutResult logoutDevice(String targetDeviceId) throws Exception {
-        if (!RUNNING.compareAndSet(false, true)) {
-            throw new IllegalStateException("已有同步任务正在运行，请等待当前同步完成后再试");
+        if (!DEVICE_RUNNING.compareAndSet(false, true)) {
+            throw new IllegalStateException("设备信息同步正在运行，请稍后再试");
         }
         Config config = null;
         try {
@@ -192,17 +259,19 @@ public final class CloudSyncService {
                     new Object[]{now, targetDeviceId});
             repo.raw().delete("sync_queue", "entity_type='sync_device' AND entity_id=?",
                     new String[]{targetDeviceId});
+            client.uploadDeviceProfile(config.space, targetDeviceId,
+                    deviceProfileJson(targetDeviceId, deviceName(targetDeviceId), "LOGGED_OUT", now));
             return new DeviceLogoutResult(targetDeviceId, now);
         } finally {
             if (config != null) Arrays.fill(config.spacePassword, '\0');
-            RUNNING.set(false);
+            DEVICE_RUNNING.set(false);
         }
     }
 
     /** Re-enable a previously logged-out device. This is intentionally explicit. */
     public DeviceLogoutResult allowDeviceRejoin(String targetDeviceId) throws Exception {
-        if (!RUNNING.compareAndSet(false, true)) {
-            throw new IllegalStateException("已有同步任务正在运行，请等待当前同步完成后再试");
+        if (!DEVICE_RUNNING.compareAndSet(false, true)) {
+            throw new IllegalStateException("设备信息同步正在运行，请稍后再试");
         }
         Config config = null;
         try {
@@ -221,20 +290,19 @@ public final class CloudSyncService {
             long now = System.currentTimeMillis();
             repo.raw().execSQL("UPDATE sync_devices SET role='FIELD',updated_at=? WHERE device_id=?",
                     new Object[]{now, targetDeviceId});
-            // Upload the administrator snapshot once so a previously logged-out client can learn
-            // that its role is FIELD again after the marker is removed.
-            uploadSnapshot(new BackupService(context), client, config, currentId);
+            client.uploadDeviceProfile(config.space, targetDeviceId,
+                    deviceProfileJson(targetDeviceId, deviceName(targetDeviceId), "FIELD", now));
             return new DeviceLogoutResult(targetDeviceId, now);
         } finally {
             if (config != null) Arrays.fill(config.spacePassword, '\0');
-            RUNNING.set(false);
+            DEVICE_RUNNING.set(false);
         }
     }
 
     /** Voluntary logout of the current phone. Local business data is preserved. */
     public CurrentLogoutResult logoutCurrentDevice() throws Exception {
-        if (!RUNNING.compareAndSet(false, true)) {
-            throw new IllegalStateException("已有同步任务正在运行，请等待当前同步完成后再试");
+        if (!DEVICE_RUNNING.compareAndSet(false, true)) {
+            throw new IllegalStateException("设备信息同步正在运行，请稍后再试");
         }
         Config config = null;
         try {
@@ -245,12 +313,13 @@ public final class CloudSyncService {
             // A voluntary logout must remain reversible, so remove any stale forced-logout marker.
             client.setDeviceLoggedOut(config.space, deviceId, false);
             client.deleteSnapshot(config.space, deviceId + ".safetydata");
+            client.deleteDeviceProfile(config.space, deviceId);
             disableLocalSync(false, deviceId);
             long now = System.currentTimeMillis();
             return new CurrentLogoutResult(deviceId, now);
         } finally {
             if (config != null) Arrays.fill(config.spacePassword, '\0');
-            RUNNING.set(false);
+            DEVICE_RUNNING.set(false);
         }
     }
 
@@ -282,8 +351,8 @@ public final class CloudSyncService {
      * and uploads a clean snapshot. This is intentionally explicit for retiring test devices.
      */
     public ResetResult resetCloudSpace(ProgressListener listener) throws Exception {
-        if (!RUNNING.compareAndSet(false, true)) {
-            throw new IllegalStateException("已有同步任务正在运行，请等待当前同步完成后再试");
+        if (!DEVICE_RUNNING.compareAndSet(false, true)) {
+            throw new IllegalStateException("设备信息同步正在运行，请稍后再试");
         }
         Config config = null;
         try {
@@ -317,7 +386,7 @@ public final class CloudSyncService {
             return new ResetResult(deleted, deviceId, now);
         } finally {
             if (config != null) Arrays.fill(config.spacePassword, '\0');
-            RUNNING.set(false);
+            DEVICE_RUNNING.set(false);
         }
     }
 
@@ -373,7 +442,7 @@ public final class CloudSyncService {
         File outgoing = File.createTempFile("safety-cloud-out-", ".safetydata", context.getCacheDir());
         try {
             try (FileOutputStream output = new FileOutputStream(outgoing)) {
-                backup.exportData(output, config.spacePassword.clone());
+                backup.exportCloudSnapshot(output, config.spacePassword.clone());
             }
             client.upload(config.space, deviceId + ".safetydata", outgoing);
         } finally {
@@ -411,10 +480,7 @@ public final class CloudSyncService {
             database.execSQL("UPDATE sync_devices SET display_name=?,last_seen_at=? WHERE device_id=?",
                     new Object[]{name, now, deviceId});
         }
-        currentRole = deviceRole(deviceId);
-        repo.putSetting("cloud_role", currentRole == null ? "FIELD" : currentRole);
-        repo.putSetting("device_role", "OWNER".equals(currentRole) || "ADMIN".equals(currentRole)
-                ? "PRIMARY" : "FIELD");
+        updateLocalRoleSettings(deviceId);
     }
 
     private void registerDiscoveredDevice(String deviceId, long now) {
@@ -424,6 +490,37 @@ public final class CloudSyncService {
                 new Object[]{deviceId, fallbackName, "FIELD", now, now, now});
         database.execSQL("UPDATE sync_devices SET last_seen_at=? WHERE device_id=?",
                 new Object[]{now, deviceId});
+    }
+
+    private void applyDeviceProfile(String deviceId, JSONObject json, long now) {
+        String name = json.optString("displayName", "设备 " + shortDevice(deviceId));
+        String role = json.optString("role", "FIELD");
+        if (!("OWNER".equals(role) || "ADMIN".equals(role) || "FIELD".equals(role) || "LOGGED_OUT".equals(role))) role = "FIELD";
+        long seen = json.optLong("lastSeenAt", now);
+        long updated = json.optLong("updatedAt", seen);
+        repo.raw().execSQL("INSERT OR IGNORE INTO sync_devices(device_id,display_name,role,first_seen_at,last_seen_at,updated_at) VALUES(?,?,?,?,?,?)",
+                new Object[]{deviceId, name, role, now, seen, updated});
+        repo.raw().execSQL("UPDATE sync_devices SET display_name=?,role=?,last_seen_at=?,updated_at=? WHERE device_id=?",
+                new Object[]{name, role, seen, updated, deviceId});
+        if (deviceId.equals(repo.setting("device_id", ""))) updateLocalRoleSettings(deviceId);
+    }
+
+    private String deviceProfileJson(String deviceId, String name, String role, long now) throws Exception {
+        return new JSONObject().put("version", 1).put("deviceId", deviceId)
+                .put("displayName", name == null ? "" : name).put("role", role)
+                .put("lastSeenAt", now).put("updatedAt", now).toString();
+    }
+
+    private String deviceName(String deviceId) {
+        try (Cursor cursor = repo.raw().rawQuery("SELECT display_name FROM sync_devices WHERE device_id=?", new String[]{deviceId})) {
+            return cursor.moveToFirst() ? cursor.getString(0) : "设备 " + shortDevice(deviceId);
+        }
+    }
+
+    private void updateLocalRoleSettings(String deviceId) {
+        String role = deviceRole(deviceId);
+        repo.putSetting("cloud_role", role == null ? "FIELD" : role);
+        repo.putSetting("device_role", "OWNER".equals(role) || "ADMIN".equals(role) ? "PRIMARY" : "FIELD");
     }
 
     private String firstOwner() {
@@ -478,7 +575,8 @@ public final class CloudSyncService {
 
     public record Result(int peerDevices, int changedRows, int skippedSnapshots,
                          String role, long completedAt, String warning) {}
-    public record DiscoveryResult(int remoteDevices, long completedAt) {}
+    public record DiscoveryResult(int remoteDevices, long completedAt, String role) {}
+    public record DeviceRoleResult(String deviceId, String role, long completedAt) {}
     public record DeviceLogoutResult(String deviceId, long completedAt) {}
     public record CurrentLogoutResult(String deviceId, long completedAt) {}
     public record ResetResult(int deletedSnapshots, String ownerDeviceId, long completedAt) {}

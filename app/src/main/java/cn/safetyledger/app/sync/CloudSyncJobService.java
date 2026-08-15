@@ -28,7 +28,9 @@ public final class CloudSyncJobService extends JobService {
         new Thread(() -> {
             boolean retry = false;
             try {
-                new CloudSyncService(this).syncNow();
+                CloudSyncService service = new CloudSyncService(this);
+                if (params.getJobId() == CloudSyncScheduler.DEVICE_JOB_ID) service.syncDeviceManagement();
+                else service.syncNow();
             } catch (OutOfMemoryError error) {
                 retry = false;
                 String message = "同步数据较大且当前系统内存不足，本次后台同步已安全停止。请升级所有设备到 1.2.14 后重试。";

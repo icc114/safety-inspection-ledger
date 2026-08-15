@@ -87,6 +87,7 @@ public final class WebDavClient {
         if (!root.successDav()) throw failure("服务地址不是可读的 WebDAV 目录", root);
         mkcol(spaceUrl(space));
         mkcol(devicesUrl(space));
+        mkcol(deviceControlUrl(space));
     }
 
     public List<String> listSnapshots(String space) throws Exception {
@@ -118,6 +119,50 @@ public final class WebDavClient {
         return names;
     }
 
+    /** Tiny device-management metadata channel; never contains inspection/photo data. */
+    public List<String> listDeviceProfiles(String space) throws Exception {
+        ResponseInfo response = execute("PROPFIND", deviceControlUrl(space), PROPFIND, "1");
+        if (!response.successDav()) throw failure("无法读取设备管理目录", response);
+        String xmlText = new String(response.body, StandardCharsets.UTF_8);
+        String upperXml = xmlText.toUpperCase(java.util.Locale.ROOT);
+        if (upperXml.contains("<!DOCTYPE") || upperXml.contains("<!ENTITY")) {
+            throw new java.io.IOException("服务器返回了不安全的 XML DTD/ENTITY，已拒绝解析");
+        }
+        DocumentBuilderFactory factory = DocumentBuilderFactory.newInstance();
+        factory.setNamespaceAware(true);
+        setXmlFeatureSafely(factory, "http://apache.org/xml/features/disallow-doctype-decl", true);
+        setXmlFeatureSafely(factory, "http://xml.org/sax/features/external-general-entities", false);
+        setXmlFeatureSafely(factory, "http://xml.org/sax/features/external-parameter-entities", false);
+        try { factory.setXIncludeAware(false); } catch (RuntimeException | AbstractMethodError ignored) {}
+        try { factory.setExpandEntityReferences(false); } catch (RuntimeException | AbstractMethodError ignored) {}
+        Document document = factory.newDocumentBuilder()
+                .parse(new java.io.ByteArrayInputStream(response.body));
+        NodeList hrefs = document.getElementsByTagNameNS("*", "href");
+        List<String> names = new ArrayList<>();
+        for (int i = 0; i < hrefs.getLength(); i++) {
+            String href = hrefs.item(i).getTextContent();
+            int slash = href.lastIndexOf('/');
+            String name = URLDecoder.decode(slash >= 0 ? href.substring(slash + 1) : href,
+                    StandardCharsets.UTF_8.name());
+            if (name.endsWith(".device.json") && !names.contains(name)) names.add(name);
+        }
+        return names;
+    }
+
+    public void uploadDeviceProfile(String space, String deviceId, String json) throws Exception {
+        putBytes(controlFileUrl(space, deviceId + ".device.json"),
+                json.getBytes(StandardCharsets.UTF_8));
+    }
+
+    public String downloadDeviceProfile(String space, String deviceId) throws Exception {
+        return new String(getBytes(controlFileUrl(space, deviceId + ".device.json")),
+                StandardCharsets.UTF_8);
+    }
+
+    public void deleteDeviceProfile(String space, String deviceId) throws Exception {
+        delete(controlFileUrl(space, deviceId + ".device.json"));
+    }
+
     public void download(String space, String name, File target) throws Exception {
         Request request = request(fileUrl(space, name)).get().build();
         try (Response response = http.newCall(request).execute()) {
@@ -145,16 +190,24 @@ public final class WebDavClient {
     public void setDeviceLoggedOut(String space, String deviceId, boolean loggedOut) throws Exception {
         String name = deviceId + ".logout";
         if (loggedOut) {
-            putBytes(fileUrl(space, name),
+            putBytes(controlFileUrl(space, name),
                     String.valueOf(System.currentTimeMillis()).getBytes(StandardCharsets.UTF_8));
         } else {
+            delete(controlFileUrl(space, name));
+            // Clean up markers written by 1.2.13/1.2.14.
             delete(fileUrl(space, name));
         }
     }
 
     public boolean isDeviceLoggedOut(String space, String deviceId) throws Exception {
-        Request request = request(fileUrl(space, deviceId + ".logout")).head().build();
+        Request request = request(controlFileUrl(space, deviceId + ".logout")).head().build();
         try (Response response = http.newCall(request).execute()) {
+            if (response.isSuccessful()) return true;
+            if (response.code() != 404) throw failure("读取设备登出状态失败", response);
+        }
+        // Backward compatibility with old markers stored beside snapshots.
+        Request legacy = request(fileUrl(space, deviceId + ".logout")).head().build();
+        try (Response response = http.newCall(legacy).execute()) {
             if (response.code() == 404) return false;
             if (!response.isSuccessful()) throw failure("读取设备登出状态失败", response);
             return true;
@@ -234,8 +287,12 @@ public final class WebDavClient {
     }
 
     private String spaceUrl(String space) { return endpoint + segment(wireSpace(space)) + "/"; }
+    /** Large inspection-content snapshots. Kept at the legacy path for compatibility. */
     private String devicesUrl(String space) { return spaceUrl(space) + "devices/"; }
+    /** Small device name/role/logout metadata. */
+    private String deviceControlUrl(String space) { return spaceUrl(space) + "device-control/"; }
     private String fileUrl(String space, String name) { return devicesUrl(space) + segment(name); }
+    private String controlFileUrl(String space, String name) { return deviceControlUrl(space) + segment(name); }
     private String segment(String value) {
         try {
             return URLEncoder.encode(value, "UTF-8").replace("+", "%20");

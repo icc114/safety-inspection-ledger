@@ -8,6 +8,8 @@ import android.graphics.Color;
 import android.graphics.Matrix;
 import android.graphics.Paint;
 import android.graphics.Typeface;
+import android.location.Address;
+import android.location.Geocoder;
 import android.location.Location;
 import android.media.ExifInterface;
 import android.net.Uri;
@@ -90,10 +92,10 @@ public final class MediaService {
             lines.add("拍摄时间：" + Instant.ofEpochMilli(capturedAt)
                     .atZone(ZoneId.systemDefault()).toLocalDateTime().format(WATERMARK_TIME));
         }
-        String gpsText = "";
+        String locationText = "";
         if (latitude != null && longitude != null) {
-            gpsText = chineseCoordinates(latitude, longitude);
-            lines.add("拍摄位置：" + gpsText);
+            locationText = reverseGeocode(latitude, longitude);
+            if (!locationText.isBlank()) lines.add("拍摄地点：" + locationText);
         }
         // Do not invent a watermark from the inspection form. If EXIF/fresh-camera
         // metadata is unavailable, the business JPEG remains visually unchanged.
@@ -115,7 +117,7 @@ public final class MediaService {
         media.category = category;
         media.localPath = output.getAbsolutePath();
         media.capturedAt = capturedAt == null ? System.currentTimeMillis() : capturedAt;
-        media.location = gpsText;
+        media.location = locationText;
         media.latitude = latitude;
         media.longitude = longitude;
         media.sha256 = sha256(output);
@@ -217,10 +219,30 @@ public final class MediaService {
                 matrix, true);
     }
 
-    private String chineseCoordinates(double latitude, double longitude) {
-        return String.format(Locale.CHINA, "%s %.6f°，%s %.6f°",
-                latitude >= 0 ? "北纬" : "南纬", Math.abs(latitude),
-                longitude >= 0 ? "东经" : "西经", Math.abs(longitude));
+    @SuppressWarnings("deprecation")
+    private String reverseGeocode(double latitude, double longitude) {
+        if (!Geocoder.isPresent()) return "";
+        try {
+            Geocoder geocoder = new Geocoder(context, Locale.CHINA);
+            List<Address> addresses = geocoder.getFromLocation(latitude, longitude, 1);
+            if (addresses == null || addresses.isEmpty()) return "";
+            Address address = addresses.get(0);
+            String line = address.getMaxAddressLineIndex() >= 0 ? address.getAddressLine(0) : "";
+            if (line == null) line = "";
+            line = line.trim().replaceFirst("^中国", "").replaceFirst("^中华人民共和国", "");
+            line = line.replaceAll("[ ]*[0-9]{6}$", "").trim();
+            if (!line.isBlank()) return line;
+            StringBuilder value = new StringBuilder();
+            for (String part : new String[]{address.getAdminArea(), address.getSubAdminArea(),
+                    address.getLocality(), address.getSubLocality(), address.getThoroughfare(),
+                    address.getFeatureName()}) {
+                if (part != null && !part.isBlank() && value.indexOf(part) < 0) value.append(part);
+            }
+            return value.toString();
+        } catch (Exception ignored) {
+            // If GPS cannot be converted to a readable place name, omit location watermark.
+            return "";
+        }
     }
 
     private void drawWatermark(Bitmap bitmap, List<String> lines) {
