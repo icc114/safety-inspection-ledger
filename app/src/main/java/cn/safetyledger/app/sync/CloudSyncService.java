@@ -16,12 +16,19 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import java.util.UUID;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
  * Provider-neutral snapshot synchronization. Every device owns one encrypted snapshot;
  * a sync downloads and merges all peer snapshots before uploading its new aggregate view.
  */
 public final class CloudSyncService {
+    private static final AtomicBoolean RUNNING = new AtomicBoolean(false);
+
+    public interface ProgressListener {
+        void onProgress(String message);
+    }
+
     private final Context context;
     private final LedgerRepository repo;
 
@@ -31,6 +38,135 @@ public final class CloudSyncService {
     }
 
     public Result syncNow() throws Exception {
+        return syncNow(null);
+    }
+
+    public Result syncNow(ProgressListener listener) throws Exception {
+        if (!RUNNING.compareAndSet(false, true)) {
+            throw new IllegalStateException("已有同步任务正在运行，请等待当前同步完成后再试");
+        }
+        Config config = null;
+        try {
+            config = requireConfig();
+            progress(listener, "正在连接云端…");
+            WebDavClient client = client(config);
+            prepare(client, config);
+
+            String deviceId = ensureDeviceId();
+            progress(listener, "正在读取云端设备列表…");
+            List<String> snapshots = client.listSnapshots(config.space);
+            boolean emptyCloud = snapshots.isEmpty();
+
+            // Register locally before touching peer snapshots. A new device joining a non-empty
+            // space is FIELD until an existing OWNER/ADMIN explicitly promotes it.
+            registerCurrentDevice(deviceId, emptyCloud);
+
+            // Publish presence first. Previously a bad/stale peer snapshot could fail before the
+            // new device ever uploaded anything, so the administrator could never see/manage it.
+            BackupService backup = new BackupService(context);
+            progress(listener, "正在登记本机设备…");
+            uploadSnapshot(backup, client, config, deviceId);
+
+            int peers = 0;
+            int changed = 0;
+            int skipped = 0;
+            List<String> warnings = new ArrayList<>();
+            int peerTotal = 0;
+            for (String name : snapshots) if (!name.equals(deviceId + ".safetydata")) peerTotal++;
+            int peerIndex = 0;
+
+            for (String name : snapshots) {
+                if (name.equals(deviceId + ".safetydata")) continue;
+                peerIndex++;
+                progress(listener, "正在接收设备 " + peerIndex + "/" + peerTotal + "…");
+                File remote = File.createTempFile("safety-cloud-in-", ".safetydata", context.getCacheDir());
+                try {
+                    client.download(config.space, name, remote);
+                    try (FileInputStream input = new FileInputStream(remote)) {
+                        BackupService.RestorePackage restore = backup.decryptAndValidate(input,
+                                config.spacePassword.clone());
+                        changed += backup.mergeRestore(restore);
+                    }
+                    peers++;
+                } catch (Exception peerError) {
+                    skipped++;
+                    String detail = readable(peerError);
+                    if (detail.length() > 90) detail = detail.substring(0, 90) + "…";
+                    warnings.add(shortDevice(name) + "：" + detail);
+                } finally {
+                    remote.delete();
+                }
+            }
+
+            // Merged role data may contain an administrator's change for this device.
+            registerCurrentDevice(deviceId, emptyCloud);
+            applyTombstones();
+
+            progress(listener, "正在上传本机最新数据…");
+            uploadSnapshot(backup, client, config, deviceId);
+
+            long now = System.currentTimeMillis();
+            repo.raw().execSQL("DELETE FROM sync_queue");
+            repo.raw().execSQL("UPDATE tombstones SET synced_at=? WHERE synced_at IS NULL",
+                    new Object[]{now});
+            repo.putSetting("last_sync_at", String.valueOf(now));
+            repo.putSetting("last_sync_error", "");
+            String warning = warnings.isEmpty() ? "" : String.join("；", warnings);
+            repo.putSetting("last_sync_warning", warning);
+            progress(listener, skipped == 0 ? "同步完成" : "同步完成，但有旧设备快照被跳过");
+            return new Result(peers, changed, skipped, deviceRole(deviceId), now, warning);
+        } finally {
+            if (config != null) Arrays.fill(config.spacePassword, '\0');
+            RUNNING.set(false);
+        }
+    }
+
+    /**
+     * Deletes only device snapshot files in the currently configured sync space. It does not
+     * delete any local inspection record/photo. The current phone then becomes the first owner
+     * and uploads a clean snapshot. This is intentionally explicit for retiring test devices.
+     */
+    public ResetResult resetCloudSpace(ProgressListener listener) throws Exception {
+        if (!RUNNING.compareAndSet(false, true)) {
+            throw new IllegalStateException("已有同步任务正在运行，请等待当前同步完成后再试");
+        }
+        Config config = null;
+        try {
+            config = requireConfig();
+            progress(listener, "正在连接云端…");
+            WebDavClient client = client(config);
+            prepare(client, config);
+            progress(listener, "正在读取旧设备快照…");
+            List<String> snapshots = client.listSnapshots(config.space);
+            int deleted = 0;
+            for (int i = 0; i < snapshots.size(); i++) {
+                progress(listener, "正在清理旧设备 " + (i + 1) + "/" + snapshots.size() + "…");
+                client.deleteSnapshot(config.space, snapshots.get(i));
+                deleted++;
+            }
+
+            SQLiteDatabase database = repo.raw();
+            database.delete("sync_devices", null, null);
+            repo.putSetting("cloud_role", "");
+            repo.putSetting("device_role", "PRIMARY");
+            repo.putSetting("last_sync_error", "");
+            repo.putSetting("last_sync_warning", "");
+
+            String deviceId = ensureDeviceId();
+            registerCurrentDevice(deviceId, true);
+            progress(listener, "正在建立新的管理员设备…");
+            uploadSnapshot(new BackupService(context), client, config, deviceId);
+            long now = System.currentTimeMillis();
+            repo.putSetting("last_sync_at", String.valueOf(now));
+            progress(listener, "云端同步空间已重新建立");
+            return new ResetResult(deleted, deviceId, now);
+        } finally {
+            if (config != null) Arrays.fill(config.spacePassword, '\0');
+            RUNNING.set(false);
+        }
+    }
+
+    private Config requireConfig() throws Exception {
         Config config = loadConfig();
         if (config == null) throw new IllegalStateException("请先保存并启用云同步配置");
         if (!(config.type.contains("WebDAV") || "Cloudflare".equals(config.type)
@@ -40,16 +176,21 @@ public final class CloudSyncService {
         if (config.spacePassword.length < 8) {
             throw new IllegalStateException("同步空间密码至少 8 位，请重新保存配置");
         }
+        return config;
+    }
 
-        WebDavClient client = new WebDavClient(config.endpoint, config.username,
+    private WebDavClient client(Config config) {
+        return new WebDavClient(config.endpoint, config.username,
                 config.serverPassword, config.token,
                 "Cloudflare".equals(config.type) ? config.space : "",
                 "Cloudflare".equals(config.type) ? new String(config.spacePassword) : "");
+    }
+
+    private void prepare(WebDavClient client, Config config) throws Exception {
         try {
             client.prepare(config.space);
         } catch (Exception error) {
-            String message = error.getMessage() == null
-                    ? error.getClass().getSimpleName() : error.getMessage();
+            String message = readable(error);
             if ("Cloudflare".equals(config.type)) {
                 if (message.contains("需要设备授权") || message.contains("HTTP 401")) {
                     message = "Cloudflare 自动配对被拒绝，请确认同步空间名称和密码一致。原始响应：" + message;
@@ -61,35 +202,19 @@ public final class CloudSyncService {
             }
             throw new java.io.IOException(message, error);
         }
+    }
 
+    private String ensureDeviceId() {
         String deviceId = repo.setting("device_id", "");
         if (deviceId.isBlank()) {
             deviceId = UUID.randomUUID().toString();
             repo.putSetting("device_id", deviceId);
         }
-        List<String> snapshots = client.listSnapshots(config.space);
-        int peers = 0;
-        int changed = 0;
-        BackupService backup = new BackupService(context);
-        for (String name : snapshots) {
-            if (name.equals(deviceId + ".safetydata")) continue;
-            File remote = File.createTempFile("safety-cloud-in-", ".safetydata", context.getCacheDir());
-            try {
-                client.download(config.space, name, remote);
-                try (FileInputStream input = new FileInputStream(remote)) {
-                    BackupService.RestorePackage restore = backup.decryptAndValidate(input,
-                            config.spacePassword.clone());
-                    changed += backup.mergeRestore(restore);
-                }
-                peers++;
-            } finally {
-                remote.delete();
-            }
-        }
+        return deviceId;
+    }
 
-        registerCurrentDevice(deviceId, snapshots.isEmpty());
-        applyTombstones();
-
+    private void uploadSnapshot(BackupService backup, WebDavClient client,
+                                Config config, String deviceId) throws Exception {
         File outgoing = File.createTempFile("safety-cloud-out-", ".safetydata", context.getCacheDir());
         try {
             try (FileOutputStream output = new FileOutputStream(outgoing)) {
@@ -98,16 +223,7 @@ public final class CloudSyncService {
             client.upload(config.space, deviceId + ".safetydata", outgoing);
         } finally {
             outgoing.delete();
-            Arrays.fill(config.spacePassword, '\0');
         }
-
-        long now = System.currentTimeMillis();
-        repo.raw().execSQL("DELETE FROM sync_queue");
-        repo.raw().execSQL("UPDATE tombstones SET synced_at=? WHERE synced_at IS NULL",
-                new Object[]{now});
-        repo.putSetting("last_sync_at", String.valueOf(now));
-        repo.putSetting("last_sync_error", "");
-        return new Result(peers, changed, deviceRole(deviceId), now);
     }
 
     private Config loadConfig() throws Exception {
@@ -180,7 +296,25 @@ public final class CloudSyncService {
         }
     }
 
-    public record Result(int peerDevices, int changedRows, String role, long completedAt) {}
+    private static void progress(ProgressListener listener, String message) {
+        if (listener != null) listener.onProgress(message);
+    }
+
+    private static String shortDevice(String name) {
+        if (name == null) return "未知设备";
+        String value = name.endsWith(".safetydata")
+                ? name.substring(0, name.length() - ".safetydata".length()) : name;
+        return value.length() > 8 ? value.substring(0, 8) : value;
+    }
+
+    private static String readable(Throwable error) {
+        String message = error.getMessage();
+        return message == null || message.isBlank() ? error.getClass().getSimpleName() : message;
+    }
+
+    public record Result(int peerDevices, int changedRows, int skippedSnapshots,
+                         String role, long completedAt, String warning) {}
+    public record ResetResult(int deletedSnapshots, String ownerDeviceId, long completedAt) {}
 
     private static final class Config {
         final String type, endpoint, username, serverPassword, token, space;
