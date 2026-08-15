@@ -59,6 +59,8 @@ public final class SettingsActivity extends Activity {
     private EditText encryption;
     private LinearLayout advancedAuthBox;
     private Button advancedAuthButton;
+    private Button syncSaveButton;
+    private TextView syncEnabledStatus;
     private TextView syncStatus;
     private String savedServerPassword = "";
     private String savedToken = "";
@@ -175,9 +177,8 @@ public final class SettingsActivity extends Activity {
     private LinearLayout cloudCard() {
         LinearLayout card = Ui.card(this);
         card.addView(Ui.sectionTitle(this, "4", "云同步", "服务提供商可切换，失败不影响本地填报"));
-        provider = spinner(new String[]{"WebDAV", "Cloudflare", "飞牛 NAS / WebDAV",
-                "Google Drive", "OneDrive", "自定义 HTTP 服务器"});
-        endpoint = Ui.input(this, "服务地址 / 账号授权地址");
+        provider = spinner(new String[]{"Cloudflare", "WebDAV / NAS"});
+        endpoint = Ui.input(this, "Cloudflare Worker / WebDAV 服务地址");
         space = Ui.input(this, "同步空间名称");
         space.setText("safety-ledger");
         encryption = Ui.input(this, "同步密码（配对、加密和永久删除）");
@@ -223,18 +224,20 @@ public final class SettingsActivity extends Activity {
                 12, false);
         explanation.setTextColor(Ui.MUTED);
         card.addView(explanation);
+        syncEnabledStatus = Ui.text(this, "云同步：未启用", 14, true);
+        card.addView(syncEnabledStatus);
         syncStatus = Ui.text(this, "同步状态：未配置", 14, true);
         card.addView(syncStatus);
         LinearLayout actions = Ui.row(this);
         Button test = Ui.compactButton(this, "测试连接", false);
-        Button save = Ui.compactButton(this, "保存并启用", true);
+        syncSaveButton = Ui.compactButton(this, "保存并启用", true);
         Button now = Ui.compactButton(this, "立即同步", false);
         test.setOnClickListener(view -> testConnection(false));
-        save.setOnClickListener(view -> testConnection(true));
+        syncSaveButton.setOnClickListener(view -> saveAndEnable());
         now.setOnClickListener(view -> syncNow());
         actions.addView(test, Ui.weight(1));
         actions.addView(Ui.horizontalGap(this, 5));
-        actions.addView(save, Ui.weight(1));
+        actions.addView(syncSaveButton, Ui.weight(1));
         actions.addView(Ui.horizontalGap(this, 5));
         actions.addView(now, Ui.weight(1));
         card.addView(actions);
@@ -284,13 +287,19 @@ public final class SettingsActivity extends Activity {
 
     private void loadProvider() {
         try (Cursor cursor = repo.raw().rawQuery(
-                "SELECT provider_type,endpoint,username,encrypted_secret,token_ciphertext,sync_space,encryption_secret FROM sync_providers WHERE enabled=1 LIMIT 1",
+                "SELECT provider_type,endpoint,username,encrypted_secret,token_ciphertext,sync_space,encryption_secret FROM sync_providers WHERE enabled=1 ORDER BY updated_at DESC LIMIT 1",
                 null)) {
-            if (!cursor.moveToFirst()) return;
-            String type = cursor.getString(0);
-            for (int i = 0; i < provider.getCount(); i++) {
-                if (provider.getItemAtPosition(i).equals(type)) provider.setSelection(i);
+            if (!cursor.moveToFirst()) {
+                syncEnabledStatus.setText("云同步：未启用");
+                syncStatus.setText("同步状态：未配置");
+                return;
             }
+            String type = cursor.getString(0);
+            String displayType = "Cloudflare".equals(type) ? "Cloudflare" : "WebDAV / NAS";
+            setProviderSelection(displayType);
+            syncEnabledStatus.setText("云同步：已启用 · " + displayType);
+            syncEnabledStatus.setTextColor(Color.rgb(22, 128, 57));
+            if (syncSaveButton != null) syncSaveButton.setText("已启用 · 保存修改");
             endpoint.setText(cursor.getString(1));
             user.setText(cursor.getString(2));
             SecretStore store = new SecretStore();
@@ -509,6 +518,47 @@ public final class SettingsActivity extends Activity {
                 .show();
     }
 
+    private void saveAndEnable() {
+        String type = (String) provider.getSelectedItem();
+        String url = endpoint.getText().toString().trim();
+        String username = user.getText().toString().trim();
+        String password = secret.getText().toString().isBlank()
+                ? savedServerPassword : secret.getText().toString();
+        String tokenValue = token.getText().toString().isBlank()
+                ? savedToken : token.getText().toString();
+        String spaceName = space.getText().toString().trim();
+        String spacePassword = encryption.getText().toString().isBlank()
+                ? savedSpacePassword : encryption.getText().toString();
+
+        if (url.isBlank()) {
+            Ui.toast(this, "请填写服务地址");
+            return;
+        }
+        if (spaceName.isBlank()) {
+            Ui.toast(this, "请填写同步空间名称");
+            return;
+        }
+        if (spacePassword.length() < 8) {
+            Ui.toast(this, "同步空间密码至少 8 位");
+            return;
+        }
+        if (url.contains("workers.dev") && !"Cloudflare".equals(type)) {
+            type = "Cloudflare";
+            setProviderSelection(type);
+            Ui.toast(this, "已根据 workers.dev 地址自动切换为 Cloudflare");
+        }
+
+        if (saveProvider(type, url, username, password, tokenValue, spaceName, spacePassword)) {
+            setProviderSelection(type);
+            syncEnabledStatus.setText("云同步：已启用 · " + type);
+            syncEnabledStatus.setTextColor(Color.rgb(22, 128, 57));
+            syncSaveButton.setText("已启用 · 保存修改");
+            syncStatus.setText("同步状态：配置已保存，正在首次同步…");
+            Ui.toast(this, "云同步已启用，正在同步");
+            syncNow();
+        }
+    }
+
     private void testConnection(boolean saveOnSuccess) {
         String type = (String) provider.getSelectedItem();
         String url = endpoint.getText().toString().trim();
@@ -520,6 +570,11 @@ public final class SettingsActivity extends Activity {
         String spaceName = space.getText().toString().trim();
         String spacePassword = encryption.getText().toString().isBlank()
                 ? savedSpacePassword : encryption.getText().toString();
+        if (url.contains("workers.dev") && !"Cloudflare".equals(type)) {
+            type = "Cloudflare";
+            setProviderSelection(type);
+            Ui.toast(this, "已根据 workers.dev 地址自动切换为 Cloudflare");
+        }
         if (spaceName.isBlank()) {
             Ui.toast(this, "请填写同步空间名称");
             return;
@@ -533,16 +588,17 @@ public final class SettingsActivity extends Activity {
             Ui.toast(this, "同步空间密码至少 8 位");
             return;
         }
+        final String resolvedType = type;
         syncStatus.setText("同步状态：正在测试…");
         new Thread(() -> {
             SyncProvider.ConnectionResult result;
-            if (type.contains("WebDAV") || "Cloudflare".equals(type)
-                    || "自定义 HTTP 服务器".equals(type)) {
+            if (resolvedType.contains("WebDAV") || "Cloudflare".equals(resolvedType)
+                    || "自定义 HTTP 服务器".equals(resolvedType)) {
                 result = new WebDavClient(url, username, password, tokenValue,
-                        "Cloudflare".equals(type) ? spaceName : "",
-                        "Cloudflare".equals(type) ? spacePassword : "")
+                        "Cloudflare".equals(resolvedType) ? spaceName : "",
+                        "Cloudflare".equals(resolvedType) ? spacePassword : "")
                         .testReadWrite(spaceName);
-                if (!result.success() && "Cloudflare".equals(type)) {
+                if (!result.success() && "Cloudflare".equals(resolvedType)) {
                     String detail = result.message();
                     if (detail.contains("需要设备授权") || detail.contains("HTTP 401")) {
                         detail = "已使用同步空间名称和同步密码自动发起设备配对，但这个地址仍拒绝授权。它不是本版兼容网关，或仍使用旧私有授权协议。请重新部署仓库 cloudflare-worker；如果云端另外生成了设备 Token，也可在高级认证中填写。\n\n原始响应："
@@ -555,14 +611,14 @@ public final class SettingsActivity extends Activity {
                 }
             } else {
                 result = new SyncProvider.ConnectionResult(false,
-                        type + " 的官方授权尚未接入；请选择 WebDAV、飞牛 WebDAV或兼容 Worker");
+                        resolvedType + " 的官方授权尚未接入；请选择 Cloudflare 或 WebDAV / NAS");
             }
             SyncProvider.ConnectionResult checked = result;
             runOnUiThread(() -> {
                 if (checked.success()) {
                     boolean saved = true;
                     if (saveOnSuccess) {
-                        saved = saveProvider(type, url, username, password, tokenValue,
+                        saved = saveProvider(resolvedType, url, username, password, tokenValue,
                                 spaceName, spacePassword);
                     }
                     syncStatus.setText("同步状态：连接成功" + (saveOnSuccess && saved ? "，配置已启用" : ""));
@@ -606,6 +662,10 @@ public final class SettingsActivity extends Activity {
             token.setHint(tokenValue.isBlank() ? "Cloudflare 设备 Token / Bearer Token"
                     : "••••••••（设备 Token 已保存）");
             encryption.setHint("••••••••（同步密码已保存）");
+            repo.putSetting("last_sync_error", "");
+            syncEnabledStatus.setText("云同步：已启用 · " + type);
+            syncEnabledStatus.setTextColor(Color.rgb(22, 128, 57));
+            if (syncSaveButton != null) syncSaveButton.setText("已启用 · 保存修改");
             CloudSyncScheduler.schedule(this);
             return true;
         } catch (Exception error) {
@@ -622,7 +682,13 @@ public final class SettingsActivity extends Activity {
                 CloudSyncService.Result result = new CloudSyncService(this).syncNow();
                 runOnUiThread(() -> {
                     String role = "FIELD".equals(result.role()) ? "工作人员" : "管理员";
-                    syncStatus.setText("同步状态：已同步 · 本机角色 " + role);
+                    String type = (String) provider.getSelectedItem();
+                    syncEnabledStatus.setText("云同步：已启用 · " + type);
+                    syncEnabledStatus.setTextColor(Color.rgb(22, 128, 57));
+                    if (syncSaveButton != null) syncSaveButton.setText("已启用 · 保存修改");
+                    String time = DateFormat.getTimeInstance(DateFormat.SHORT)
+                            .format(new Date(result.completedAt()));
+                    syncStatus.setText("同步状态：成功 · " + time + " · 本机角色 " + role);
                     Ui.toast(this, "同步完成：接收 " + result.peerDevices()
                             + " 台设备，合并 " + result.changedRows() + " 项数据");
                     deviceRole.setSelection("FIELD".equals(result.role()) ? 1 : 0);
@@ -698,6 +764,17 @@ public final class SettingsActivity extends Activity {
 
     private String roleName(String role) {
         return "FIELD".equals(role) ? "工作人员" : "管理员";
+    }
+
+    private void setProviderSelection(String type) {
+        if (provider == null || type == null) return;
+        String wanted = "Cloudflare".equals(type) ? "Cloudflare" : "WebDAV / NAS";
+        for (int i = 0; i < provider.getCount(); i++) {
+            if (wanted.equals(provider.getItemAtPosition(i))) {
+                provider.setSelection(i, false);
+                return;
+            }
+        }
     }
 
     private void setAdvancedAuthVisible(boolean visible) {
