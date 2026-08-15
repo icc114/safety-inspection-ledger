@@ -3,6 +3,8 @@ package cn.safetyledger.pc;
 import javax.swing.*;
 import javax.swing.table.DefaultTableModel;
 import java.awt.*;
+import java.awt.event.MouseAdapter;
+import java.awt.event.MouseEvent;
 import java.awt.event.WindowAdapter;
 import java.awt.event.WindowEvent;
 import java.nio.charset.StandardCharsets;
@@ -39,7 +41,16 @@ public final class SafetyLedgerDesktop extends JFrame {
         JPanel archiveRow=new JPanel(new BorderLayout(5,0));archiveRow.add(archive,BorderLayout.CENTER);JButton choose=new JButton("选择文件夹");choose.addActionListener(e->chooseArchive());archiveRow.add(choose,BorderLayout.EAST);fields.add(new JLabel("电脑本地资料库"));fields.add(archiveRow);north.add(fields,BorderLayout.CENTER);
         JPanel actions=new JPanel(new FlowLayout(FlowLayout.LEFT,6,0));JButton save=new JButton("保存设置");save.addActionListener(e->saveConfig());JButton test=new JButton("测试连接");test.addActionListener(e->testConnection());JButton sync=new JButton("立即同步检查内容");sync.addActionListener(e->sync(true));JButton importPackage=new JButton("导入手机数据包");importPackage.addActionListener(e->importPackage());JButton exportPackage=new JButton("导出手机兼容数据包");exportPackage.addActionListener(e->exportPortable());JButton open=new JButton("打开资料库");open.addActionListener(e->openArchive());
         actions.add(save);actions.add(test);actions.add(sync);actions.add(importPackage);actions.add(exportPackage);actions.add(open);north.add(actions,BorderLayout.SOUTH);add(north,BorderLayout.NORTH);
-        table.setAutoCreateRowSorter(true);table.setRowHeight(26);table.getColumnModel().getColumn(5).setPreferredWidth(330);add(new JScrollPane(table),BorderLayout.CENTER);
+        table.setAutoCreateRowSorter(true);table.setRowHeight(26);table.getColumnModel().getColumn(5).setPreferredWidth(330);
+        table.addMouseListener(new MouseAdapter(){@Override public void mouseClicked(MouseEvent e){
+            int viewRow=table.rowAtPoint(e.getPoint()),viewCol=table.columnAtPoint(e.getPoint());
+            if(viewRow<0)return;
+            if(viewCol==2||e.getClickCount()>=2)openRecordPreview(viewRow);
+        }});
+        table.getInputMap(JComponent.WHEN_FOCUSED).put(KeyStroke.getKeyStroke("ENTER"),"preview-record");
+        table.getActionMap().put("preview-record",new AbstractAction(){@Override public void actionPerformed(java.awt.event.ActionEvent e){int row=table.getSelectedRow();if(row>=0)openRecordPreview(row);}});
+        table.setToolTipText("点击“检查记录”可预览；双击任意行也可打开预览");
+        add(new JScrollPane(table),BorderLayout.CENTER);
         JPanel south=new JPanel(new BorderLayout());south.setBorder(BorderFactory.createEmptyBorder(0,12,12,12));JLabel note=new JLabel("同步后的记录会长期保存到上面指定的本地文件夹；云端仅作为设备间传输通道。Word 被人工修改后，后续同步不会覆盖，会另生成“系统更新”版本。");note.setForeground(new Color(80,80,80));south.add(note,BorderLayout.NORTH);south.add(status,BorderLayout.SOUTH);add(south,BorderLayout.SOUTH);
     }
 
@@ -87,6 +98,16 @@ public final class SafetyLedgerDesktop extends JFrame {
         if(!saveConfig())return;Path latest=config.privateDir().resolve("latest");if(!Files.isRegularFile(latest.resolve("database.sqlite"))){JOptionPane.showMessageDialog(this,"还没有可导出的同步数据。请先同步云端或导入手机数据包。","提示",JOptionPane.INFORMATION_MESSAGE);return;}
         JFileChooser chooser=new JFileChooser();chooser.setSelectedFile(new java.io.File("安全检查台账-电脑导出-"+LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyyMMdd-HHmm"))+".safetydata"));if(chooser.showSaveDialog(this)!=JFileChooser.APPROVE_OPTION)return;Path out=chooser.getSelectedFile().toPath();
         runTask("正在生成手机兼容数据包…",()->{DataPackageCodec.createPortable(latest,out);return "数据包已导出，可由 Android 或其他 PC 端直接识别";},null);
+    }
+
+    private void openRecordPreview(int viewRow){
+        try{
+            int modelRow=table.convertRowIndexToModel(viewRow);
+            Object value=model.getValueAt(modelRow,5);
+            if(value==null)throw new IllegalStateException("该记录没有本地资料路径");
+            Path folder=Path.of(String.valueOf(value));
+            RecordPreviewDialog.open(this,folder);
+        }catch(Exception error){showError("无法预览检查记录",error);}
     }
 
     private void refreshTable(){
