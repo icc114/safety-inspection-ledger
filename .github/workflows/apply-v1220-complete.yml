@@ -27,13 +27,10 @@ jobs:
           def patch(path, pairs):
               p = Path(path)
               text = p.read_text(encoding='utf-8')
-              original = text
               for old, new in pairs:
                   if old not in text:
-                      raise SystemExit(f'Expected text not found in {path}: {old[:120]!r}')
+                      raise SystemExit(f'Expected text not found in {path}: {old[:100]!r}')
                   text = text.replace(old, new)
-              if text == original:
-                  raise SystemExit(f'No change made to {path}')
               p.write_text(text, encoding='utf-8')
 
           patch('app/src/main/java/cn/safetyledger/app/TemplateActivity.java', [
@@ -46,6 +43,11 @@ jobs:
           patch('app/src/main/java/cn/safetyledger/app/pdf/PdfExporter.java', [
               ('private static final int FORM_ITEM_SLOTS = 9;', 'private static final int FORM_ITEM_SLOTS = 12;'),
               ('Bitmap bitmap = decodeForPdf(media.localPath, 900, 1100, false);', 'Bitmap bitmap = decodeForPdf(media.localPath, 720, 900, false);'),
+          ])
+
+          patch('app/src/main/java/cn/safetyledger/app/LedgerActivity.java', [
+              ('import cn.safetyledger.app.pdf.PdfExporter;', 'import cn.safetyledger.app.pdf.PdfExporter;\nimport cn.safetyledger.app.sync.CloudSyncScheduler;'),
+              ('    protected void onResume() {\n        super.onResume();\n        if (records != null) {', '    protected void onResume() {\n        super.onResume();\n        CloudSyncScheduler.scheduleTrashSoon(this);\n        if (records != null) {'),
           ])
 
           patch('desktop/src/main/java/cn/safetyledger/pc/WordExporter.java', [
@@ -73,67 +75,30 @@ jobs:
               ('    private static String shortId(String id) {', '    private static String formTitle(String value) {\n        String title = blank(value, "安全检查").trim();\n        if (title.endsWith("记录表")) return title;\n        if (title.endsWith("记录")) return title + "表";\n        return title + "记录表";\n    }\n\n    private static String shortId(String id) {'),
           ])
 
-          patch('app/src/main/java/cn/safetyledger/app/LedgerActivity.java', [
-              ('import cn.safetyledger.app.pdf.PdfExporter;', 'import cn.safetyledger.app.pdf.PdfExporter;\nimport cn.safetyledger.app.sync.CloudSyncScheduler;'),
-              ('    private void render() {', '    @Override\n    protected void onResume() {\n        super.onResume();\n        if (repo != null) {\n            CloudSyncScheduler.scheduleTrashSoon(this);\n            refreshTypeFilter();\n            load();\n        }\n    }\n\n    private void render() {'),
-          ])
+          patch('app/build.gradle', [('versionCode 22','versionCode 23'),("versionName '1.2.19'","versionName '1.2.20'")])
+          patch('desktop/pom.xml', [('<version>0.1.2</version>','<version>0.1.3</version>'),('<finalName>safety-ledger-pc-0.1.2-all</finalName>','<finalName>safety-ledger-pc-0.1.3-all</finalName>')])
+          patch('.github/workflows/android-build.yml', [("安全检查台账-1.2.19-debug-不可作为长期升级包.apk","安全检查台账-1.2.20-debug-不可作为长期升级包.apk"),('name: 安全检查台账-1.2.19-debug','name: 安全检查台账-1.2.20-debug')])
+          patch('.github/workflows/android-release.yml', [("安全检查台账-1.2.19-正式签名.apk","安全检查台账-1.2.20-正式签名.apk"),('name: 安全检查台账-1.2.19-正式签名','name: 安全检查台账-1.2.20-正式签名')])
+          patch('.github/workflows/windows-pc-build.yml', [('safety-ledger-pc-0.1.2-all.jar','safety-ledger-pc-0.1.3-all.jar'),('--app-version 0.1.2','--app-version 0.1.3'),('安全检查台账-PC-0.1.2-Windows.zip','安全检查台账-PC-0.1.3-Windows.zip'),('name: 安全检查台账-PC-0.1.2-Windows','name: 安全检查台账-PC-0.1.3-Windows')])
 
-          patch('app/build.gradle', [
-              ("versionCode 22", "versionCode 23"),
-              ("versionName '1.2.19'", "versionName '1.2.20'"),
-          ])
-
-          patch('desktop/pom.xml', [
-              ('<version>0.1.2</version>', '<version>0.1.3</version>'),
-              ('<finalName>safety-ledger-pc-0.1.2-all</finalName>', '<finalName>safety-ledger-pc-0.1.3-all</finalName>'),
-          ])
-
-          patch('.github/workflows/android-build.yml', [
-              ("安全检查台账-1.2.19-debug-不可作为长期升级包.apk", "安全检查台账-1.2.20-debug-不可作为长期升级包.apk"),
-              ('name: 安全检查台账-1.2.19-debug', 'name: 安全检查台账-1.2.20-debug'),
-          ])
-
-          patch('.github/workflows/android-release.yml', [
-              ("安全检查台账-1.2.19-正式签名.apk", "安全检查台账-1.2.20-正式签名.apk"),
-              ('name: 安全检查台账-1.2.19-正式签名', 'name: 安全检查台账-1.2.20-正式签名'),
-          ])
-
-          patch('.github/workflows/windows-pc-build.yml', [
-              ('safety-ledger-pc-0.1.2-all.jar', 'safety-ledger-pc-0.1.3-all.jar'),
-              ('--app-version 0.1.2', '--app-version 0.1.3'),
-              ('安全检查台账-PC-0.1.2-Windows.zip', '安全检查台账-PC-0.1.3-Windows.zip'),
-              ('name: 安全检查台账-PC-0.1.2-Windows', 'name: 安全检查台账-PC-0.1.3-Windows'),
-          ])
-
-          Path('docs/release-1.2.20-complete.md').write_text('''# 安全检查台账 1.2.20 / PC 0.1.3 完整修改\n\n- Android 模板最多 12 个检查项目，固定 12 个 A4 项目槽位，增加项目时前面单元格不再反复改变高度。\n- 检查内容最多 100 字、标准最多 60 字；PDF 单元格按文字量自动缩放。\n- PDF 第 1 页只保留检查表、整改意见、整改记录、三方签名；删除“共检查几项/是几项/否几项”的检查情况汇总。\n- 第 2 页起为照片附件，顺序为检查照片 → 整改照片 → 复查照片。\n- 图片只在存在原始拍摄时间/可解析中文地点时写水印；不把 GPS 数字作为地点文字。\n- PDF 照片嵌入尺寸下调到 720×900 上限，降低导出文件体积。\n- 回收站永久删除统一验证云同步空间密码；使用轻量 trash 指令和 30 天云端回收站，管理员可按日期、时间、模板、地点查看并恢复。\n- APP 回到台账首页时会立即安排一次轻量回收站状态检查，后台仍保留 15 分钟兜底。\n- 网络超时/无法连接统一显示“网络连接问题”，不再直接暴露英文连接错误。\n- 自动归档开关保留：只清理超过 6 个月且已完成记录的未处理原图副本，不删除检查记录、水印业务照片、签名或整改资料。\n- PC 本地资料库继续按 年/月/日期/序号 建目录，保存检查照片、整改照片、复查照片、签名、record.json 和可编辑 Word。\n- PC Word 布局按 Android A4 PDF 的同一列宽和高度比例重做；版本升级后自动重绘未人工修改的旧 Word，人工修改过的保留并生成“系统更新”版。\n- PC 点击“检查记录”或双击记录可弹窗预览；网络错误改为中文可操作提示。\n- `.safetydata` 继续支持 Android、其他手机和 PC 之间导入导出。\n''', encoding='utf-8')
+          Path('docs/release-1.2.20-complete.md').write_text('''# 安全检查台账 1.2.20 / PC 0.1.3 完整修改\n\n- 模板最多 12 个检查项目；检查内容最多 100 字、标准最多 60 字。\n- PDF 第1页固定为检查表、整改意见、整改记录、三方签名；不再显示“共检查几项/是几项/否几项”。照片从第2页开始，顺序为检查照片、整改照片、复查照片。\n- 照片水印只使用真实拍摄时间和可解析的中文地点；无信息时不添加，原始GPS数字不作为地点。\n- 降低 PDF 照片嵌入分辨率以减小文件体积。\n- 回收站永久删除统一验证云同步空间密码；轻量删除/恢复信号；云端回收站30天；管理员恢复列表显示日期、时间、模板、地点。\n- 回到台账首页即安排一次轻量回收站状态检查，15分钟后台任务继续兜底。\n- 网络超时、DNS、无法连接显示中文“网络连接问题”。\n- 自动归档开关只清理超过6个月已完成记录的未处理原图副本，不删业务资料。\n- PC资料库按年/月/日/序号长期落地检查照片、整改照片、复查照片、签名和可编辑Word。\n- PC Word 与 Android PDF 使用同一A4第一页列宽、项目区、整改区和签名区比例；未人工编辑的旧Word自动迁移，人工编辑版保留并另生成系统更新版。\n- PC点击检查记录或双击行可预览；Android/PC继续互认 .safetydata。\n''', encoding='utf-8')
           PY
-      - name: Verify Android source changes
-        run: |
-          grep -F 'MAX_TEMPLATE_ITEMS = 12' app/src/main/java/cn/safetyledger/app/TemplateActivity.java
-          grep -F 'FORM_ITEM_SLOTS = 12' app/src/main/java/cn/safetyledger/app/pdf/PdfExporter.java
-          grep -F "versionName '1.2.20'" app/build.gradle
-      - name: Verify PC source changes
-        run: |
-          grep -F 'LAYOUT_VERSION = 5' desktop/src/main/java/cn/safetyledger/pc/WordExporter.java
-          grep -F 'Math.max(12, realCount)' desktop/src/main/java/cn/safetyledger/pc/WordExporter.java
-          grep -F '<version>0.1.3</version>' desktop/pom.xml
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: '17'
           cache: gradle
       - uses: android-actions/setup-android@v3
-      - name: Install Android SDK
-        run: sdkmanager 'platform-tools' 'platforms;android-35' 'build-tools;35.0.0'
+      - run: sdkmanager 'platform-tools' 'platforms;android-35' 'build-tools;35.0.0'
       - run: chmod +x gradlew
       - name: Android test lint build
         run: ./gradlew --no-daemon testDebugUnitTest lintDebug assembleDebug
-      - name: PC tests
+      - name: PC tests and package
         run: mvn -B -f desktop/pom.xml test package
       - name: Commit consolidated implementation
         run: |
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git add app desktop docs .github/workflows/android-build.yml .github/workflows/android-release.yml .github/workflows/windows-pc-build.yml
-          git commit -m 'Finalize Android 1.2.20 and PC 0.1.3' || exit 0
+          git commit -m 'Finalize Android 1.2.20 and PC 0.1.3'
           git push
