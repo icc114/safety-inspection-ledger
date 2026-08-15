@@ -6,6 +6,7 @@ on:
     paths:
       - 'tools/apply_v1218_sync_trash.py'
       - 'tools/fix_v1218_build.py'
+      - 'tools/fix_pc_word_compile.py'
       - '.github/workflows/apply-v1218-pc012.yml'
   workflow_dispatch:
 
@@ -25,6 +26,7 @@ jobs:
         run: |
           python3 tools/apply_v1218_sync_trash.py
           python3 tools/fix_v1218_build.py
+          python3 tools/fix_pc_word_compile.py
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
