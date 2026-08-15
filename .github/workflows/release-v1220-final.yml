@@ -1,0 +1,90 @@
+name: Release Android 1.2.20 and PC 0.1.3
+
+on:
+  push:
+    branches:
+      - agent/v1220-complete-android-pc
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  android-release:
+    if: contains(github.event.head_commit.message, 'Finalize Android 1.2.20 and PC 0.1.3') || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    env:
+      SAFETY_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+      SAFETY_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+      SAFETY_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+      EXPECTED_CERT_SHA256: "0E:D4:37:B3:AB:D1:2F:BC:62:88:91:C8:1C:FF:15:06:72:D0:AD:A7:8C:C6:6D:11:72:08:59:EC:C9:F5:28:15"
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify permanent signing secrets
+        env:
+          KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+        run: |
+          test -n "$KEYSTORE_B64" || (echo 'Missing ANDROID_KEYSTORE_BASE64' && exit 1)
+          test -n "$SAFETY_KEYSTORE_PASSWORD" || (echo 'Missing ANDROID_KEYSTORE_PASSWORD' && exit 1)
+          test -n "$SAFETY_KEY_ALIAS" || (echo 'Missing ANDROID_KEY_ALIAS' && exit 1)
+          test -n "$SAFETY_KEY_PASSWORD" || (echo 'Missing ANDROID_KEY_PASSWORD' && exit 1)
+          printf '%s' "$KEYSTORE_B64" | base64 --decode > "$RUNNER_TEMP/safety-ledger-release.jks"
+          chmod 600 "$RUNNER_TEMP/safety-ledger-release.jks"
+          echo "SAFETY_KEYSTORE_PATH=$RUNNER_TEMP/safety-ledger-release.jks" >> "$GITHUB_ENV"
+      - name: Verify permanent signing fingerprint
+        run: |
+          keytool -list -v -keystore "$SAFETY_KEYSTORE_PATH" -storepass "$SAFETY_KEYSTORE_PASSWORD" -alias "$SAFETY_KEY_ALIAS" > "$RUNNER_TEMP/key-info.txt"
+          grep -F "SHA256: $EXPECTED_CERT_SHA256" "$RUNNER_TEMP/key-info.txt" >/dev/null || (echo 'Wrong permanent signing key' && exit 1)
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: gradle
+      - uses: android-actions/setup-android@v3
+      - name: Install Android SDK
+        run: sdkmanager 'platform-tools' 'platforms;android-35' 'build-tools;35.0.0'
+      - run: chmod +x gradlew
+      - name: Test, lint and build stable APK
+        run: ./gradlew --no-daemon testDebugUnitTest lintDebug assembleRelease
+      - name: Verify built APK signature
+        run: |
+          $ANDROID_HOME/build-tools/35.0.0/apksigner verify --verbose --print-certs app/build/outputs/apk/release/app-release.apk | tee "$RUNNER_TEMP/apk-cert.txt"
+          NORMALIZED=$(echo "$EXPECTED_CERT_SHA256" | tr -d ':' | tr '[:upper:]' '[:lower:]')
+          grep -F "Signer #1 certificate SHA-256 digest: $NORMALIZED" "$RUNNER_TEMP/apk-cert.txt" >/dev/null || (echo 'Built APK certificate mismatch' && exit 1)
+          cp app/build/outputs/apk/release/app-release.apk '安全检查台账-1.2.20-正式签名-可覆盖升级.apk'
+      - uses: actions/upload-artifact@v4
+        with:
+          name: 安全检查台账-1.2.20-正式签名-可覆盖升级
+          path: 安全检查台账-1.2.20-正式签名-可覆盖升级.apk
+          if-no-files-found: error
+          retention-days: 30
+
+  windows-pc:
+    if: contains(github.event.head_commit.message, 'Finalize Android 1.2.20 and PC 0.1.3') || github.event_name == 'workflow_dispatch'
+    runs-on: windows-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: maven
+      - name: Compile cross-platform data tool
+        run: javac -encoding UTF-8 tools/SafetyDataTool.java
+      - name: Test and package PC client
+        run: mvn -B -f desktop/pom.xml test package
+      - name: Build portable Windows app
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path desktop/target/jpackage-input | Out-Null
+          Copy-Item desktop/target/safety-ledger-pc-0.1.3-all.jar desktop/target/jpackage-input/
+          jpackage --type app-image --name SafetyLedgerPC --app-version 0.1.3 --vendor "Safety Ledger" --input desktop/target/jpackage-input --main-jar safety-ledger-pc-0.1.3-all.jar --main-class cn.safetyledger.pc.SafetyLedgerDesktop --dest desktop/target/windows
+          Compress-Archive -Path desktop/target/windows/SafetyLedgerPC -DestinationPath "desktop/target/安全检查台账-PC-0.1.3-Windows-便携版.zip" -Force
+      - uses: actions/upload-artifact@v4
+        with:
+          name: 安全检查台账-PC-0.1.3-Windows-便携版
+          path: desktop/target/安全检查台账-PC-0.1.3-Windows-便携版.zip
+          if-no-files-found: error
+          retention-days: 30
