@@ -5,6 +5,7 @@ on:
     branches: [agent/pc-word-pdf-layout-v012]
     paths:
       - 'tools/apply_v1218_sync_trash.py'
+      - 'tools/fix_v1218_build.py'
       - '.github/workflows/apply-v1218-pc012.yml'
   workflow_dispatch:
 
@@ -21,7 +22,9 @@ jobs:
         with:
           ref: agent/pc-word-pdf-layout-v012
       - name: Apply patch
-        run: python3 tools/apply_v1218_sync_trash.py
+        run: |
+          python3 tools/apply_v1218_sync_trash.py
+          python3 tools/fix_v1218_build.py
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
