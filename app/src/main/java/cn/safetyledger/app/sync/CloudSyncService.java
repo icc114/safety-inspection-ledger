@@ -122,6 +122,35 @@ public final class CloudSyncService {
     }
 
     /**
+     * Lightweight paired-device discovery. It only reads the WebDAV/R2 device directory and
+     * registers unknown snapshot owners locally. It deliberately does not download/decrypt any
+     * inspection/photo snapshot, so opening device management stays fast even with large data.
+     */
+    public DiscoveryResult discoverDevices() throws Exception {
+        Config config = null;
+        try {
+            config = requireConfig();
+            WebDavClient client = client(config);
+            prepare(client, config);
+            String currentId = ensureDeviceId();
+            List<String> snapshots = client.listSnapshots(config.space);
+            registerCurrentDevice(currentId, snapshots.isEmpty());
+            long now = System.currentTimeMillis();
+            int remoteDevices = 0;
+            for (String name : snapshots) {
+                if (!name.endsWith(".safetydata")) continue;
+                String id = name.substring(0, name.length() - ".safetydata".length());
+                if (id.equals(currentId)) continue;
+                registerDiscoveredDevice(id, now);
+                remoteDevices++;
+            }
+            return new DiscoveryResult(remoteDevices, now);
+        } finally {
+            if (config != null) Arrays.fill(config.spacePassword, '\0');
+        }
+    }
+
+    /**
      * Deletes only device snapshot files in the currently configured sync space. It does not
      * delete any local inspection record/photo. The current phone then becomes the first owner
      * and uploads a clean snapshot. This is intentionally explicit for retiring test devices.
@@ -262,6 +291,15 @@ public final class CloudSyncService {
                 ? "PRIMARY" : "FIELD");
     }
 
+    private void registerDiscoveredDevice(String deviceId, long now) {
+        SQLiteDatabase database = repo.raw();
+        String fallbackName = "设备 " + shortDevice(deviceId);
+        database.execSQL("INSERT OR IGNORE INTO sync_devices(device_id,display_name,role,first_seen_at,last_seen_at,updated_at) VALUES(?,?,?,?,?,?)",
+                new Object[]{deviceId, fallbackName, "FIELD", now, now, now});
+        database.execSQL("UPDATE sync_devices SET last_seen_at=? WHERE device_id=?",
+                new Object[]{now, deviceId});
+    }
+
     private String firstOwner() {
         try (Cursor cursor = repo.raw().rawQuery(
                 "SELECT device_id FROM sync_devices WHERE role='OWNER' ORDER BY first_seen_at LIMIT 1", null)) {
@@ -314,6 +352,7 @@ public final class CloudSyncService {
 
     public record Result(int peerDevices, int changedRows, int skippedSnapshots,
                          String role, long completedAt, String warning) {}
+    public record DiscoveryResult(int remoteDevices, long completedAt) {}
     public record ResetResult(int deletedSnapshots, String ownerDeviceId, long completedAt) {}
 
     private static final class Config {
