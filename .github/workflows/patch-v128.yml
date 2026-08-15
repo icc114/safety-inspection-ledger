@@ -22,6 +22,35 @@ jobs:
       - name: Apply fixes
         run: python3 tools/patch_v128.py
 
+      - name: Fix Java lambda capture
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('app/src/main/java/cn/safetyledger/app/SettingsActivity.java')
+          s = p.read_text(encoding='utf-8')
+          marker = '        syncStatus.setText("同步状态：正在测试…");\n        new Thread(() -> {'
+          replacement = '        final String resolvedType = type;\n        syncStatus.setText("同步状态：正在测试…");\n        new Thread(() -> {'
+          if marker not in s:
+              raise SystemExit('testConnection thread marker not found')
+          s = s.replace(marker, replacement, 1)
+          start = s.index('        final String resolvedType = type;')
+          end = s.index('        }).start();', start)
+          block = s[start:end]
+          replacements = {
+              'if (type.contains("WebDAV") || "Cloudflare".equals(type)': 'if (resolvedType.contains("WebDAV") || "Cloudflare".equals(resolvedType)',
+              '|| "自定义 HTTP 服务器".equals(type))': '|| "自定义 HTTP 服务器".equals(resolvedType))',
+              '"Cloudflare".equals(type) ? spaceName : ""': '"Cloudflare".equals(resolvedType) ? spaceName : ""',
+              '"Cloudflare".equals(type) ? spacePassword : ""': '"Cloudflare".equals(resolvedType) ? spacePassword : ""',
+              'if (!result.success() && "Cloudflare".equals(type))': 'if (!result.success() && "Cloudflare".equals(resolvedType))',
+              'type + " 的官方授权尚未接入；请选择 WebDAV、飞牛 WebDAV或兼容 Worker"': 'resolvedType + " 的官方授权尚未接入；请选择 Cloudflare 或 WebDAV / NAS"',
+              'saved = saveProvider(type, url, username, password, tokenValue,': 'saved = saveProvider(resolvedType, url, username, password, tokenValue,',
+          }
+          for old, new in replacements.items():
+              block = block.replace(old, new)
+          s = s[:start] + block + s[end:]
+          p.write_text(s, encoding='utf-8')
+          PY
+
       - name: Set up Java 17
         uses: actions/setup-java@v4
         with:
