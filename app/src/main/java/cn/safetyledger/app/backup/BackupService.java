@@ -10,12 +10,17 @@ public final class BackupService{
     private final Context context;public BackupService(Context c){context=c.getApplicationContext();}
     public void exportData(OutputStream destination,char[]password)throws Exception{
         if(password.length<8)throw new IllegalArgumentException("密码至少 8 位");
-        exportInternal(destination,password,MAGIC);
+        exportInternal(destination,password,MAGIC,true);
+    }
+    /** Cloud transport only needs the business JPEGs; untouched originals stay on the source phone. */
+    public void exportCloudSnapshot(OutputStream destination,char[]password)throws Exception{
+        if(password.length<8)throw new IllegalArgumentException("密码至少 8 位");
+        exportInternal(destination,password,MAGIC,false);
     }
     public void exportPortable(OutputStream destination)throws Exception{
-        exportInternal(destination,PORTABLE_KEY.clone(),PORTABLE_MAGIC);
+        exportInternal(destination,PORTABLE_KEY.clone(),PORTABLE_MAGIC,true);
     }
-    private void exportInternal(OutputStream destination,char[]password,byte[]magic)throws Exception{
+    private void exportInternal(OutputStream destination,char[]password,byte[]magic,boolean includeOriginals)throws Exception{
         File tmp=File.createTempFile("safety-backup-",".zip",context.getCacheDir());
         try{
             LedgerDatabase h=((SafetyLedgerApp)context).db();
@@ -35,7 +40,7 @@ public final class BackupService{
                 entry(z,"manifest.properties",properties(manifest));
                 file(z,"database.sqlite",dbFile);
                 File media=new File(context.getFilesDir(),"business_media");
-                zipDir(z,media,"business_media/");
+                zipDir(z,media,"business_media/",includeOriginals);
             }
             encrypt(tmp,destination,password,magic);
         }finally{
@@ -90,8 +95,7 @@ public final class BackupService{
         String path=p.database.getAbsolutePath().replace("'","''");
         int changed=0;
         String[] tables={"templates","template_items","inspections","inspection_items","media",
-                "signatures","app_settings","sync_providers","sync_devices","tombstones",
-                "archive_index","holiday_cache"};
+                "signatures","tombstones","archive_index","holiday_cache"};
         d.execSQL("ATTACH DATABASE '"+path+"' AS incoming");
         d.beginTransaction();
         try{
@@ -151,6 +155,7 @@ public final class BackupService{
         if(tableExists(d,"main","app_settings")){
             d.delete("app_settings","key IN ('device_id','cloud_role','device_role','last_sync_at','last_sync_error')",null);
         }
+        if(tableExists(d,"main","sync_devices")) d.delete("sync_devices",null,null);
     }
     private void encrypt(File plain,OutputStream out,char[]pw,byte[]magic)throws Exception{
         byte[]salt=random(16),baseNonce=random(12);SecretKey key=derive(pw,salt);
@@ -208,7 +213,7 @@ public final class BackupService{
     }
     private SecretKey derive(char[]pw,byte[]salt)throws Exception{PBEKeySpec s=new PBEKeySpec(pw,salt,ITERATIONS,256);byte[]k=SecretKeyFactory.getInstance("PBKDF2WithHmacSHA256").generateSecret(s).getEncoded();s.clearPassword();return new SecretKeySpec(k,"AES");}
     private byte[]random(int n){byte[]b=new byte[n];new SecureRandom().nextBytes(b);return b;}private byte[]properties(Properties p)throws IOException{ByteArrayOutputStream b=new ByteArrayOutputStream();p.store(b,"Safety Ledger portable backup");return b.toByteArray();}
-    private void entry(ZipOutputStream z,String name,byte[]b)throws IOException{z.putNextEntry(new ZipEntry(name));z.write(b);z.closeEntry();}private void file(ZipOutputStream z,String name,File f)throws IOException{z.putNextEntry(new ZipEntry(name));Files.copy(f.toPath(),z);z.closeEntry();}private void zipDir(ZipOutputStream z,File dir,String prefix)throws IOException{if(!dir.isDirectory())return;File[]fs=dir.listFiles();if(fs==null)return;for(File f:fs)if(f.isDirectory())zipDir(z,f,prefix+f.getName()+"/");else file(z,prefix+f.getName(),f);}
+    private void entry(ZipOutputStream z,String name,byte[]b)throws IOException{z.putNextEntry(new ZipEntry(name));z.write(b);z.closeEntry();}private void file(ZipOutputStream z,String name,File f)throws IOException{z.putNextEntry(new ZipEntry(name));Files.copy(f.toPath(),z);z.closeEntry();}private void zipDir(ZipOutputStream z,File dir,String prefix,boolean includeOriginals)throws IOException{if(!dir.isDirectory())return;File[]fs=dir.listFiles();if(fs==null)return;for(File f:fs)if(f.isDirectory())zipDir(z,f,prefix+f.getName()+"/",includeOriginals);else if(includeOriginals||!f.getName().endsWith("-original.bin"))file(z,prefix+f.getName(),f);}
     private void unzip(File zip,File dir)throws IOException{try(ZipInputStream z=new ZipInputStream(new FileInputStream(zip))){for(ZipEntry e;(e=z.getNextEntry())!=null;){File out=new File(dir,e.getName()).getCanonicalFile();if(!out.toPath().startsWith(dir.getCanonicalFile().toPath()))throw new IOException("备份路径非法");if(e.isDirectory())out.mkdirs();else{out.getParentFile().mkdirs();try(OutputStream o=new FileOutputStream(out)){copy(z,o);}}}}}
     private static byte[] readExactly(InputStream in,int length)throws IOException{byte[]out=new byte[length];int offset=0;while(offset<length){int n=in.read(out,offset,length-offset);if(n<0)throw new EOFException("备份文件被截断");offset+=n;}return out;}
     private static void copy(InputStream in,OutputStream out)throws IOException{byte[]b=new byte[65536];for(int n;(n=in.read(b))>=0;)if(n>0)out.write(b,0,n);}

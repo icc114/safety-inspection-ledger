@@ -501,7 +501,7 @@ public class MainActivity extends Activity {
                     pendingCategory, model.location, capturedNow ? lastLocation() : null, capturedNow);
             repo.addMedia(media);
             renderMedia();
-            Ui.toast(this, "照片已保存；可读取的原始时间和 GPS 已写入水印");
+            Ui.toast(this, "照片已保存；有原始拍摄时间或可解析地点时才添加文字水印");
         } catch (Exception error) {
             Ui.toast(this, "照片处理失败：" + error.getMessage());
         }

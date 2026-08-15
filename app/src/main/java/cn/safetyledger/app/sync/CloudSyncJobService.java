@@ -27,26 +27,29 @@ public final class CloudSyncJobService extends JobService {
 
         new Thread(() -> {
             boolean retry = false;
+            boolean deviceJob = params.getJobId() == CloudSyncScheduler.DEVICE_JOB_ID;
             try {
-                new CloudSyncService(this).syncNow();
+                CloudSyncService service = new CloudSyncService(this);
+                if (deviceJob) service.syncDeviceManagement();
+                else service.syncNow();
             } catch (OutOfMemoryError error) {
                 retry = false;
-                String message = "同步数据较大且当前系统内存不足，本次后台同步已安全停止。请升级所有设备到 1.2.14 后重试。";
-                repo.putSetting("last_sync_error", message);
-                notifyFailure(message);
+                String message = "检查内容较大且当前系统内存不足，本次后台同步已安全停止。请稍后重试。";
+                repo.putSetting(deviceJob ? "last_device_sync_error" : "last_sync_error", message);
+                if (!deviceJob) notifyFailure(message);
             } catch (Exception error) {
                 String message = error.getMessage() == null ? error.getClass().getSimpleName()
                         : error.getMessage();
-                // Manual and background sync can meet. This is not a network failure and must not
-                // trigger notifications/retry bursts; the active sync already owns the work.
-                if (!message.contains("已有同步任务正在运行")) {
+                // A manual operation may meet its own background channel. That is not a failure.
+                if (!message.contains("同步正在运行")) {
                     retry = true;
-                    repo.putSetting("last_sync_error", message);
-                    notifyFailure(message);
+                    repo.putSetting(deviceJob ? "last_device_sync_error" : "last_sync_error", message);
+                    if (!deviceJob) notifyFailure(message);
                 }
             }
             jobFinished(params, retry);
-        }, "safety-ledger-cloud-sync").start();
+        }, params.getJobId() == CloudSyncScheduler.DEVICE_JOB_ID
+                ? "safety-ledger-device-sync" : "safety-ledger-content-sync").start();
         return true;
     }
 

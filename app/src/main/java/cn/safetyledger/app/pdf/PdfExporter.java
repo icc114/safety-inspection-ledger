@@ -20,6 +20,7 @@ import java.io.File;
 import java.io.IOException;
 import java.io.OutputStream;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -236,8 +237,9 @@ public final class PdfExporter {
                 20, Paint.Align.CENTER, true);
         text(canvas, MARGIN, 53, displayDate(record) + "  " + record.location,
                 11, Paint.Align.LEFT, false);
-        for (int i = 0; i < 4 && start + i < record.media.size(); i++) {
-            Media media = record.media.get(start + i);
+        List<Media> ordered = orderedPhotos(record.media);
+        for (int i = 0; i < 4 && start + i < ordered.size(); i++) {
+            Media media = ordered.get(start + i);
             int column = i % 2;
             int row = i / 2;
             float gap = 10;
@@ -254,9 +256,34 @@ public final class PdfExporter {
             }
             String label = "RECTIFICATION".equals(media.category)
                     ? "整改照片" : "RECHECK".equals(media.category) ? "复查照片" : "检查照片";
-            text(canvas, x + 5, y + height - 9, label + "  " + media.location,
+            String place = readablePhotoPlace(media.location);
+            text(canvas, x + 5, y + height - 9, label + (place.isBlank() ? "" : "  " + place),
                     9, Paint.Align.LEFT, false);
         }
+    }
+
+    private List<Media> orderedPhotos(List<Media> source) {
+        List<Media> ordered = new ArrayList<>(source);
+        ordered.sort(Comparator.comparingInt((Media media) -> photoPriority(media.category))
+                .thenComparingLong(media -> media.capturedAt));
+        return ordered;
+    }
+
+    private int photoPriority(String category) {
+        if ("RECTIFICATION".equals(category)) return 1;
+        if ("RECHECK".equals(category)) return 2;
+        return 0; // SCENE/inspection photos always come first.
+    }
+
+    private String readablePhotoPlace(String value) {
+        if (value == null) return "";
+        String text = value.trim();
+        if (text.isBlank()) return "";
+        // Old test versions stored raw coordinates such as 北纬 39.x，东经 116.x.
+        // Never print those numeric coordinates as a place name in the formal PDF.
+        if (text.contains("北纬") || text.contains("南纬") || text.contains("东经") || text.contains("西经")) return "";
+        if (text.matches(".*[-+]?[0-9]{2,3}[.][0-9]{3,}.*[-+]?[0-9]{2,3}[.][0-9]{3,}.*")) return "";
+        return text;
     }
 
     private String formTitle(Inspection record) {
