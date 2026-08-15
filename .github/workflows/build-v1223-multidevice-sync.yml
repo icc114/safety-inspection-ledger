@@ -1,0 +1,143 @@
+name: Build Android 1.2.23 multi-device background sync
+
+on:
+  push:
+    branches:
+      - agent/v1220-complete-android-pc
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    if: contains(github.event.head_commit.message, 'Build Android 1.2.23 multi-device background sync')
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Apply multi-device sync fixes
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          def rep(path, old, new, count=-1):
+              p=Path(path); s=p.read_text(encoding='utf-8')
+              if old not in s:
+                  raise SystemExit(f'missing expected text in {path}: {old[:180]!r}')
+              p.write_text(s.replace(old,new,count), encoding='utf-8')
+
+          # Scheduler: explicit save/photo/draft gets a fast job, followed by one pull-only convergence job.
+          p='app/src/main/java/cn/safetyledger/app/sync/CloudSyncScheduler.java'
+          rep(p,
+              '    public static final int TRASH_SOON_JOB_ID = 1142030;\n',
+              '    public static final int TRASH_SOON_JOB_ID = 1142030;\n    public static final int IMMEDIATE_CONTENT_JOB_ID = 1142031;\n    public static final int FOLLOWUP_CONTENT_JOB_ID = 1142032;\n')
+          rep(p,
+              '    private static final long CHANGE_DEADLINE = 5L * 60L * 1000L;\n',
+              '    private static final long CHANGE_DEADLINE = 5L * 60L * 1000L;\n    private static final long IMMEDIATE_LATENCY = 1_000L;\n    private static final long IMMEDIATE_DEADLINE = 10_000L;\n    private static final long FOLLOWUP_LATENCY = 20_000L;\n    private static final long FOLLOWUP_DEADLINE = 60_000L;\n')
+          rep(p,
+              '    public static void scheduleTrashSoon(Context context) {\n',
+              '''    /** Starts content sync promptly after an explicit save, photo import, signature or draft save. */\n    public static void scheduleImmediate(Context context) {\n        if (CloudSyncService.isContentSyncRunning()) {\n            schedulePeerRefresh(context);\n            return;\n        }\n        JobScheduler scheduler = context.getSystemService(JobScheduler.class);\n        if (scheduler == null) return;\n        JobInfo job = new JobInfo.Builder(IMMEDIATE_CONTENT_JOB_ID,\n                new ComponentName(context, CloudSyncJobService.class))\n                .setRequiredNetworkType(JobInfo.NETWORK_TYPE_ANY)\n                .setMinimumLatency(IMMEDIATE_LATENCY)\n                .setOverrideDeadline(IMMEDIATE_DEADLINE)\n                .build();\n        scheduler.schedule(job);\n    }\n\n    /** One follow-up pull closes races when two or more phones save at nearly the same time. */\n    public static void schedulePeerRefresh(Context context) {\n        JobScheduler scheduler = context.getSystemService(JobScheduler.class);\n        if (scheduler == null) return;\n        JobInfo job = new JobInfo.Builder(FOLLOWUP_CONTENT_JOB_ID,\n                new ComponentName(context, CloudSyncJobService.class))\n                .setRequiredNetworkType(JobInfo.NETWORK_TYPE_ANY)\n                .setMinimumLatency(FOLLOWUP_LATENCY)\n                .setOverrideDeadline(FOLLOWUP_DEADLINE)\n                .build();\n        scheduler.schedule(job);\n    }\n\n    public static void scheduleTrashSoon(Context context) {\n''')
+          rep(p,
+              '        scheduler.cancel(TRASH_SOON_JOB_ID);\n',
+              '        scheduler.cancel(TRASH_SOON_JOB_ID);\n        scheduler.cancel(IMMEDIATE_CONTENT_JOB_ID);\n        scheduler.cancel(FOLLOWUP_CONTENT_JOB_ID);\n')
+
+          # Content sync: publish this device first when it has edits, then merge peers, then publish aggregate.
+          # Only clear queue rows that existed when this sync started; edits made during sync remain pending.
+          p='app/src/main/java/cn/safetyledger/app/sync/CloudSyncService.java'
+          rep(p,
+              '    public CloudSyncService(Context context) {\n        this.context = context.getApplicationContext();\n        this.repo = new LedgerRepository(this.context);\n    }\n',
+              '    public CloudSyncService(Context context) {\n        this.context = context.getApplicationContext();\n        this.repo = new LedgerRepository(this.context);\n    }\n\n    public static boolean isContentSyncRunning() { return CONTENT_RUNNING.get(); }\n')
+          rep(p,
+              '        Config config = null;\n        try {\n            config = requireConfig();\n',
+              '        Config config = null;\n        long syncStartedAt = System.currentTimeMillis();\n        boolean publishedLocalFirst = false;\n        try {\n            config = requireConfig();\n',
+              1)
+          rep(p,
+              '''            // Device presence/roles now use the independent device-control channel. Content sync\n            // therefore downloads/merges first and uploads only once at the end, avoiding the old\n            // double-upload of every photo-heavy .safetydata snapshot.\n            BackupService backup = new BackupService(context);\n\n            int peers = 0;\n''',
+              '''            // Multi-device publish/merge protocol: if this phone has local edits, first publish\n            // its current encrypted snapshot so A/B/C phones can all expose their changes concurrently.\n            // We then re-list and merge every peer before publishing one final aggregate snapshot.\n            BackupService backup = new BackupService(context);\n            boolean pendingAtStart = hasPendingLocalChanges(syncStartedAt);\n            if (pendingAtStart) {\n                progress(listener, "正在发布本机修改，供其他设备并行接收…");\n                uploadSnapshot(backup, client, config, deviceId);\n                publishedLocalFirst = true;\n                try { Thread.sleep(350L); } catch (InterruptedException interrupted) {\n                    Thread.currentThread().interrupt();\n                }\n                snapshots = client.listSnapshots(config.space);\n                emptyCloud = snapshots.isEmpty();\n            }\n\n            int peers = 0;\n''')
+          rep(p,
+              '            repo.raw().execSQL("DELETE FROM sync_queue");\n',
+              '            repo.raw().execSQL("DELETE FROM sync_queue WHERE created_at<=?", new Object[]{syncStartedAt});\n')
+          rep(p,
+              '''            progress(listener, skipped == 0 ? "同步完成" : "同步完成，但有旧设备快照被跳过");\n            return new Result(peers, changed, skipped, deviceRole(deviceId), now, warning);\n''',
+              '''            // A save that happened while this sync was running must not be swallowed by the\n            // cleanup above. Run it promptly. Otherwise perform one delayed peer pull so simultaneous\n            // A/B/C saves converge without waiting for the 2-hour periodic job.\n            if (hasPendingLocalChanges()) CloudSyncScheduler.scheduleImmediate(context);\n            else if (publishedLocalFirst) CloudSyncScheduler.schedulePeerRefresh(context);\n            progress(listener, skipped == 0 ? "同步完成" : "同步完成，但有旧设备快照被跳过");\n            return new Result(peers, changed, skipped, deviceRole(deviceId), now, warning);\n''')
+          rep(p,
+              '    /**\n     * Independent device-management synchronization. Only small JSON metadata and logout markers\n',
+              '''    private boolean hasPendingLocalChanges(long through) {\n        try (Cursor cursor = repo.raw().rawQuery(\n                "SELECT 1 FROM sync_queue WHERE created_at<=? LIMIT 1",\n                new String[]{String.valueOf(through)})) {\n            return cursor.moveToFirst();\n        }\n    }\n\n    private boolean hasPendingLocalChanges() {\n        try (Cursor cursor = repo.raw().rawQuery("SELECT 1 FROM sync_queue LIMIT 1", null)) {\n            return cursor.moveToFirst();\n        }\n    }\n\n    /**\n     * Independent device-management synchronization. Only small JSON metadata and logout markers\n''')
+
+          # Fill form: explicit save, draft autosave, photo and signature all trigger prompt background sync.
+          p='app/src/main/java/cn/safetyledger/app/MainActivity.java'
+          rep(p,
+              'import cn.safetyledger.app.media.MediaService;\n',
+              'import cn.safetyledger.app.media.MediaService;\nimport cn.safetyledger.app.sync.CloudSyncScheduler;\n')
+          rep(p,
+              '''        } else if (request == SIGN) {\n            renderSignatures();\n            Ui.toast(this, "签名已保存");\n        }\n''',
+              '''        } else if (request == SIGN) {\n            renderSignatures();\n            CloudSyncScheduler.scheduleImmediate(this);\n            Ui.toast(this, "签名已保存");\n        }\n''')
+          rep(p,
+              '''            repo.addMedia(media);\n            renderMedia();\n            Ui.toast(this, "照片已保存；有原始拍摄时间或可解析地点时才添加文字水印");\n''',
+              '''            repo.addMedia(media);\n            renderMedia();\n            CloudSyncScheduler.scheduleImmediate(this);\n''')
+          rep(p,
+              '''        repo.saveInspection(model);\n        repo.putSetting("current_draft", "");\n        Ui.toast(this, hasProblem ? "已保存，待补录整改记录" : "检查记录已保存");\n''',
+              '''        repo.saveInspection(model);\n        repo.putSetting("current_draft", "");\n        CloudSyncScheduler.scheduleImmediate(this);\n        Ui.toast(this, hasProblem ? "已保存，待补录整改记录；正在后台同步" : "检查记录已保存；正在后台同步");\n''')
+          rep(p,
+              '''                repo.saveInspection(model);\n                repo.putSetting("current_draft", model.id);\n''',
+              '''                repo.saveInspection(model);\n                repo.putSetting("current_draft", model.id);\n                CloudSyncScheduler.scheduleImmediate(this);\n''')
+
+          # Record detail: no watermark toast; supplemental photos, signatures and rectification save sync in background.
+          p='app/src/main/java/cn/safetyledger/app/RecordDetailActivity.java'
+          rep(p,
+              'import cn.safetyledger.app.media.MediaService;\n',
+              'import cn.safetyledger.app.media.MediaService;\nimport cn.safetyledger.app.sync.CloudSyncScheduler;\n')
+          rep(p,
+              '''        delete.setOnClickListener(view -> {\n            repo.softDelete(model.id);\n            Ui.toast(this, "已移入回收站");\n            finish();\n        });\n''',
+              '''        delete.setOnClickListener(view -> {\n            repo.softDelete(model.id);\n            CloudSyncScheduler.scheduleImmediate(this);\n            Ui.toast(this, "已移入回收站；正在后台同步");\n            finish();\n        });\n''')
+          rep(p,
+              '''        repo.saveInspection(model);\n        Ui.toast(this, confirmed.isChecked() ? "整改已确认完成" : "整改记录已保存");\n        render();\n''',
+              '''        repo.saveInspection(model);\n        CloudSyncScheduler.scheduleImmediate(this);\n        Ui.toast(this, confirmed.isChecked() ? "整改已确认完成；正在后台同步" : "整改记录已保存；正在后台同步");\n        render();\n''')
+          rep(p,
+              '''            } else if (request == SIGN) {\n                showSignatures();\n                Ui.toast(this, "签名已保存");\n            }\n''',
+              '''            } else if (request == SIGN) {\n                showSignatures();\n                CloudSyncScheduler.scheduleImmediate(this);\n                Ui.toast(this, "签名已保存");\n            }\n''')
+          rep(p,
+              '''        repo.addMedia(media);\n        showMedia();\n        Ui.toast(this, ("SCENE".equals(pendingCategory) ? "检查照片" : "整改照片")\n                + "已保存；可读取的原始时间和 GPS 已写入水印");\n''',
+              '''        repo.addMedia(media);\n        showMedia();\n        CloudSyncScheduler.scheduleImmediate(this);\n''')
+
+          # Version bump.
+          rep('app/build.gradle','versionCode 25','versionCode 26')
+          rep('app/build.gradle',"versionName '1.2.22'","versionName '1.2.23'")
+
+          Path('docs/release-1.2.23.md').write_text('''# Android 1.2.23\n\n- 检查记录明确保存后 1–10 秒内安排后台同步。\n- 草稿自动保存、检查照片、整改照片、补签、整改记录也安排后台同步。\n- 移除照片保存后的水印提示 Toast；水印仍在后台按 EXIF 时间/可解析中文地点生成。\n- 多设备同步改为“先发布本机修改 → 读取/合并全部其他设备 → 再发布聚合结果”。多个手机可同时发布，不再要求一台同步完另一台再开始。\n- 每次本机修改同步完成后 20–60 秒自动再拉取一次，解决 A/B/C 几乎同时保存时的交叉覆盖/漏看窗口。\n- 同步开始后新产生的 sync_queue 不再被本轮同步结尾误清空；会自动触发下一轮。\n- 原有 2 小时周期同步仍作为长期兜底。\n''',encoding='utf-8')
+          PY
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: gradle
+      - uses: android-actions/setup-android@v3
+      - name: Install Android SDK
+        run: sdkmanager 'platform-tools' 'platforms;android-35' 'build-tools;35.0.0'
+      - run: chmod +x gradlew
+      - name: Test lint and build release APK
+        run: ./gradlew --no-daemon testDebugUnitTest lintDebug assembleRelease
+      - name: Stage unsigned APK
+        shell: bash
+        run: |
+          test -f app/build/outputs/apk/release/app-release-unsigned.apk
+          cp app/build/outputs/apk/release/app-release-unsigned.apk '安全检查台账-1.2.23-待永久签名.apk'
+      - uses: actions/upload-artifact@v4
+        with:
+          name: 安全检查台账-1.2.23-待永久签名
+          path: 安全检查台账-1.2.23-待永久签名.apk
+          if-no-files-found: error
+          retention-days: 30
+      - name: Commit verified source
+        shell: bash
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add app docs/release-1.2.23.md
+          git commit -m 'Android 1.2.23 concurrent multi-device background sync'
+          git pull --rebase origin agent/v1220-complete-android-pc
+          git push origin HEAD:agent/v1220-complete-android-pc
