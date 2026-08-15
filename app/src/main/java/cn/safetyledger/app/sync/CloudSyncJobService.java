@@ -29,6 +29,11 @@ public final class CloudSyncJobService extends JobService {
             boolean retry = false;
             try {
                 new CloudSyncService(this).syncNow();
+            } catch (OutOfMemoryError error) {
+                retry = false;
+                String message = "同步数据较大且当前系统内存不足，本次后台同步已安全停止。请升级所有设备到 1.2.14 后重试。";
+                repo.putSetting("last_sync_error", message);
+                notifyFailure(message);
             } catch (Exception error) {
                 String message = error.getMessage() == null ? error.getClass().getSimpleName()
                         : error.getMessage();
