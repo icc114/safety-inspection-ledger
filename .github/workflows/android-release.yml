@@ -57,11 +57,11 @@ jobs:
           NORMALIZED=$(echo "$EXPECTED_CERT_SHA256" | tr -d ':' | tr '[:upper:]' '[:lower:]')
           grep -F "Signer #1 certificate SHA-256 digest: $NORMALIZED" "$RUNNER_TEMP/apk-cert.txt" >/dev/null || (echo 'Built APK certificate mismatch' && exit 1)
       - name: Name stable APK
-        run: cp app/build/outputs/apk/release/app-release.apk '安全检查台账-1.2.17-正式签名.apk'
+        run: cp app/build/outputs/apk/release/app-release.apk '安全检查台账-1.2.19-正式签名.apk'
       - name: Upload stable signed APK
         uses: actions/upload-artifact@v4
         with:
-          name: 安全检查台账-1.2.17-正式签名
-          path: 安全检查台账-1.2.17-正式签名.apk
+          name: 安全检查台账-1.2.19-正式签名
+          path: 安全检查台账-1.2.19-正式签名.apk
           if-no-files-found: error
           retention-days: 30
