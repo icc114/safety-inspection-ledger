@@ -92,9 +92,18 @@ public final class WebDavClient {
     public List<String> listSnapshots(String space) throws Exception {
         ResponseInfo response = execute("PROPFIND", devicesUrl(space), PROPFIND, "1");
         if (!response.successDav()) throw failure("无法读取同步空间设备列表", response);
+        String xmlText = new String(response.body, StandardCharsets.UTF_8);
+        String upperXml = xmlText.toUpperCase(java.util.Locale.ROOT);
+        if (upperXml.contains("<!DOCTYPE") || upperXml.contains("<!ENTITY")) {
+            throw new java.io.IOException("服务器返回了不安全的 XML DTD/ENTITY，已拒绝解析");
+        }
         DocumentBuilderFactory factory = DocumentBuilderFactory.newInstance();
         factory.setNamespaceAware(true);
-        factory.setFeature("http://apache.org/xml/features/disallow-doctype-decl", true);
+        setXmlFeatureSafely(factory, "http://apache.org/xml/features/disallow-doctype-decl", true);
+        setXmlFeatureSafely(factory, "http://xml.org/sax/features/external-general-entities", false);
+        setXmlFeatureSafely(factory, "http://xml.org/sax/features/external-parameter-entities", false);
+        try { factory.setXIncludeAware(false); } catch (RuntimeException | AbstractMethodError ignored) {}
+        try { factory.setExpandEntityReferences(false); } catch (RuntimeException | AbstractMethodError ignored) {}
         Document document = factory.newDocumentBuilder()
                 .parse(new java.io.ByteArrayInputStream(response.body));
         NodeList hrefs = document.getElementsByTagNameNS("*", "href");
@@ -224,6 +233,18 @@ public final class WebDavClient {
         if (text.length() > 180) text = text.substring(0, 180);
         return new java.io.IOException(prefix + "：HTTP " + response.code()
                 + (text.isBlank() ? "" : " · " + text));
+    }
+
+    private static void setXmlFeatureSafely(DocumentBuilderFactory factory,
+                                            String feature, boolean enabled) {
+        try {
+            factory.setFeature(feature, enabled);
+        } catch (javax.xml.parsers.ParserConfigurationException
+                 | RuntimeException | AbstractMethodError ignored) {
+            // Android vendors ship different XML parser implementations. DTD/ENTITY
+            // text is rejected before parsing, so unsupported hardening flags must not
+            // make otherwise valid WebDAV XML impossible to read.
+        }
     }
 
     private String readable(Exception error) {

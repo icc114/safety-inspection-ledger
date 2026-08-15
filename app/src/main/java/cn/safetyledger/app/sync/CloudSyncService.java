@@ -45,21 +45,21 @@ public final class CloudSyncService {
                 config.serverPassword, config.token,
                 "Cloudflare".equals(config.type) ? config.space : "",
                 "Cloudflare".equals(config.type) ? new String(config.spacePassword) : "");
-        SyncProvider.ConnectionResult probe = client.testReadWrite(config.space);
-        if (!probe.success()) {
-            String message = probe.message();
+        try {
+            client.prepare(config.space);
+        } catch (Exception error) {
+            String message = error.getMessage() == null
+                    ? error.getClass().getSimpleName() : error.getMessage();
             if ("Cloudflare".equals(config.type)) {
                 if (message.contains("需要设备授权") || message.contains("HTTP 401")) {
-                    message = "Cloudflare 自动配对被拒绝：当前地址不是本版兼容网关，或仍使用旧私有授权协议。请重新部署仓库 cloudflare-worker；若云端提供设备 Token，也可在高级认证中填写。原始响应："
-                            + message;
+                    message = "Cloudflare 自动配对被拒绝，请确认同步空间名称和密码一致。原始响应：" + message;
                 } else if (message.contains("HTTP 404") || message.contains("HTTP 405")
                         || message.contains("HTTP 500") || message.contains("HTTP 503")
                         || message.contains("不是可读的 WebDAV")) {
-                    message = "Cloudflare 服务与当前 APK 协议不匹配。1.2.6 需要仓库 cloudflare-worker 的 WebDAV 兼容 Worker，并绑定私有 R2 为 SAFETY_LEDGER_BUCKET；旧版 D1/env.DB Worker 不能直接使用。原始响应："
-                            + message;
+                    message = "Cloudflare R2 Worker 未通过 WebDAV 目录准备：" + message;
                 }
             }
-            throw new java.io.IOException(message);
+            throw new java.io.IOException(message, error);
         }
 
         String deviceId = repo.setting("device_id", "");
