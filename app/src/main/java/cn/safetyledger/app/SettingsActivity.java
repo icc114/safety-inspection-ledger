@@ -641,7 +641,9 @@ public final class SettingsActivity extends Activity {
                         .testReadWrite(spaceName);
                 if (!result.success() && "Cloudflare".equals(resolvedType)) {
                     String detail = result.message();
-                    if (detail.contains("需要设备授权") || detail.contains("HTTP 401")) {
+                    if (detail.startsWith("网络连接问题：")) {
+                        // Preserve the transport diagnosis. A timeout does not prove the Worker is reachable.
+                    } else if (detail.contains("需要设备授权") || detail.contains("HTTP 401")) {
                         detail = "已使用同步空间名称和同步密码自动发起设备配对，但这个地址仍拒绝授权。它不是本版兼容网关，或仍使用旧私有授权协议。请重新部署仓库 cloudflare-worker；如果云端另外生成了设备 Token，也可在高级认证中填写。\n\n原始响应："
                                 + detail;
                     } else {
@@ -671,7 +673,8 @@ public final class SettingsActivity extends Activity {
                 } else {
                     syncStatus.setText("同步状态：失败 · " + checked.message());
                     syncNotification(checked.message());
-                    new AlertDialog.Builder(this).setTitle("连接失败")
+                    new AlertDialog.Builder(this)
+                            .setTitle(checked.message().startsWith("网络连接问题：") ? "网络连接问题" : "连接失败")
                             .setMessage(checked.message()).setPositiveButton("确定", null).show();
                 }
             });
