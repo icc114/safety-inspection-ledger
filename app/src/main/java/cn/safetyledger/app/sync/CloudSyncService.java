@@ -53,6 +53,9 @@ public final class CloudSyncService {
             prepare(client, config);
 
             String deviceId = ensureDeviceId();
+            if (client.isDeviceLoggedOut(config.space, deviceId)) {
+                return finishForcedLogout(client, config, deviceId, listener);
+            }
             progress(listener, "正在读取云端设备列表…");
             List<String> snapshots = client.listSnapshots(config.space);
             boolean emptyCloud = snapshots.isEmpty();
@@ -100,6 +103,10 @@ public final class CloudSyncService {
 
             // Merged role data may contain an administrator's change for this device.
             registerCurrentDevice(deviceId, emptyCloud);
+            if (client.isDeviceLoggedOut(config.space, deviceId)
+                    || "LOGGED_OUT".equals(deviceRole(deviceId))) {
+                return finishForcedLogout(client, config, deviceId, listener);
+            }
             applyTombstones();
 
             progress(listener, "正在上传本机最新数据…");
@@ -148,6 +155,123 @@ public final class CloudSyncService {
         } finally {
             if (config != null) Arrays.fill(config.spacePassword, '\0');
         }
+    }
+
+    /**
+     * Administrator logout for another device. A tiny .logout marker is written first and the
+     * target snapshot is removed. The target app checks the marker before every upload and clears
+     * only its cloud credentials; local inspection records/photos remain untouched.
+     */
+    public DeviceLogoutResult logoutDevice(String targetDeviceId) throws Exception {
+        if (!RUNNING.compareAndSet(false, true)) {
+            throw new IllegalStateException("已有同步任务正在运行，请等待当前同步完成后再试");
+        }
+        Config config = null;
+        try {
+            config = requireConfig();
+            WebDavClient client = client(config);
+            prepare(client, config);
+            String currentId = ensureDeviceId();
+            String currentRole = deviceRole(currentId);
+            if (!("OWNER".equals(currentRole) || "ADMIN".equals(currentRole))) {
+                throw new SecurityException("只有管理员可以登出其他设备");
+            }
+            if (targetDeviceId == null || targetDeviceId.isBlank() || targetDeviceId.equals(currentId)) {
+                throw new IllegalArgumentException("请选择其他设备；本机请使用“退出当前同步空间”");
+            }
+            String targetRole = deviceRole(targetDeviceId);
+            if ("OWNER".equals(targetRole)) {
+                throw new SecurityException("首位管理员不能被其他设备登出");
+            }
+            client.setDeviceLoggedOut(config.space, targetDeviceId, true);
+            client.deleteSnapshot(config.space, targetDeviceId + ".safetydata");
+            long now = System.currentTimeMillis();
+            repo.raw().execSQL("UPDATE sync_devices SET role='LOGGED_OUT',updated_at=? WHERE device_id=?",
+                    new Object[]{now, targetDeviceId});
+            repo.raw().delete("sync_queue", "entity_type='sync_device' AND entity_id=?",
+                    new String[]{targetDeviceId});
+            return new DeviceLogoutResult(targetDeviceId, now);
+        } finally {
+            if (config != null) Arrays.fill(config.spacePassword, '\0');
+            RUNNING.set(false);
+        }
+    }
+
+    /** Re-enable a previously logged-out device. This is intentionally explicit. */
+    public DeviceLogoutResult allowDeviceRejoin(String targetDeviceId) throws Exception {
+        if (!RUNNING.compareAndSet(false, true)) {
+            throw new IllegalStateException("已有同步任务正在运行，请等待当前同步完成后再试");
+        }
+        Config config = null;
+        try {
+            config = requireConfig();
+            WebDavClient client = client(config);
+            prepare(client, config);
+            String currentId = ensureDeviceId();
+            String currentRole = deviceRole(currentId);
+            if (!("OWNER".equals(currentRole) || "ADMIN".equals(currentRole))) {
+                throw new SecurityException("只有管理员可以允许设备重新加入");
+            }
+            if (targetDeviceId == null || targetDeviceId.isBlank() || targetDeviceId.equals(currentId)) {
+                throw new IllegalArgumentException("设备选择无效");
+            }
+            client.setDeviceLoggedOut(config.space, targetDeviceId, false);
+            long now = System.currentTimeMillis();
+            repo.raw().execSQL("UPDATE sync_devices SET role='FIELD',updated_at=? WHERE device_id=?",
+                    new Object[]{now, targetDeviceId});
+            // Upload the administrator snapshot once so a previously logged-out client can learn
+            // that its role is FIELD again after the marker is removed.
+            uploadSnapshot(new BackupService(context), client, config, currentId);
+            return new DeviceLogoutResult(targetDeviceId, now);
+        } finally {
+            if (config != null) Arrays.fill(config.spacePassword, '\0');
+            RUNNING.set(false);
+        }
+    }
+
+    /** Voluntary logout of the current phone. Local business data is preserved. */
+    public CurrentLogoutResult logoutCurrentDevice() throws Exception {
+        if (!RUNNING.compareAndSet(false, true)) {
+            throw new IllegalStateException("已有同步任务正在运行，请等待当前同步完成后再试");
+        }
+        Config config = null;
+        try {
+            config = requireConfig();
+            WebDavClient client = client(config);
+            prepare(client, config);
+            String deviceId = ensureDeviceId();
+            // A voluntary logout must remain reversible, so remove any stale forced-logout marker.
+            client.setDeviceLoggedOut(config.space, deviceId, false);
+            client.deleteSnapshot(config.space, deviceId + ".safetydata");
+            disableLocalSync(false, deviceId);
+            long now = System.currentTimeMillis();
+            return new CurrentLogoutResult(deviceId, now);
+        } finally {
+            if (config != null) Arrays.fill(config.spacePassword, '\0');
+            RUNNING.set(false);
+        }
+    }
+
+    private Result finishForcedLogout(WebDavClient client, Config config, String deviceId,
+                                      ProgressListener listener) throws Exception {
+        progress(listener, "本设备已被管理员登出");
+        try { client.deleteSnapshot(config.space, deviceId + ".safetydata"); }
+        catch (Exception ignored) { /* marker already blocks the normal app before upload */ }
+        long now = System.currentTimeMillis();
+        repo.raw().execSQL("UPDATE sync_devices SET role='LOGGED_OUT',updated_at=? WHERE device_id=?",
+                new Object[]{now, deviceId});
+        disableLocalSync(true, deviceId);
+        repo.putSetting("last_sync_at", String.valueOf(now));
+        repo.putSetting("last_sync_error", "");
+        return new Result(0, 0, 0, "LOGGED_OUT", now, "");
+    }
+
+    private void disableLocalSync(boolean forced, String deviceId) {
+        repo.raw().execSQL("UPDATE sync_providers SET enabled=0,encrypted_secret='',token_ciphertext='',encryption_secret='' WHERE enabled=1");
+        repo.putSetting("cloud_role", forced ? "LOGGED_OUT" : "");
+        repo.putSetting("device_role", forced ? "FIELD" : "PRIMARY");
+        repo.putSetting("last_sync_error", "");
+        CloudSyncScheduler.cancel(context);
     }
 
     /**
@@ -353,6 +477,8 @@ public final class CloudSyncService {
     public record Result(int peerDevices, int changedRows, int skippedSnapshots,
                          String role, long completedAt, String warning) {}
     public record DiscoveryResult(int remoteDevices, long completedAt) {}
+    public record DeviceLogoutResult(String deviceId, long completedAt) {}
+    public record CurrentLogoutResult(String deviceId, long completedAt) {}
     public record ResetResult(int deletedSnapshots, String ownerDeviceId, long completedAt) {}
 
     private static final class Config {

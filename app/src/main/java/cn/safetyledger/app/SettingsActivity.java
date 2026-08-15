@@ -758,6 +758,18 @@ public final class SettingsActivity extends Activity {
                 CloudSyncService.Result result = new CloudSyncService(this).syncNow(message ->
                         runOnUiThread(() -> syncStatus.setText("同步状态：" + message)));
                 runOnUiThread(() -> {
+                    if ("LOGGED_OUT".equals(result.role())) {
+                        syncEnabledStatus.setText("云同步：未启用");
+                        syncEnabledStatus.setTextColor(Ui.TEXT);
+                        syncStatus.setText("同步状态：本设备已被管理员登出");
+                        if (syncSaveButton != null) syncSaveButton.setText("保存并启用");
+                        encryption.setText("");
+                        encryption.setHint("同步密码（至少 8 位）");
+                        new AlertDialog.Builder(this).setTitle("本设备已被登出")
+                                .setMessage("管理员已将本设备从当前同步空间登出。云同步已停用并清除了本机保存的同步密码；本地检查记录、照片、签名和模板全部保留。")
+                                .setPositiveButton("确定", null).show();
+                        return;
+                    }
                     String role = "FIELD".equals(result.role()) ? "工作人员" : "管理员";
                     String type = (String) provider.getSelectedItem();
                     syncEnabledStatus.setText("云同步：已启用 · " + type);
@@ -895,7 +907,7 @@ public final class SettingsActivity extends Activity {
             deviceButton.setPadding(Ui.dp(this, 14), Ui.dp(this, 8), Ui.dp(this, 14), Ui.dp(this, 8));
             deviceButton.setOnClickListener(view -> {
                 if (ids.get(index).equals(localId)) {
-                    Ui.toast(this, "这是本机；请点击其他设备设置角色");
+                    confirmCurrentDeviceLogout();
                     return;
                 }
                 if (!finalCanManage) {
@@ -927,9 +939,26 @@ public final class SettingsActivity extends Activity {
     }
 
     private void chooseDeviceRole(String deviceId, String label) {
+        String currentRole = "FIELD";
+        try (Cursor cursor = repo.raw().rawQuery(
+                "SELECT role FROM sync_devices WHERE device_id=?", new String[]{deviceId})) {
+            if (cursor.moveToFirst()) currentRole = cursor.getString(0);
+        }
+        if ("LOGGED_OUT".equals(currentRole)) {
+            new AlertDialog.Builder(this)
+                    .setTitle(label.replace("\n", " · "))
+                    .setItems(new String[]{"允许重新加入为工作人员"}, (dialog, which) -> allowDeviceRejoin(deviceId))
+                    .setNegativeButton("取消", null)
+                    .show();
+            return;
+        }
         new AlertDialog.Builder(this)
                 .setTitle(label.replace("\n", " · "))
-                .setItems(new String[]{"设为管理员", "设为工作人员"}, (dialog, which) -> {
+                .setItems(new String[]{"设为管理员", "设为工作人员", "登出此设备"}, (dialog, which) -> {
+                    if (which == 2) {
+                        confirmRemoteDeviceLogout(deviceId, label);
+                        return;
+                    }
                     String role = which == 0 ? "ADMIN" : "FIELD";
                     repo.raw().execSQL("UPDATE sync_devices SET role=?,updated_at=? WHERE device_id=?",
                             new Object[]{role, System.currentTimeMillis(), deviceId});
@@ -940,7 +969,94 @@ public final class SettingsActivity extends Activity {
                 .show();
     }
 
+    private void confirmRemoteDeviceLogout(String deviceId, String label) {
+        new AlertDialog.Builder(this)
+                .setTitle("登出设备")
+                .setMessage("确定让“" + label.replace("\n", " · ") + "”退出当前同步空间吗？\n\n"
+                        + "云端会立即移除该设备快照，并写入轻量登出标记；该设备下次联网同步时会自动停用云同步并清除本机保存的同步密码。"
+                        + "\n\n不会删除该设备本地的检查记录、照片、签名或模板。")
+                .setPositiveButton("确认登出", (dialog, which) -> logoutRemoteDevice(deviceId))
+                .setNegativeButton("取消", null)
+                .show();
+    }
+
+    private void logoutRemoteDevice(String deviceId) {
+        syncStatus.setText("同步状态：正在登出设备…");
+        new Thread(() -> {
+            try {
+                CloudSyncService.DeviceLogoutResult result = new CloudSyncService(this).logoutDevice(deviceId);
+                runOnUiThread(() -> {
+                    String time = DateFormat.getTimeInstance(DateFormat.SHORT)
+                            .format(new Date(result.completedAt()));
+                    syncStatus.setText("同步状态：设备已登出 · " + time);
+                    Ui.toast(this, "设备已登出；本地检查资料不会被删除");
+                });
+            } catch (Exception error) {
+                String message = readableError(error);
+                runOnUiThread(() -> {
+                    syncStatus.setText("同步状态：设备登出失败 · " + message);
+                    new AlertDialog.Builder(this).setTitle("设备登出失败")
+                            .setMessage(message).setPositiveButton("确定", null).show();
+                });
+            }
+        }, "logout-remote-device").start();
+    }
+
+    private void allowDeviceRejoin(String deviceId) {
+        syncStatus.setText("同步状态：正在允许设备重新加入…");
+        new Thread(() -> {
+            try {
+                CloudSyncService.DeviceLogoutResult result = new CloudSyncService(this).allowDeviceRejoin(deviceId);
+                runOnUiThread(() -> {
+                    String time = DateFormat.getTimeInstance(DateFormat.SHORT)
+                            .format(new Date(result.completedAt()));
+                    syncStatus.setText("同步状态：已允许设备重新加入 · " + time);
+                    Ui.toast(this, "已允许重新加入；该设备需重新输入同步密码并启用云同步");
+                });
+            } catch (Exception error) {
+                String message = readableError(error);
+                runOnUiThread(() -> new AlertDialog.Builder(this).setTitle("操作失败")
+                        .setMessage(message).setPositiveButton("确定", null).show());
+            }
+        }, "allow-device-rejoin").start();
+    }
+
+    private void confirmCurrentDeviceLogout() {
+        new AlertDialog.Builder(this)
+                .setTitle("退出当前同步空间")
+                .setMessage("确定让本机退出当前云同步吗？\n\n"
+                        + "本机检查记录、照片、签名和模板全部保留；只会移除本机云端快照、停用云同步，并清除本机保存的同步密码。")
+                .setPositiveButton("确认退出", (dialog, which) -> logoutCurrentDevice())
+                .setNegativeButton("取消", null)
+                .show();
+    }
+
+    private void logoutCurrentDevice() {
+        syncStatus.setText("同步状态：正在退出当前同步空间…");
+        new Thread(() -> {
+            try {
+                new CloudSyncService(this).logoutCurrentDevice();
+                runOnUiThread(() -> {
+                    syncEnabledStatus.setText("云同步：未启用");
+                    syncEnabledStatus.setTextColor(Ui.TEXT);
+                    syncStatus.setText("同步状态：本机已退出当前同步空间");
+                    if (syncSaveButton != null) syncSaveButton.setText("保存并启用");
+                    encryption.setText("");
+                    encryption.setHint("同步密码（至少 8 位）");
+                    new AlertDialog.Builder(this).setTitle("已退出")
+                            .setMessage("本机已退出当前同步空间。本地检查资料全部保留；以后需要重新加入时，请重新填写云同步配置和同步密码。")
+                            .setPositiveButton("确定", null).show();
+                });
+            } catch (Exception error) {
+                String message = readableError(error);
+                runOnUiThread(() -> new AlertDialog.Builder(this).setTitle("退出失败")
+                        .setMessage(message).setPositiveButton("确定", null).show());
+            }
+        }, "logout-current-device").start();
+    }
+
     private String roleName(String role) {
+        if ("LOGGED_OUT".equals(role)) return "已登出";
         return "FIELD".equals(role) ? "工作人员" : "管理员";
     }
 

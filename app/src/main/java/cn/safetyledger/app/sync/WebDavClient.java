@@ -141,6 +141,26 @@ public final class WebDavClient {
         delete(fileUrl(space, name));
     }
 
+    /** Small control marker used to make device logout immediate without uploading a full backup. */
+    public void setDeviceLoggedOut(String space, String deviceId, boolean loggedOut) throws Exception {
+        String name = deviceId + ".logout";
+        if (loggedOut) {
+            putBytes(fileUrl(space, name),
+                    String.valueOf(System.currentTimeMillis()).getBytes(StandardCharsets.UTF_8));
+        } else {
+            delete(fileUrl(space, name));
+        }
+    }
+
+    public boolean isDeviceLoggedOut(String space, String deviceId) throws Exception {
+        Request request = request(fileUrl(space, deviceId + ".logout")).head().build();
+        try (Response response = http.newCall(request).execute()) {
+            if (response.code() == 404) return false;
+            if (!response.isSuccessful()) throw failure("读取设备登出状态失败", response);
+            return true;
+        }
+    }
+
     private void mkcol(String url) throws Exception {
         ResponseInfo response = execute("MKCOL", url, new byte[0], null);
         if (!(response.code == 200 || response.code == 201 || response.code == 204
