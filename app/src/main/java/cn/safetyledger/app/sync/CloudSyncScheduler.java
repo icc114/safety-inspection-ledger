@@ -18,4 +18,9 @@ public final class CloudSyncScheduler {
                 .build();
         context.getSystemService(JobScheduler.class).schedule(job);
     }
+
+    public static void cancel(Context context) {
+        JobScheduler scheduler = context.getSystemService(JobScheduler.class);
+        if (scheduler != null) scheduler.cancel(JOB_ID);
+    }
 }

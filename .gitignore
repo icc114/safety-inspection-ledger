@@ -6,3 +6,6 @@ local.properties
 *.apk
 work/
 outputs/
+tools/android-signing-backup/
+*.jks
+*.keystore

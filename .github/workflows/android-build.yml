@@ -28,14 +28,14 @@ jobs:
         run: sdkmanager 'platform-tools' 'platforms;android-35' 'build-tools;35.0.0'
       - name: Grant Gradle permission
         run: chmod +x gradlew
-      - name: Test, lint and build APK
+      - name: Test, lint and build debug APK
         run: ./gradlew --no-daemon testDebugUnitTest lintDebug assembleDebug
-      - name: Name APK
-        run: cp app/build/outputs/apk/debug/app-debug.apk '安全检查台账-1.2.8.apk'
-      - name: Upload APK artifact
+      - name: Name debug APK
+        run: cp app/build/outputs/apk/debug/app-debug.apk '安全检查台账-1.2.9-debug-不可作为长期升级包.apk'
+      - name: Upload debug APK artifact
         uses: actions/upload-artifact@v4
         with:
-          name: 安全检查台账-1.2.8
-          path: 安全检查台账-1.2.8.apk
+          name: 安全检查台账-1.2.9-debug
+          path: 安全检查台账-1.2.9-debug-不可作为长期升级包.apk
           if-no-files-found: error
           retention-days: 30

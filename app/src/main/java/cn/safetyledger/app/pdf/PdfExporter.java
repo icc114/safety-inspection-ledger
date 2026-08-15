@@ -223,7 +223,7 @@ public final class PdfExporter {
                                float x, float y, float width, float height) {
         for (Signature signature : signatures) {
             if (!role.equals(signature.role)) continue;
-            Bitmap bitmap = BitmapFactory.decodeFile(signature.path);
+            Bitmap bitmap = decodeForPdf(signature.path, 700, 320, true);
             if (bitmap == null) return;
             canvas.drawBitmap(bitmap, null, fit(bitmap, x, y, width, height), paint);
             bitmap.recycle();
@@ -246,7 +246,7 @@ public final class PdfExporter {
             float x = MARGIN + column * (width + gap);
             float y = 66 + row * (height + 10);
             rect(canvas, x, y, width, height);
-            Bitmap bitmap = BitmapFactory.decodeFile(media.localPath);
+            Bitmap bitmap = decodeForPdf(media.localPath, 900, 1100, false);
             if (bitmap != null) {
                 canvas.drawBitmap(bitmap, null,
                         fit(bitmap, x + 3, y + 3, width - 6, height - 28), paint);
@@ -276,6 +276,29 @@ public final class PdfExporter {
     private String rectificationStatus(String status) {
         return "RECTIFIED".equals(status) || "COMPLETED".equals(status)
                 ? "已整改完成" : "尚未确认完成";
+    }
+
+    private Bitmap decodeForPdf(String path, int maxWidth, int maxHeight, boolean preserveAlpha) {
+        BitmapFactory.Options bounds = new BitmapFactory.Options();
+        bounds.inJustDecodeBounds = true;
+        BitmapFactory.decodeFile(path, bounds);
+        if (bounds.outWidth <= 0 || bounds.outHeight <= 0) return null;
+        int sample = 1;
+        while (bounds.outWidth / sample > maxWidth * 2
+                || bounds.outHeight / sample > maxHeight * 2) sample *= 2;
+        BitmapFactory.Options options = new BitmapFactory.Options();
+        options.inSampleSize = Math.max(1, sample);
+        options.inPreferredConfig = preserveAlpha ? Bitmap.Config.ARGB_8888 : Bitmap.Config.RGB_565;
+        Bitmap decoded = BitmapFactory.decodeFile(path, options);
+        if (decoded == null) return null;
+        float scale = Math.min(1f, Math.min(maxWidth / (float) decoded.getWidth(),
+                maxHeight / (float) decoded.getHeight()));
+        if (scale >= .999f) return decoded;
+        Bitmap scaled = Bitmap.createScaledBitmap(decoded,
+                Math.max(1, Math.round(decoded.getWidth() * scale)),
+                Math.max(1, Math.round(decoded.getHeight() * scale)), true);
+        if (scaled != decoded) decoded.recycle();
+        return scaled;
     }
 
     private RectF fit(Bitmap bitmap, float x, float y, float width, float height) {

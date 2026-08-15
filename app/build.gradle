@@ -1,5 +1,11 @@
 plugins { id 'com.android.application' }
 
+def stableKeystorePath = System.getenv('SAFETY_KEYSTORE_PATH')
+def stableKeystorePassword = System.getenv('SAFETY_KEYSTORE_PASSWORD')
+def stableKeyAlias = System.getenv('SAFETY_KEY_ALIAS')
+def stableKeyPassword = System.getenv('SAFETY_KEY_PASSWORD')
+def stableSigningReady = stableKeystorePath && stableKeystorePassword && stableKeyAlias && stableKeyPassword
+
 android {
     namespace 'cn.safetyledger.app'
     compileSdk 35
@@ -8,15 +14,29 @@ android {
         applicationId 'cn.safetyledger.app'
         minSdk 26
         targetSdk 35
-        versionCode 11
-        versionName '1.2.8'
+        versionCode 12
+        versionName '1.2.9'
         testInstrumentationRunner 'android.app.InstrumentationTestRunner'
     }
+
+    signingConfigs {
+        stableRelease {
+            if (stableSigningReady) {
+                storeFile file(stableKeystorePath)
+                storePassword stableKeystorePassword
+                keyAlias stableKeyAlias
+                keyPassword stableKeyPassword
+                enableV1Signing true
+                enableV2Signing true
+            }
+        }
+    }
+
     buildTypes {
         debug { applicationIdSuffix '' }
         release {
             minifyEnabled false
-            signingConfig signingConfigs.debug
+            if (stableSigningReady) signingConfig signingConfigs.stableRelease
             proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
         }
     }
