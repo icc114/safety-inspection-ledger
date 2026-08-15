@@ -1,4 +1,4 @@
-name: One-time signed 1.2.11 release
+name: One-time unsigned 1.2.11 release
 
 on:
   push:
@@ -12,33 +12,9 @@ jobs:
   release:
     runs-on: ubuntu-latest
     timeout-minutes: 30
-    env:
-      SAFETY_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
-      SAFETY_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
-      SAFETY_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
-      EXPECTED_CERT_SHA256: "0E:D4:37:B3:AB:D1:2F:BC:62:88:91:C8:1C:FF:15:06:72:D0:AD:A7:8C:C6:6D:11:72:08:59:EC:C9:F5:28:15"
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-      - name: Verify signing secrets exist
-        env:
-          KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
-        run: |
-          test -n "$KEYSTORE_B64" || (echo 'Missing ANDROID_KEYSTORE_BASE64' && exit 1)
-          test -n "$SAFETY_KEYSTORE_PASSWORD" || (echo 'Missing ANDROID_KEYSTORE_PASSWORD' && exit 1)
-          test -n "$SAFETY_KEY_ALIAS" || (echo 'Missing ANDROID_KEY_ALIAS' && exit 1)
-          test -n "$SAFETY_KEY_PASSWORD" || (echo 'Missing ANDROID_KEY_PASSWORD' && exit 1)
-      - name: Restore private release keystore
-        env:
-          KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
-        run: |
-          printf '%s' "$KEYSTORE_B64" | base64 --decode > "$RUNNER_TEMP/safety-ledger-release.jks"
-          chmod 600 "$RUNNER_TEMP/safety-ledger-release.jks"
-          echo "SAFETY_KEYSTORE_PATH=$RUNNER_TEMP/safety-ledger-release.jks" >> "$GITHUB_ENV"
-      - name: Verify permanent signing key fingerprint
-        run: |
-          keytool -list -v -keystore "$SAFETY_KEYSTORE_PATH" -storepass "$SAFETY_KEYSTORE_PASSWORD" -alias "$SAFETY_KEY_ALIAS" > "$RUNNER_TEMP/key-info.txt"
-          grep -F "SHA256: $EXPECTED_CERT_SHA256" "$RUNNER_TEMP/key-info.txt" >/dev/null || (echo 'Wrong Android signing key: certificate fingerprint mismatch' && exit 1)
       - name: Set up Java 17
         uses: actions/setup-java@v4
         with:
@@ -51,19 +27,17 @@ jobs:
         run: sdkmanager 'platform-tools' 'platforms;android-35' 'build-tools;35.0.0'
       - name: Grant Gradle permission
         run: chmod +x gradlew
-      - name: Test, lint and build stable release APK
+      - name: Test, lint and build release APK
         run: ./gradlew --no-daemon testDebugUnitTest lintDebug assembleRelease
-      - name: Verify APK signing certificate
+      - name: Collect unsigned release APK
         run: |
-          $ANDROID_HOME/build-tools/35.0.0/apksigner verify --verbose --print-certs app/build/outputs/apk/release/app-release.apk | tee "$RUNNER_TEMP/apk-cert.txt"
-          NORMALIZED=$(echo "$EXPECTED_CERT_SHA256" | tr -d ':' | tr '[:upper:]' '[:lower:]')
-          grep -F "Signer #1 certificate SHA-256 digest: $NORMALIZED" "$RUNNER_TEMP/apk-cert.txt" >/dev/null || (echo 'Built APK certificate mismatch' && exit 1)
-      - name: Name stable APK
-        run: cp app/build/outputs/apk/release/app-release.apk '安全检查台账-1.2.11-正式签名.apk'
-      - name: Upload stable signed APK
+          APK=$(find app/build/outputs/apk/release -maxdepth 1 -type f -name '*.apk' | head -1)
+          test -n "$APK" || (echo 'Release APK not found' && exit 1)
+          cp "$APK" '安全检查台账-1.2.11-unsigned.apk'
+      - name: Upload unsigned release APK
         uses: actions/upload-artifact@v4
         with:
-          name: 安全检查台账-1.2.11-正式签名
-          path: 安全检查台账-1.2.11-正式签名.apk
+          name: 安全检查台账-1.2.11-unsigned
+          path: 安全检查台账-1.2.11-unsigned.apk
           if-no-files-found: error
-          retention-days: 30
+          retention-days: 7
