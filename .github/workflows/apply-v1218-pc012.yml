@@ -8,6 +8,8 @@ on:
       - 'tools/fix_v1218_build.py'
       - 'tools/fix_pc_word_compile.py'
       - 'tools/fix_a4_summary_limits.py'
+      - 'tools/fix_network_messages.py'
+      - 'app/src/test/java/cn/safetyledger/app/sync/SyncErrorFormatterTest.java'
       - 'desktop/src/test/java/cn/safetyledger/pc/WordExporterTest.java'
       - '.github/workflows/apply-v1218-pc012.yml'
   workflow_dispatch:
@@ -30,6 +32,7 @@ jobs:
           python3 tools/fix_v1218_build.py
           python3 tools/fix_pc_word_compile.py
           python3 tools/fix_a4_summary_limits.py
+          python3 tools/fix_network_messages.py
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
