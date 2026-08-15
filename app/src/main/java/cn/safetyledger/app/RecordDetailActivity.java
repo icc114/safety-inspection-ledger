@@ -29,6 +29,7 @@ import cn.safetyledger.app.data.Entities.Media;
 import cn.safetyledger.app.data.Entities.Signature;
 import cn.safetyledger.app.data.LedgerRepository;
 import cn.safetyledger.app.media.MediaService;
+import cn.safetyledger.app.sync.CloudSyncScheduler;
 
 import java.util.List;
 
@@ -85,7 +86,8 @@ public final class RecordDetailActivity extends Activity {
         delete.setTextColor(Ui.DANGER);
         delete.setOnClickListener(view -> {
             repo.softDelete(model.id);
-            Ui.toast(this, "已移入回收站");
+            CloudSyncScheduler.scheduleImmediate(this);
+            Ui.toast(this, "已移入回收站；正在后台同步");
             finish();
         });
         content.addView(delete);
@@ -276,7 +278,8 @@ public final class RecordDetailActivity extends Activity {
         }
         model.status = confirmed.isChecked() ? "RECTIFIED" : "RECTIFYING";
         repo.saveInspection(model);
-        Ui.toast(this, confirmed.isChecked() ? "整改已确认完成" : "整改记录已保存");
+        CloudSyncScheduler.scheduleImmediate(this);
+        Ui.toast(this, confirmed.isChecked() ? "整改已确认完成；正在后台同步" : "整改记录已保存；正在后台同步");
         render();
     }
 
@@ -340,6 +343,7 @@ public final class RecordDetailActivity extends Activity {
                 getContentResolver().delete(cameraUri, null, null);
             } else if (request == SIGN) {
                 showSignatures();
+                CloudSyncScheduler.scheduleImmediate(this);
                 Ui.toast(this, "签名已保存");
             }
         } catch (Exception error) {
@@ -364,8 +368,7 @@ public final class RecordDetailActivity extends Activity {
                 pendingCategory, model.location, capturedNow ? lastLocation() : null, capturedNow);
         repo.addMedia(media);
         showMedia();
-        Ui.toast(this, ("SCENE".equals(pendingCategory) ? "检查照片" : "整改照片")
-                + "已保存；可读取的原始时间和 GPS 已写入水印");
+        CloudSyncScheduler.scheduleImmediate(this);
     }
 
     private void showMedia() {

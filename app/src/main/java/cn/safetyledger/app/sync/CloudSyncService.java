@@ -42,6 +42,8 @@ public final class CloudSyncService {
         this.repo = new LedgerRepository(this.context);
     }
 
+    public static boolean isContentSyncRunning() { return CONTENT_RUNNING.get(); }
+
     public Result syncNow() throws Exception {
         return syncNow(null);
     }
@@ -51,6 +53,8 @@ public final class CloudSyncService {
             throw new IllegalStateException("检查内容同步正在运行，请等待当前同步完成后再试");
         }
         Config config = null;
+        long syncStartedAt = System.currentTimeMillis();
+        boolean publishedLocalFirst = false;
         try {
             config = requireConfig();
             progress(listener, "正在连接云端…");
@@ -70,10 +74,16 @@ public final class CloudSyncService {
             // space is FIELD until an existing OWNER/ADMIN explicitly promotes it.
             registerCurrentDevice(deviceId, emptyCloud);
 
-            // Device presence/roles now use the independent device-control channel. Content sync
-            // therefore downloads/merges first and uploads only once at the end, avoiding the old
-            // double-upload of every photo-heavy .safetydata snapshot.
             BackupService backup = new BackupService(context);
+            boolean pendingAtStart = hasPendingLocalChanges(syncStartedAt);
+            if (pendingAtStart) {
+                progress(listener, "正在发布本机修改，供其他设备并行接收…");
+                uploadSnapshot(backup, client, config, deviceId);
+                publishedLocalFirst = true;
+                try { Thread.sleep(350L); } catch (InterruptedException interrupted) { Thread.currentThread().interrupt(); }
+                snapshots = client.listSnapshots(config.space);
+                emptyCloud = snapshots.isEmpty();
+            }
 
             int peers = 0;
             int changed = 0;
@@ -122,19 +132,28 @@ public final class CloudSyncService {
             runAutoArchiveAfterSuccessfulSync();
 
             long now = System.currentTimeMillis();
-            repo.raw().execSQL("DELETE FROM sync_queue");
+            repo.raw().execSQL("DELETE FROM sync_queue WHERE created_at<=?", new Object[]{syncStartedAt});
             repo.raw().execSQL("UPDATE tombstones SET synced_at=? WHERE synced_at IS NULL",
                     new Object[]{now});
             repo.putSetting("last_sync_at", String.valueOf(now));
             repo.putSetting("last_sync_error", "");
             String warning = warnings.isEmpty() ? "" : String.join("；", warnings);
             repo.putSetting("last_sync_warning", warning);
+            if (hasPendingLocalChanges()) CloudSyncScheduler.scheduleImmediate(context);
+            else if (publishedLocalFirst) CloudSyncScheduler.schedulePeerRefresh(context);
             progress(listener, skipped == 0 ? "同步完成" : "同步完成，但有旧设备快照被跳过");
             return new Result(peers, changed, skipped, deviceRole(deviceId), now, warning);
         } finally {
             if (config != null) Arrays.fill(config.spacePassword, '\0');
             CONTENT_RUNNING.set(false);
         }
+    }
+
+    private boolean hasPendingLocalChanges(long through) {
+        try (Cursor cursor=repo.raw().rawQuery("SELECT 1 FROM sync_queue WHERE created_at<=? LIMIT 1",new String[]{String.valueOf(through)})) { return cursor.moveToFirst(); }
+    }
+    private boolean hasPendingLocalChanges() {
+        try (Cursor cursor=repo.raw().rawQuery("SELECT 1 FROM sync_queue LIMIT 1",null)) { return cursor.moveToFirst(); }
     }
 
     /**

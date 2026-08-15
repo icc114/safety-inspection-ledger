@@ -33,6 +33,7 @@ import cn.safetyledger.app.data.Entities.Signature;
 import cn.safetyledger.app.data.Entities.Template;
 import cn.safetyledger.app.data.LedgerRepository;
 import cn.safetyledger.app.media.MediaService;
+import cn.safetyledger.app.sync.CloudSyncScheduler;
 
 import java.io.File;
 import java.time.LocalDate;
@@ -471,6 +472,7 @@ public class MainActivity extends Activity {
             }
         } else if (request == SIGN) {
             renderSignatures();
+            CloudSyncScheduler.scheduleImmediate(this);
             Ui.toast(this, "签名已保存");
         }
     }
@@ -503,7 +505,7 @@ public class MainActivity extends Activity {
                     pendingCategory, model.location, capturedNow ? lastLocation() : null, capturedNow);
             repo.addMedia(media);
             renderMedia();
-            Ui.toast(this, "照片已保存；有原始拍摄时间或可解析地点时才添加文字水印");
+            CloudSyncScheduler.scheduleImmediate(this);
         } catch (Exception error) {
             Ui.toast(this, "照片处理失败：" + error.getMessage());
         }
@@ -603,7 +605,8 @@ public class MainActivity extends Activity {
         model.status = hasProblem ? "PENDING_RECTIFICATION" : "COMPLETED";
         repo.saveInspection(model);
         repo.putSetting("current_draft", "");
-        Ui.toast(this, hasProblem ? "已保存，待补录整改记录" : "检查记录已保存");
+        CloudSyncScheduler.scheduleImmediate(this);
+        Ui.toast(this, hasProblem ? "已保存，待补录整改记录；正在后台同步" : "检查记录已保存；正在后台同步");
         startActivity(new Intent(this, RecordDetailActivity.class)
                 .putExtra("inspection_id", model.id));
         finish();
@@ -616,6 +619,7 @@ public class MainActivity extends Activity {
                 syncFields();
                 repo.saveInspection(model);
                 repo.putSetting("current_draft", model.id);
+                CloudSyncScheduler.scheduleImmediate(this);
             } catch (RuntimeException ignored) {
                 // Keep navigation responsive; an explicit save still reports validation errors.
             }
