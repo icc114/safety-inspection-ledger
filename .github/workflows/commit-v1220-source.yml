@@ -10,7 +10,7 @@ permissions:
 
 jobs:
   commit-source:
-    if: contains(github.event.head_commit.message, 'Commit final 1.2.20 and PC 0.1.3 source to branch')
+    if: contains(github.event.head_commit.message, 'Commit final source without workflow file edits')
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -58,21 +58,13 @@ jobs:
           rep('app/build.gradle',"versionName '1.2.19'","versionName '1.2.20'")
           rep('desktop/pom.xml','<version>0.1.2</version>','<version>0.1.3</version>')
           rep('desktop/pom.xml','<finalName>safety-ledger-pc-0.1.2-all</finalName>','<finalName>safety-ledger-pc-0.1.3-all</finalName>')
-          rep('.github/workflows/android-build.yml','安全检查台账-1.2.19-debug-不可作为长期升级包.apk','安全检查台账-1.2.20-debug-不可作为长期升级包.apk')
-          rep('.github/workflows/android-build.yml','name: 安全检查台账-1.2.19-debug','name: 安全检查台账-1.2.20-debug')
-          rep('.github/workflows/android-release.yml','安全检查台账-1.2.19-正式签名.apk','安全检查台账-1.2.20-正式签名.apk')
-          rep('.github/workflows/android-release.yml','name: 安全检查台账-1.2.19-正式签名','name: 安全检查台账-1.2.20-正式签名')
-          rep('.github/workflows/windows-pc-build.yml','safety-ledger-pc-0.1.2-all.jar','safety-ledger-pc-0.1.3-all.jar')
-          rep('.github/workflows/windows-pc-build.yml','--app-version 0.1.2','--app-version 0.1.3')
-          rep('.github/workflows/windows-pc-build.yml','安全检查台账-PC-0.1.2-Windows.zip','安全检查台账-PC-0.1.3-Windows.zip')
-          rep('.github/workflows/windows-pc-build.yml','name: 安全检查台账-PC-0.1.2-Windows','name: 安全检查台账-PC-0.1.3-Windows')
           Path('docs/release-1.2.20-complete.md').write_text('''# 安全检查台账 Android 1.2.20 / PC 0.1.3\n\n完整整合版：最多12项；固定A4第一页；整改意见+整改记录+签名；第二页起照片；网络错误中文化；轻量云端回收站删除/恢复；30天恢复；自动归档开关；管理员恢复显示详情；PC资料库和Android PDF版式统一。\n''',encoding='utf-8')
           PY
       - name: Commit actual source to branch
         run: |
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add app desktop docs .github/workflows/android-build.yml .github/workflows/android-release.yml .github/workflows/windows-pc-build.yml
+          git add app desktop docs
           git commit -m 'Finalize Android 1.2.20 and PC 0.1.3 source'
           git pull --rebase origin agent/v1220-complete-android-pc
           git push origin HEAD:agent/v1220-complete-android-pc
