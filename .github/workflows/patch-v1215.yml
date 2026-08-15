@@ -6,6 +6,7 @@ on:
       - agent/split-device-content-sync-v1215
     paths:
       - tools/patch_v1215_split_sync_pdf.py
+      - tools/patch_v1215_escape_fix.py
       - .github/workflows/patch-v1215.yml
   workflow_dispatch:
 
@@ -22,7 +23,9 @@ jobs:
         with:
           ref: agent/split-device-content-sync-v1215
       - name: Apply v1.2.15 patch
-        run: python3 tools/patch_v1215_split_sync_pdf.py
+        run: |
+          python3 tools/patch_v1215_split_sync_pdf.py
+          python3 tools/patch_v1215_escape_fix.py
       - name: Set up Java 17
         uses: actions/setup-java@v4
         with:
