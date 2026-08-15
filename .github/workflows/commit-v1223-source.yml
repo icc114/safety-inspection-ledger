@@ -1,0 +1,65 @@
+name: Commit Android 1.2.23 source
+
+on:
+  push:
+    branches:
+      - agent/v1220-complete-android-pc
+
+permissions:
+  contents: write
+
+jobs:
+  commit-source:
+    if: contains(github.event.head_commit.message, 'Commit Android 1.2.23 multi-device sync source')
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Apply source-only patch
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          def rep(path,old,new,count=-1):
+              p=Path(path);s=p.read_text(encoding='utf-8')
+              if old not in s: raise SystemExit(f'missing expected text in {path}: {old[:140]!r}')
+              p.write_text(s.replace(old,new,count),encoding='utf-8')
+          p='app/src/main/java/cn/safetyledger/app/sync/CloudSyncScheduler.java'
+          rep(p,'    public static final int TRASH_SOON_JOB_ID = 1142030;\n','    public static final int TRASH_SOON_JOB_ID = 1142030;\n    public static final int IMMEDIATE_CONTENT_JOB_ID = 1142031;\n    public static final int FOLLOWUP_CONTENT_JOB_ID = 1142032;\n')
+          rep(p,'    private static final long CHANGE_DEADLINE = 5L * 60L * 1000L;\n','    private static final long CHANGE_DEADLINE = 5L * 60L * 1000L;\n    private static final long IMMEDIATE_LATENCY = 1_000L;\n    private static final long IMMEDIATE_DEADLINE = 10_000L;\n    private static final long FOLLOWUP_LATENCY = 20_000L;\n    private static final long FOLLOWUP_DEADLINE = 60_000L;\n')
+          rep(p,'    public static void scheduleTrashSoon(Context context) {\n','''    public static void scheduleImmediate(Context context) {\n        if (CloudSyncService.isContentSyncRunning()) { schedulePeerRefresh(context); return; }\n        JobScheduler scheduler=context.getSystemService(JobScheduler.class); if(scheduler==null)return;\n        scheduler.schedule(new JobInfo.Builder(IMMEDIATE_CONTENT_JOB_ID,new ComponentName(context,CloudSyncJobService.class))\n                .setRequiredNetworkType(JobInfo.NETWORK_TYPE_ANY).setMinimumLatency(IMMEDIATE_LATENCY)\n                .setOverrideDeadline(IMMEDIATE_DEADLINE).build());\n    }\n\n    public static void schedulePeerRefresh(Context context) {\n        JobScheduler scheduler=context.getSystemService(JobScheduler.class); if(scheduler==null)return;\n        scheduler.schedule(new JobInfo.Builder(FOLLOWUP_CONTENT_JOB_ID,new ComponentName(context,CloudSyncJobService.class))\n                .setRequiredNetworkType(JobInfo.NETWORK_TYPE_ANY).setMinimumLatency(FOLLOWUP_LATENCY)\n                .setOverrideDeadline(FOLLOWUP_DEADLINE).build());\n    }\n\n    public static void scheduleTrashSoon(Context context) {\n''')
+          rep(p,'        scheduler.cancel(TRASH_SOON_JOB_ID);\n','        scheduler.cancel(TRASH_SOON_JOB_ID);\n        scheduler.cancel(IMMEDIATE_CONTENT_JOB_ID);\n        scheduler.cancel(FOLLOWUP_CONTENT_JOB_ID);\n')
+          p='app/src/main/java/cn/safetyledger/app/sync/CloudSyncService.java'
+          rep(p,'    public CloudSyncService(Context context) {\n        this.context = context.getApplicationContext();\n        this.repo = new LedgerRepository(this.context);\n    }\n','    public CloudSyncService(Context context) {\n        this.context = context.getApplicationContext();\n        this.repo = new LedgerRepository(this.context);\n    }\n\n    public static boolean isContentSyncRunning() { return CONTENT_RUNNING.get(); }\n')
+          rep(p,'        Config config = null;\n        try {\n            config = requireConfig();\n','        Config config = null;\n        long syncStartedAt = System.currentTimeMillis();\n        boolean publishedLocalFirst = false;\n        try {\n            config = requireConfig();\n',1)
+          rep(p,'''            // Device presence/roles now use the independent device-control channel. Content sync\n            // therefore downloads/merges first and uploads only once at the end, avoiding the old\n            // double-upload of every photo-heavy .safetydata snapshot.\n            BackupService backup = new BackupService(context);\n\n            int peers = 0;\n''','''            BackupService backup = new BackupService(context);\n            boolean pendingAtStart = hasPendingLocalChanges(syncStartedAt);\n            if (pendingAtStart) {\n                progress(listener, "正在发布本机修改，供其他设备并行接收…");\n                uploadSnapshot(backup, client, config, deviceId);\n                publishedLocalFirst = true;\n                try { Thread.sleep(350L); } catch (InterruptedException interrupted) { Thread.currentThread().interrupt(); }\n                snapshots = client.listSnapshots(config.space);\n                emptyCloud = snapshots.isEmpty();\n            }\n\n            int peers = 0;\n''')
+          rep(p,'            repo.raw().execSQL("DELETE FROM sync_queue");\n','            repo.raw().execSQL("DELETE FROM sync_queue WHERE created_at<=?", new Object[]{syncStartedAt});\n')
+          rep(p,'''            progress(listener, skipped == 0 ? "同步完成" : "同步完成，但有旧设备快照被跳过");\n            return new Result(peers, changed, skipped, deviceRole(deviceId), now, warning);\n''','''            if (hasPendingLocalChanges()) CloudSyncScheduler.scheduleImmediate(context);\n            else if (publishedLocalFirst) CloudSyncScheduler.schedulePeerRefresh(context);\n            progress(listener, skipped == 0 ? "同步完成" : "同步完成，但有旧设备快照被跳过");\n            return new Result(peers, changed, skipped, deviceRole(deviceId), now, warning);\n''')
+          rep(p,'    /**\n     * Independent device-management synchronization. Only small JSON metadata and logout markers\n','''    private boolean hasPendingLocalChanges(long through) {\n        try (Cursor cursor=repo.raw().rawQuery("SELECT 1 FROM sync_queue WHERE created_at<=? LIMIT 1",new String[]{String.valueOf(through)})) { return cursor.moveToFirst(); }\n    }\n    private boolean hasPendingLocalChanges() {\n        try (Cursor cursor=repo.raw().rawQuery("SELECT 1 FROM sync_queue LIMIT 1",null)) { return cursor.moveToFirst(); }\n    }\n\n    /**\n     * Independent device-management synchronization. Only small JSON metadata and logout markers\n''')
+          p='app/src/main/java/cn/safetyledger/app/MainActivity.java'
+          rep(p,'import cn.safetyledger.app.media.MediaService;\n','import cn.safetyledger.app.media.MediaService;\nimport cn.safetyledger.app.sync.CloudSyncScheduler;\n')
+          rep(p,'        } else if (request == SIGN) {\n            renderSignatures();\n            Ui.toast(this, "签名已保存");\n        }\n','        } else if (request == SIGN) {\n            renderSignatures();\n            CloudSyncScheduler.scheduleImmediate(this);\n            Ui.toast(this, "签名已保存");\n        }\n')
+          rep(p,'            repo.addMedia(media);\n            renderMedia();\n            Ui.toast(this, "照片已保存；有原始拍摄时间或可解析地点时才添加文字水印");\n','            repo.addMedia(media);\n            renderMedia();\n            CloudSyncScheduler.scheduleImmediate(this);\n')
+          rep(p,'        repo.saveInspection(model);\n        repo.putSetting("current_draft", "");\n        Ui.toast(this, hasProblem ? "已保存，待补录整改记录" : "检查记录已保存");\n','        repo.saveInspection(model);\n        repo.putSetting("current_draft", "");\n        CloudSyncScheduler.scheduleImmediate(this);\n        Ui.toast(this, hasProblem ? "已保存，待补录整改记录；正在后台同步" : "检查记录已保存；正在后台同步");\n')
+          rep(p,'                repo.saveInspection(model);\n                repo.putSetting("current_draft", model.id);\n','                repo.saveInspection(model);\n                repo.putSetting("current_draft", model.id);\n                CloudSyncScheduler.scheduleImmediate(this);\n')
+          p='app/src/main/java/cn/safetyledger/app/RecordDetailActivity.java'
+          rep(p,'import cn.safetyledger.app.media.MediaService;\n','import cn.safetyledger.app.media.MediaService;\nimport cn.safetyledger.app.sync.CloudSyncScheduler;\n')
+          rep(p,'            repo.softDelete(model.id);\n            Ui.toast(this, "已移入回收站");\n','            repo.softDelete(model.id);\n            CloudSyncScheduler.scheduleImmediate(this);\n            Ui.toast(this, "已移入回收站；正在后台同步");\n')
+          rep(p,'        repo.saveInspection(model);\n        Ui.toast(this, confirmed.isChecked() ? "整改已确认完成" : "整改记录已保存");\n','        repo.saveInspection(model);\n        CloudSyncScheduler.scheduleImmediate(this);\n        Ui.toast(this, confirmed.isChecked() ? "整改已确认完成；正在后台同步" : "整改记录已保存；正在后台同步");\n')
+          rep(p,'            } else if (request == SIGN) {\n                showSignatures();\n                Ui.toast(this, "签名已保存");\n','            } else if (request == SIGN) {\n                showSignatures();\n                CloudSyncScheduler.scheduleImmediate(this);\n                Ui.toast(this, "签名已保存");\n')
+          rep(p,'        repo.addMedia(media);\n        showMedia();\n        Ui.toast(this, ("SCENE".equals(pendingCategory) ? "检查照片" : "整改照片")\n                + "已保存；可读取的原始时间和 GPS 已写入水印");\n','        repo.addMedia(media);\n        showMedia();\n        CloudSyncScheduler.scheduleImmediate(this);\n')
+          rep('app/build.gradle','versionCode 25','versionCode 26')
+          rep('app/build.gradle',"versionName '1.2.22'","versionName '1.2.23'")
+          Path('docs/release-1.2.23.md').write_text('# Android 1.2.23\n\n多设备并行发布/合并、保存/草稿/照片/整改后台快速同步，照片水印提示取消。\n',encoding='utf-8')
+          PY
+      - name: Commit product source only
+        shell: bash
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add app docs/release-1.2.23.md
+          git commit -m 'Android 1.2.23 concurrent multi-device background sync'
+          git push origin HEAD:agent/v1220-complete-android-pc
