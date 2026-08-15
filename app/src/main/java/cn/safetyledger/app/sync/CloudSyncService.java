@@ -59,7 +59,7 @@ public final class CloudSyncService {
             if (client.isDeviceLoggedOut(config.space, deviceId)) {
                 return finishForcedLogout(client, config, deviceId, listener);
             }
-            progress(listener, "正在读取云端设备列表…");
+            progress(listener, "正在读取其他设备的检查内容…");
             List<String> snapshots = client.listSnapshots(config.space);
             boolean emptyCloud = snapshots.isEmpty();
 
@@ -70,7 +70,7 @@ public final class CloudSyncService {
             // Publish presence first. Previously a bad/stale peer snapshot could fail before the
             // new device ever uploaded anything, so the administrator could never see/manage it.
             BackupService backup = new BackupService(context);
-            progress(listener, "正在登记本机设备…");
+            progress(listener, "正在准备本机检查内容…");
             uploadSnapshot(backup, client, config, deviceId);
 
             int peers = 0;
@@ -97,7 +97,7 @@ public final class CloudSyncService {
                 } catch (Throwable peerError) {
                     skipped++;
                     String detail = peerError instanceof OutOfMemoryError
-                            ? "旧版云端快照过大，已跳过；请将该设备升级到 1.2.14 后重新同步"
+                            ? "旧版云端快照过大，已跳过；请将该设备升级到 1.2.15 后重新同步"
                             : readable(peerError);
                     if (detail.length() > 90) detail = detail.substring(0, 90) + "…";
                     warnings.add(shortDevice(name) + "：" + detail);
@@ -351,8 +351,12 @@ public final class CloudSyncService {
      * and uploads a clean snapshot. This is intentionally explicit for retiring test devices.
      */
     public ResetResult resetCloudSpace(ProgressListener listener) throws Exception {
+        if (!CONTENT_RUNNING.compareAndSet(false, true)) {
+            throw new IllegalStateException("检查内容同步正在运行，请等待完成后再重建云端");
+        }
         if (!DEVICE_RUNNING.compareAndSet(false, true)) {
-            throw new IllegalStateException("设备信息同步正在运行，请稍后再试");
+            CONTENT_RUNNING.set(false);
+            throw new IllegalStateException("设备信息同步正在运行，请等待完成后再重建云端");
         }
         Config config = null;
         try {
@@ -362,11 +366,17 @@ public final class CloudSyncService {
             prepare(client, config);
             progress(listener, "正在读取旧设备快照…");
             List<String> snapshots = client.listSnapshots(config.space);
+            List<String> profiles = client.listDeviceProfiles(config.space);
             int deleted = 0;
             for (int i = 0; i < snapshots.size(); i++) {
-                progress(listener, "正在清理旧设备 " + (i + 1) + "/" + snapshots.size() + "…");
+                progress(listener, "正在清理旧检查内容 " + (i + 1) + "/" + snapshots.size() + "…");
                 client.deleteSnapshot(config.space, snapshots.get(i));
                 deleted++;
+            }
+            for (String file : profiles) {
+                String id = file.substring(0, file.length() - ".device.json".length());
+                client.deleteDeviceProfile(config.space, id);
+                client.setDeviceLoggedOut(config.space, id, false);
             }
 
             SQLiteDatabase database = repo.raw();
@@ -379,14 +389,18 @@ public final class CloudSyncService {
             String deviceId = ensureDeviceId();
             registerCurrentDevice(deviceId, true);
             progress(listener, "正在建立新的管理员设备…");
-            uploadSnapshot(new BackupService(context), client, config, deviceId);
             long now = System.currentTimeMillis();
+            client.uploadDeviceProfile(config.space, deviceId,
+                    deviceProfileJson(deviceId, deviceName(deviceId), "OWNER", now));
+            progress(listener, "正在上传本机检查内容…");
+            uploadSnapshot(new BackupService(context), client, config, deviceId);
             repo.putSetting("last_sync_at", String.valueOf(now));
             progress(listener, "云端同步空间已重新建立");
             return new ResetResult(deleted, deviceId, now);
         } finally {
             if (config != null) Arrays.fill(config.spacePassword, '\0');
             DEVICE_RUNNING.set(false);
+            CONTENT_RUNNING.set(false);
         }
     }
 
