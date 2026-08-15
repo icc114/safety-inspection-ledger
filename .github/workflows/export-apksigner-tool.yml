@@ -1,0 +1,30 @@
+name: Export Android APK Signer Tool
+
+on:
+  push:
+    branches:
+      - agent/export-apksigner-tool
+
+permissions:
+  contents: read
+
+jobs:
+  export:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: android-actions/setup-android@v3
+      - name: Install Android build tools
+        run: sdkmanager 'build-tools;35.0.0'
+      - name: Collect signing tools
+        run: |
+          mkdir -p signing-tools
+          cp "$ANDROID_HOME/build-tools/35.0.0/lib/apksigner.jar" signing-tools/
+          cp "$ANDROID_HOME/build-tools/35.0.0/zipalign" signing-tools/
+          chmod +x signing-tools/zipalign
+      - uses: actions/upload-artifact@v4
+        with:
+          name: android-signing-tools-35
+          path: signing-tools
+          retention-days: 1
