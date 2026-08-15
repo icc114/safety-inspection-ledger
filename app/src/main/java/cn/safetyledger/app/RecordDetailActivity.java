@@ -28,14 +28,11 @@ import cn.safetyledger.app.data.Entities.Media;
 import cn.safetyledger.app.data.Entities.Signature;
 import cn.safetyledger.app.data.LedgerRepository;
 import cn.safetyledger.app.media.MediaService;
-import cn.safetyledger.app.pdf.PdfExporter;
 
-import java.io.OutputStream;
 import java.util.List;
 
 public final class RecordDetailActivity extends Activity {
     private static final int PICK = 610;
-    private static final int PDF = 611;
     private static final int CAMERA = 612;
     private static final int PERMISSION = 613;
     private static final int SIGN = 614;
@@ -83,12 +80,6 @@ public final class RecordDetailActivity extends Activity {
             content.addView(rectificationCard());
         }
         content.addView(Ui.gap(this, 14));
-        Button pdf = Ui.button(this, "导出本条 A4 PDF");
-        pdf.setOnClickListener(view -> startActivityForResult(new Intent(Intent.ACTION_CREATE_DOCUMENT)
-                .setType("application/pdf")
-                .putExtra(Intent.EXTRA_TITLE, "安全检查记录-" + model.date + ".pdf"), PDF));
-        content.addView(pdf);
-        content.addView(Ui.gap(this, 8));
         Button delete = Ui.secondaryButton(this, "移入回收站");
         delete.setTextColor(Ui.DANGER);
         delete.setOnClickListener(view -> {
@@ -348,11 +339,6 @@ public final class RecordDetailActivity extends Activity {
             } else if (request == SIGN) {
                 showSignatures();
                 Ui.toast(this, "签名已保存");
-            } else if (request == PDF && data != null) {
-                try (OutputStream output = getContentResolver().openOutputStream(data.getData())) {
-                    new PdfExporter(this).export(List.of(repo.inspection(model.id)), output);
-                }
-                Ui.toast(this, "PDF 已导出");
             }
         } catch (Exception error) {
             Ui.toast(this, "操作失败：" + error.getMessage());

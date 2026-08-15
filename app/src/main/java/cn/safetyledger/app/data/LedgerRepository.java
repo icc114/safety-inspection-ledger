@@ -48,6 +48,15 @@ public final class LedgerRepository {
     public void softDelete(String id){long n=System.currentTimeMillis();raw().update("inspections",LedgerDatabase.values("deleted_at",n,"updated_at",n),"id=?",new String[]{id});queue("inspection",id,"DELETE");}
     public void restore(String id){long n=System.currentTimeMillis();raw().update("inspections",LedgerDatabase.values("deleted_at",null,"updated_at",n),"id=?",new String[]{id});queue("inspection",id,"UPSERT");}
     public void permanentDelete(String id){SQLiteDatabase d=raw();d.beginTransaction();try{d.delete("inspections","id=?",new String[]{id});tombstone("inspection",id);d.setTransactionSuccessful();}finally{d.endTransaction();}}
+    public void clearInspectionTombstoneAndRestore(String id){
+        long now=System.currentTimeMillis();SQLiteDatabase d=raw();d.beginTransaction();
+        try{
+            d.delete("tombstones","entity_type='inspection' AND entity_id=?",new String[]{id});
+            d.update("inspections",LedgerDatabase.values("deleted_at",null,"updated_at",now,"revision",1),"id=?",new String[]{id});
+            d.setTransactionSuccessful();
+        }finally{d.endTransaction();}
+        queue("inspection",id,"UPSERT");
+    }
     private void tombstone(String type,String id){long n=System.currentTimeMillis();raw().insertWithOnConflict("tombstones",null,LedgerDatabase.values("id",UUID.randomUUID().toString(),"entity_type",type,"entity_id",id,"deleted_at",n,"revision",1),SQLiteDatabase.CONFLICT_REPLACE);queue(type,id,"DELETE");}
     private void queue(String type,String id,String op){long n=System.currentTimeMillis();raw().insertWithOnConflict("sync_queue",null,LedgerDatabase.values("id",UUID.randomUUID().toString(),"entity_type",type,"entity_id",id,"operation",op,"attempts",0,"next_attempt_at",n,"created_at",n),SQLiteDatabase.CONFLICT_REPLACE);CloudSyncScheduler.scheduleSoon(context);}
     public void queueDeviceRole(String deviceId){queue("sync_device",deviceId,"UPSERT");}

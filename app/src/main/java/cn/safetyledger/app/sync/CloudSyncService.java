@@ -403,6 +403,76 @@ public final class CloudSyncService {
         }
     }
 
+    public boolean hasConfiguredSync() {
+        try { return loadConfig() != null; } catch (Exception ignored) { return false; }
+    }
+
+    public DeleteResult archiveAndPermanentlyDelete(String inspectionId,char[] entered,ProgressListener listener)throws Exception{
+        Config config=null;
+        try{
+            config=requireConfig();
+            if(!samePassword(entered,config.spacePassword))throw new SecurityException("云同步空间密码错误");
+            if(repo.inspection(inspectionId)==null)throw new IllegalArgumentException("检查记录不存在");
+            WebDavClient client=client(config);prepare(client,config);String deviceId=ensureDeviceId();
+            File recovery=File.createTempFile("safety-admin-recovery-",".safetydata",context.getCacheDir());
+            try{
+                progress(listener,"正在建立管理员恢复副本…");
+                try(FileOutputStream output=new FileOutputStream(recovery)){
+                    new BackupService(context).exportCloudSnapshot(output,config.spacePassword.clone());
+                }
+                long now=System.currentTimeMillis();
+                String name=inspectionId+"__"+now+"__"+deviceId+".safetydata";
+                client.uploadAdminRecovery(config.space,name,recovery);
+                progress(listener,"恢复副本已保存，正在彻底删除本机记录…");
+                new MediaService(context).deleteInspectionMedia(inspectionId);repo.permanentDelete(inspectionId);
+                return new DeleteResult(name,now);
+            }finally{recovery.delete();}
+        }finally{
+            if(entered!=null)Arrays.fill(entered,'\0');
+            if(config!=null)Arrays.fill(config.spacePassword,'\0');
+        }
+    }
+
+    public List<RecoveryEntry> listAdminRecovery()throws Exception{
+        Config config=null;
+        try{
+            config=requireConfig();String current=ensureDeviceId();String role=deviceRole(current);
+            if(!("OWNER".equals(role)||"ADMIN".equals(role)))throw new SecurityException("只有管理员设备可以查看恢复库");
+            WebDavClient client=client(config);prepare(client,config);List<RecoveryEntry> out=new ArrayList<>();
+            for(String name:client.listAdminRecovery(config.space)){
+                String base=name.substring(0,name.length()-".safetydata".length());String[] parts=base.split("__",3);
+                if(parts.length<2)continue;long deleted=0;try{deleted=Long.parseLong(parts[1]);}catch(Exception ignored){}
+                out.add(new RecoveryEntry(name,parts[0],deleted));
+            }
+            out.sort((a,b)->Long.compare(b.deletedAt(),a.deletedAt()));return out;
+        }finally{if(config!=null)Arrays.fill(config.spacePassword,'\0');}
+    }
+
+    public RestoreResult restoreAdminRecovery(String recoveryName)throws Exception{
+        Config config=null;
+        try{
+            config=requireConfig();String current=ensureDeviceId();String role=deviceRole(current);
+            if(!("OWNER".equals(role)||"ADMIN".equals(role)))throw new SecurityException("只有管理员设备可以恢复已删除记录");
+            String base=recoveryName.endsWith(".safetydata")?recoveryName.substring(0,recoveryName.length()-11):recoveryName;
+            String[] parts=base.split("__",3);if(parts.length<2)throw new IllegalArgumentException("恢复文件名称无效");
+            String inspectionId=parts[0];WebDavClient client=client(config);prepare(client,config);
+            File incoming=File.createTempFile("safety-admin-restore-",".safetydata",context.getCacheDir());
+            try{
+                client.downloadAdminRecovery(config.space,recoveryName,incoming);BackupService backup=new BackupService(context);
+                try(FileInputStream input=new FileInputStream(incoming)){
+                    BackupService.RestorePackage restore=backup.decryptAndValidate(input,config.spacePassword.clone());
+                    backup.restoreInspection(restore,inspectionId);
+                }
+                repo.clearInspectionTombstoneAndRestore(inspectionId);return new RestoreResult(inspectionId,System.currentTimeMillis());
+            }finally{incoming.delete();}
+        }finally{if(config!=null)Arrays.fill(config.spacePassword,'\0');}
+    }
+
+    private static boolean samePassword(char[] a,char[] b){
+        if(a==null||b==null)return false;int diff=a.length^b.length;int n=Math.max(a.length,b.length);
+        for(int i=0;i<n;i++){char ca=i<a.length?a[i]:0;char cb=i<b.length?b[i]:0;diff|=ca^cb;}return diff==0;
+    }
+
     private Config requireConfig() throws Exception {
         Config config = loadConfig();
         if (config == null) throw new IllegalStateException("请先保存并启用云同步配置");
@@ -551,22 +621,23 @@ public final class CloudSyncService {
     }
 
     private void applyTombstones() {
-        List<String[]> removals = new ArrayList<>();
-        try (Cursor cursor = repo.raw().rawQuery(
-                "SELECT entity_type,entity_id FROM tombstones", null)) {
-            while (cursor.moveToNext()) removals.add(new String[]{cursor.getString(0), cursor.getString(1)});
+        List<Object[]> removals = new ArrayList<>();
+        try (Cursor cursor = repo.raw().rawQuery("SELECT entity_type,entity_id,deleted_at FROM tombstones", null)) {
+            while (cursor.moveToNext()) removals.add(new Object[]{cursor.getString(0), cursor.getString(1), cursor.getLong(2)});
         }
         SQLiteDatabase database = repo.raw();
-        for (String[] value : removals) {
-            String type = value[0], id = value[1];
+        for (Object[] value : removals) {
+            String type=(String)value[0],id=(String)value[1];long deletedAt=(Long)value[2];
             if ("inspection".equals(type)) {
-                new MediaService(context).deleteInspectionMedia(id);
-                database.delete("inspections", "id=?", new String[]{id});
-            } else if ("template".equals(type)) {
-                database.delete("templates", "id=?", new String[]{id});
-            } else if ("template_item".equals(type)) {
-                database.delete("template_items", "id=?", new String[]{id});
-            }
+                long updated=0;try(Cursor c=database.rawQuery("SELECT updated_at FROM inspections WHERE id=?",new String[]{id})){
+                    if(c.moveToFirst())updated=c.getLong(0);
+                }
+                // Administrator recovery creates a newer inspection revision. Older tombstones must
+                // not delete that restored record when stale peer snapshots are merged again.
+                if(updated>deletedAt){database.delete("tombstones","entity_type='inspection' AND entity_id=?",new String[]{id});continue;}
+                new MediaService(context).deleteInspectionMedia(id);database.delete("inspections","id=?",new String[]{id});
+            } else if ("template".equals(type)) database.delete("templates", "id=?", new String[]{id});
+            else if ("template_item".equals(type)) database.delete("template_items", "id=?", new String[]{id});
         }
     }
 
@@ -593,6 +664,9 @@ public final class CloudSyncService {
     public record DeviceLogoutResult(String deviceId, long completedAt) {}
     public record CurrentLogoutResult(String deviceId, long completedAt) {}
     public record ResetResult(int deletedSnapshots, String ownerDeviceId, long completedAt) {}
+    public record DeleteResult(String recoveryName,long completedAt) {}
+    public record RecoveryEntry(String name,String inspectionId,long deletedAt) {}
+    public record RestoreResult(String inspectionId,long completedAt) {}
 
     private static final class Config {
         final String type, endpoint, username, serverPassword, token, space;
