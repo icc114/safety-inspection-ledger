@@ -1,0 +1,53 @@
+name: Apply PC 0.2.3 clarity and sync signal
+
+on:
+  push:
+    branches:
+      - agent/pc-v022-mobile-ui-sync-log-final
+    paths:
+      - tools/apply-pc-v023-clarity-sync-signal.py
+      - .github/workflows/apply-pc-v023.yml
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: agent/pc-v022-mobile-ui-sync-log-final
+          fetch-depth: 0
+
+      - name: Set up Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: maven
+
+      - name: Apply PC 0.2.3 patch
+        run: python tools/apply-pc-v023-clarity-sync-signal.py
+
+      - name: Validate Cloudflare Worker syntax
+        run: node --check cloudflare-worker/worker.js
+
+      - name: Test and package desktop source
+        run: mvn -f desktop/pom.xml --batch-mode test package
+
+      - name: Commit verified source
+        shell: bash
+        run: |
+          git config user.name "icc114"
+          git config user.email "75865808+icc114@users.noreply.github.com"
+          git add desktop cloudflare-worker .github/workflows/pc-v022-windows.yml
+          if git diff --cached --quiet; then
+            echo "No source changes to commit"
+          else
+            git commit -m "PC 0.2.3 clarity settings sync signal and diagnostics"
+            git push origin HEAD:agent/pc-v022-mobile-ui-sync-log-final
+          fi
