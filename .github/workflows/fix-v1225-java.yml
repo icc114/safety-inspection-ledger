@@ -5,6 +5,7 @@ on:
     branches:
       - 'agent/v1225-ui-sync-diagnostics'
     paths:
+      - 'tools/fix_v1225_settings_literal.py'
       - '.github/workflows/fix-v1225-java.yml'
   workflow_dispatch:
 
@@ -19,79 +20,18 @@ jobs:
         with:
           ref: agent/v1225-ui-sync-diagnostics
           fetch-depth: 0
-      - name: Finalize compact layout and fix diagnostics text
-        shell: bash
-        run: |
-          set -euo pipefail
-          python3 - <<'PY'
-          from pathlib import Path
-
-          ledger = Path('app/src/main/java/cn/safetyledger/app/LedgerActivity.java')
-          text = ledger.read_text(encoding='utf-8')
-
-          replacements = [
-              ('previous.setTextSize(28);\n        next.setTextSize(28);',
-               'previous.setTextSize(30);\n        next.setTextSize(30);'),
-              ('reset.setTextSize(12);', 'reset.setTextSize(11.5f);'),
-              ('dateNavigation.addView(reset, new LinearLayout.LayoutParams(Ui.dp(this, 94), Ui.dp(this, 40)));',
-               'dateNavigation.addView(reset, new LinearLayout.LayoutParams(Ui.dp(this, 90), Ui.dp(this, 40)));'),
-              ('filters.addView(rangeLabel, new LinearLayout.LayoutParams(Ui.dp(this, 58), Ui.dp(this, 40)));\n        filters.addView(range, new LinearLayout.LayoutParams(Ui.dp(this, 72), Ui.dp(this, 40)));\n        filters.addView(Ui.horizontalGap(this, 4));',
-               'filters.addView(rangeLabel, new LinearLayout.LayoutParams(Ui.dp(this, 54), Ui.dp(this, 40)));\n        filters.addView(range, new LinearLayout.LayoutParams(Ui.dp(this, 66), Ui.dp(this, 40)));\n        filters.addView(Ui.horizontalGap(this, 3));'),
-              ('filters.addView(Ui.horizontalGap(this, 4));\n        filters.addView(statusFilter, new LinearLayout.LayoutParams(0, Ui.dp(this, 40), 1));',
-               'filters.addView(Ui.horizontalGap(this, 3));\n        filters.addView(statusFilter, new LinearLayout.LayoutParams(0, Ui.dp(this, 40), 1));'),
-              ('header.addView(multiToggle, new LinearLayout.LayoutParams(Ui.dp(this, 88), Ui.dp(this, 38)));\n        header.addView(Ui.horizontalGap(this, 5));\n        header.addView(pageSize, new LinearLayout.LayoutParams(Ui.dp(this, 122), Ui.dp(this, 40)));',
-               'header.addView(multiToggle, new LinearLayout.LayoutParams(Ui.dp(this, 84), Ui.dp(this, 38)));\n        header.addView(Ui.horizontalGap(this, 5));\n        header.addView(pageSize, new LinearLayout.LayoutParams(Ui.dp(this, 134), Ui.dp(this, 40)));'),
-              ('text.setTextSize(13);', 'text.setTextSize(12.5f);'),
-              ('TextView heading = Ui.text(this, weekday, 11, true);\n            heading.setPadding(0, 0, 0, 0);\n            heading.setGravity(Gravity.CENTER);\n            grid.addView(heading, cellParams(24));',
-               'TextView heading = Ui.text(this, weekday, 12, true);\n            heading.setIncludeFontPadding(false);\n            heading.setPadding(0, 0, 0, 0);\n            heading.setGravity(Gravity.CENTER);\n            grid.addView(heading, cellParams(26));'),
-              ('calendarBox.addView(monthProgressPanel(marked), new LinearLayout.LayoutParams(Ui.dp(this, 84), ViewGroup.LayoutParams.MATCH_PARENT));',
-               'calendarBox.addView(monthProgressPanel(marked), new LinearLayout.LayoutParams(Ui.dp(this, 88), ViewGroup.LayoutParams.MATCH_PARENT));'),
-              ('TextView title = Ui.text(this, "本月检查\\n进度", 10, true);',
-               'TextView title = Ui.text(this, "本月检查\\n进度", 10, true);'),
-              ('TextView rate = Ui.text(this, percent + "%", 18, true);',
-               'TextView rate = Ui.text(this, percent + "%", 17, true);'),
-              ('TextView number = Ui.text(this, value, 16, true);',
-               'TextView number = Ui.text(this, value, 15, true);'),
-          ]
-          for old, new in replacements:
-              if old in text:
-                  text = text.replace(old, new, 1)
-          ledger.write_text(text, encoding='utf-8')
-
-          ui = Path('app/src/main/java/cn/safetyledger/app/Ui.java')
-          u = ui.read_text(encoding='utf-8')
-          u = u.replace('back.setTextSize(30);', 'back.setTextSize(32);', 1)
-          u = u.replace('bar.addView(back, new LinearLayout.LayoutParams(dp(activity, 44), dp(activity, 42)));',
-                        'bar.addView(back, new LinearLayout.LayoutParams(dp(activity, 46), dp(activity, 44)));', 1)
-          ui.write_text(u, encoding='utf-8')
-
-          settings = Path('app/src/main/java/cn/safetyledger/app/SettingsActivity.java')
-          s = settings.read_text(encoding='utf-8')
-          broken = '.setMessage(message + "\n\n已自动写入同步诊断日志。请在本页点击“查看 / 导出同步日志”，导出 TXT 后即可直接发给开发者排查。")'
-          # Current source may contain a literal line break inside the Java string. Normalize both forms.
-          s = s.replace('.setMessage(message + "\n\n已自动写入同步诊断日志。请在本页点击“查看 / 导出同步日志”，导出 TXT 后即可直接发给开发者排查。")', broken)
-          literal = '.setMessage(message + "\n\n已自动写入同步诊断日志。请在本页点击“查看 / 导出同步日志”，导出 TXT 后即可直接发给开发者排查。")'
-          if literal not in s:
-              start = s.find('.setMessage(message + "')
-              marker = '已自动写入同步诊断日志。请在本页点击“查看 / 导出同步日志”，导出 TXT 后即可直接发给开发者排查。")'
-              m = s.find(marker, start)
-              if start >= 0 and m >= 0:
-                  end = m + len(marker)
-                  s = s[:start] + broken + s[end:]
-          settings.write_text(s, encoding='utf-8')
-          PY
-      - name: Commit finalized source
+      - name: Repair sync diagnostics Java string
+        run: python3 tools/fix_v1225_settings_literal.py
+      - name: Commit repaired source
         shell: bash
         run: |
           set -euo pipefail
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add app/src/main/java/cn/safetyledger/app/LedgerActivity.java \
-                  app/src/main/java/cn/safetyledger/app/Ui.java \
-                  app/src/main/java/cn/safetyledger/app/SettingsActivity.java
+          git add app/src/main/java/cn/safetyledger/app/SettingsActivity.java
           if git diff --cached --quiet; then
             echo 'No source changes needed.'
             exit 0
           fi
-          git commit -m "Finalize compact calendar filters and sync diagnostics UI"
+          git commit -m "Fix sync diagnostics message compilation"
           git push origin HEAD:agent/v1225-ui-sync-diagnostics
