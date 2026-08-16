@@ -425,8 +425,7 @@ public final class LedgerActivity extends Activity {
         LinearLayout panel = Ui.column(this);
         panel.setPadding(Ui.dp(this, 4), Ui.dp(this, 5), Ui.dp(this, 4), Ui.dp(this, 5));
         panel.setBackground(Ui.shape(this, Color.WHITE, Ui.LINE, 12));
-        TextView title = Ui.text(this, "本月检查
-进度", 10, true);
+        TextView title = Ui.text(this, "本月检查\n进度", 10, true);
         title.setPadding(0, 0, 0, 0);
         title.setGravity(Gravity.CENTER);
         panel.addView(title);
