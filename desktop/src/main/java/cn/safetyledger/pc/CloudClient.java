@@ -7,7 +7,6 @@ import java.net.URLEncoder;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
-import java.net.http.HttpTimeoutException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -133,7 +132,7 @@ public final class CloudClient {
                 IOException statusError = new IOException("下载云端检查内容失败：HTTP " + response.statusCode());
                 last = statusError;
                 if (!retryable(response.statusCode()) || attempt == MAX_ATTEMPTS) throw statusError;
-            } catch (HttpTimeoutException | IOException error) {
+            } catch (IOException error) {
                 last = error;
                 log("下载失败（第 " + attempt + " 次）：" + error.getClass().getSimpleName() + " · " + String.valueOf(error.getMessage()));
                 if (attempt == MAX_ATTEMPTS) throw error;
@@ -202,7 +201,7 @@ public final class CloudClient {
                     continue;
                 }
                 return response;
-            } catch (HttpTimeoutException | IOException error) {
+            } catch (IOException error) {
                 last = error;
                 log("网络异常（第 " + attempt + " 次）：" + error.getClass().getSimpleName() + " · " + String.valueOf(error.getMessage()));
                 if (attempt == MAX_ATTEMPTS) throw error;

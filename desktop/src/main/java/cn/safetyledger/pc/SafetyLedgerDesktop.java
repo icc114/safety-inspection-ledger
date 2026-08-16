@@ -43,7 +43,7 @@ public final class SafetyLedgerDesktop extends JFrame {
     private final JComboBox<String> type = new JComboBox<>(new String[]{"全部检查类型"});
     private final JComboBox<String> statusFilter = new JComboBox<>(new String[]{"全部状态", "待整改", "整改中", "已整改完成", "检查完成"});
     private final JTextField keyword = new JTextField();
-    private final JComboBox<Integer> pageSize = new JComboBox<>(new Integer[]{10, 30, 50});
+    private final JComboBox<Integer> pageSize = new JComboBox<>(new Integer[]{10, 20, 50, 100, 200});
     private final JLabel pageInfo = new JLabel("第 1 / 1 页", SwingConstants.CENTER);
 
     private final DefaultTableModel model = new DefaultTableModel(
@@ -61,6 +61,7 @@ public final class SafetyLedgerDesktop extends JFrame {
     private volatile boolean renderingTable;
     private PcConfig config;
     private HolidayCalendarService holidayService;
+    private volatile Path latestSyncLog;
 
     private YearMonth calendarMonth = YearMonth.now();
     private LocalDate selectedDate = LocalDate.now();
@@ -72,14 +73,14 @@ public final class SafetyLedgerDesktop extends JFrame {
     private final Set<String> selectedIds = new LinkedHashSet<>();
 
     public SafetyLedgerDesktop() {
-        super("安全检查台账 PC 0.2.1");
+        super("安全检查台账 PC 0.2.2");
         config = PcConfig.load();
         holidayService = new HolidayCalendarService(config.privateDir());
         setIconImage(AppIcon.image(64));
         buildUi();
         refreshTable();
-        setSize(1450, 860);
-        setMinimumSize(new Dimension(1120, 720));
+        setSize(1400, 820);
+        setMinimumSize(new Dimension(1040, 650));
         setLocationRelativeTo(null);
         setDefaultCloseOperation(WindowConstants.DISPOSE_ON_CLOSE);
         addWindowListener(new WindowAdapter() {
@@ -96,50 +97,79 @@ public final class SafetyLedgerDesktop extends JFrame {
         setLayout(new BorderLayout());
         getContentPane().setBackground(BG);
         add(topBar(), BorderLayout.NORTH);
-        JPanel main = new JPanel(new BorderLayout(12, 0));
+
+        // PC 0.2.2 removes the old calendar sidebar. The record workspace now uses the full width,
+        // matching the mobile client's hierarchy: top action bar -> filters -> record list.
+        JPanel main = new JPanel(new BorderLayout());
         main.setBackground(BG);
         main.setBorder(new EmptyBorder(14, 14, 8, 14));
-        JComponent sidebar = sidebarPanel();
-        sidebar.setPreferredSize(new Dimension(305, 0));
-        main.add(sidebar, BorderLayout.WEST);
         main.add(recordsPanel(), BorderLayout.CENTER);
         add(main, BorderLayout.CENTER);
+
         JPanel south = new JPanel(new BorderLayout(8, 4));
         south.setBackground(BG);
         south.setBorder(new EmptyBorder(2, 16, 9, 16));
-        JLabel note = new JLabel("电脑端长期保存本地资料；云端仅用于设备传输。双击检查记录可查看详情、照片、Word 和 PDF。");
-        note.setForeground(MUTED); note.setFont(note.getFont().deriveFont(12f));
+        JLabel note = new JLabel("电脑端长期保存本地资料；云端仅用于设备传输。双击检查记录可查看详情、照片、Word 和 PDF；同步异常可在设置中查看/导出日志。");
+        note.setForeground(MUTED);
+        note.setFont(note.getFont().deriveFont(12f));
         status.setForeground(MUTED);
-        south.add(note, BorderLayout.NORTH); south.add(status, BorderLayout.SOUTH); add(south, BorderLayout.SOUTH);
+        status.setFont(status.getFont().deriveFont(12f));
+        south.add(note, BorderLayout.NORTH);
+        south.add(status, BorderLayout.SOUTH);
+        add(south, BorderLayout.SOUTH);
+
         model.addTableModelListener(event -> {
             if (renderingTable || event.getType() != TableModelEvent.UPDATE || event.getColumn() != 0) return;
-            int row = event.getFirstRow(); if (row < 0 || row >= currentPageEntries.size()) return;
+            int row = event.getFirstRow();
+            if (row < 0 || row >= currentPageEntries.size()) return;
             boolean checked = Boolean.TRUE.equals(model.getValueAt(row, 0));
-            String id = currentPageEntries.get(row).id; if (checked) selectedIds.add(id); else selectedIds.remove(id);
+            String id = currentPageEntries.get(row).id;
+            if (checked) selectedIds.add(id); else selectedIds.remove(id);
         });
     }
 
     private JComponent topBar() {
-        JPanel bar = new JPanel(new BorderLayout(8, 0));
+        JPanel bar = new JPanel(new BorderLayout(12, 0));
         bar.setBorder(new EmptyBorder(10, 16, 10, 16));
         bar.setBackground(BLUE);
-        JPanel brand = new JPanel(new FlowLayout(FlowLayout.LEFT, 8, 0)); brand.setOpaque(false);
-        brand.add(new JLabel(AppIcon.icon(34)));
-        JLabel titleLabel = new JLabel("安全检查台账"); titleLabel.setForeground(Color.WHITE); titleLabel.setFont(titleLabel.getFont().deriveFont(Font.BOLD, 22f));
-        brand.add(titleLabel); bar.add(brand, BorderLayout.WEST);
-        JPanel actions = new JPanel(new FlowLayout(FlowLayout.RIGHT, 7, 0)); actions.setOpaque(false);
-        JButton test = headerButton("⛓  测试连接"); test.addActionListener(e -> testConnection());
-        JButton sync = headerButton("↻  立即同步"); sync.addActionListener(e -> sync(true));
-        JButton archive = headerButton("▣  打开资料库"); archive.addActionListener(e -> openArchive());
-        JButton tools = headerButton("▦  数据工具  ▾"); tools.addActionListener(e -> showDataTools(tools));
-        JButton settings = headerButton("⚙  设置"); settings.addActionListener(e -> showSettings());
-        actions.add(test); actions.add(sync); actions.add(archive); actions.add(tools); actions.add(settings);
-        bar.add(actions, BorderLayout.EAST); return bar;
+
+        JPanel brand = new JPanel(new FlowLayout(FlowLayout.LEFT, 10, 0));
+        brand.setOpaque(false);
+        JLabel icon = new JLabel(AppIcon.icon(46));
+        icon.setPreferredSize(new Dimension(48, 48));
+        brand.add(icon);
+        JLabel titleLabel = new JLabel("安全检查台账");
+        titleLabel.setForeground(Color.WHITE);
+        titleLabel.setFont(titleLabel.getFont().deriveFont(Font.BOLD, 24f));
+        brand.add(titleLabel);
+        bar.add(brand, BorderLayout.WEST);
+
+        JPanel actions = new JPanel(new FlowLayout(FlowLayout.RIGHT, 9, 3));
+        actions.setOpaque(false);
+        JButton sync = headerButton("↻  立即同步", true);
+        sync.setToolTipText("立即从云端同步其他设备的检查内容");
+        sync.addActionListener(e -> sync(true));
+        JButton settings = headerButton("⚙  设置", false);
+        settings.setToolTipText("同步设置、本地资料库、数据工具和同步日志");
+        settings.addActionListener(e -> showSettings());
+        actions.add(sync);
+        actions.add(settings);
+        bar.add(actions, BorderLayout.EAST);
+        return bar;
     }
 
-    private JButton headerButton(String text) {
-        JButton button = new JButton(text); button.setFocusPainted(false); button.setMargin(new Insets(7, 12, 7, 12));
-        button.setBackground(Color.WHITE); button.setForeground(new Color(26, 67, 126)); return button;
+    private JButton headerButton(String text, boolean prominent) {
+        JButton button = new JButton(text);
+        button.setFocusPainted(false);
+        button.setFont(button.getFont().deriveFont(Font.BOLD, 14f));
+        button.setMargin(new Insets(8, 16, 8, 16));
+        button.setPreferredSize(new Dimension(prominent ? 128 : 102, 42));
+        button.setBackground(Color.WHITE);
+        button.setForeground(new Color(23, 78, 166));
+        button.setBorder(BorderFactory.createCompoundBorder(
+                BorderFactory.createLineBorder(new Color(176, 198, 228)),
+                new EmptyBorder(4, 8, 4, 8)));
+        return button;
     }
 
     private JComponent sidebarPanel() {
@@ -255,34 +285,138 @@ public final class SafetyLedgerDesktop extends JFrame {
     }
 
     private JComponent recordsPanel() {
-        JPanel root=cardPanel(new BorderLayout(7,7)); root.setBorder(BorderFactory.createCompoundBorder(BorderFactory.createLineBorder(LINE),new EmptyBorder(9,9,9,9)));
-        root.add(filterPanel(),BorderLayout.NORTH);
-        table.setAutoCreateRowSorter(true);table.setRowHeight(34);table.setSelectionMode(ListSelectionModel.MULTIPLE_INTERVAL_SELECTION);table.setGridColor(new Color(228,233,241));table.setShowHorizontalLines(true);table.setShowVerticalLines(false);
-        table.getTableHeader().setPreferredSize(new Dimension(10,38));table.getTableHeader().setBackground(new Color(247,249,252));table.getTableHeader().setFont(table.getTableHeader().getFont().deriveFont(Font.BOLD));
-        int[] widths={45,95,65,190,125,180,110};for(int i=0;i<widths.length;i++)table.getColumnModel().getColumn(i).setPreferredWidth(widths[i]);
+        JPanel root = cardPanel(new BorderLayout(10, 10));
+        root.setBorder(BorderFactory.createCompoundBorder(
+                BorderFactory.createLineBorder(LINE), new EmptyBorder(12, 12, 10, 12)));
+        root.add(filterPanel(), BorderLayout.NORTH);
+
+        table.setAutoCreateRowSorter(true);
+        table.setRowHeight(38);
+        table.setSelectionMode(ListSelectionModel.MULTIPLE_INTERVAL_SELECTION);
+        table.setGridColor(new Color(228, 233, 241));
+        table.setShowHorizontalLines(true);
+        table.setShowVerticalLines(false);
+        table.setFillsViewportHeight(true);
+        table.setFont(table.getFont().deriveFont(13f));
+        table.getTableHeader().setPreferredSize(new Dimension(10, 40));
+        table.getTableHeader().setBackground(new Color(247, 249, 252));
+        table.getTableHeader().setForeground(new Color(35, 49, 71));
+        table.getTableHeader().setFont(table.getTableHeader().getFont().deriveFont(Font.BOLD, 13f));
+        int[] widths = {50, 100, 72, 220, 145, 210, 120};
+        for (int i = 0; i < widths.length; i++) table.getColumnModel().getColumn(i).setPreferredWidth(widths[i]);
         table.getColumnModel().getColumn(6).setCellRenderer(new StatusRenderer());
-        table.addMouseListener(new MouseAdapter(){@Override public void mouseClicked(MouseEvent e){int viewRow=table.rowAtPoint(e.getPoint());int viewCol=table.columnAtPoint(e.getPoint());if(viewRow<0)return;if(e.getClickCount()>=2||viewCol==3)openRecordPreview(viewRow);}});
-        table.setToolTipText("点击检查记录或双击任意行查看详情");root.add(new JScrollPane(table),BorderLayout.CENTER);root.add(pagingPanel(),BorderLayout.SOUTH);return root;
+        table.addMouseListener(new MouseAdapter() {
+            @Override public void mouseClicked(MouseEvent e) {
+                int viewRow = table.rowAtPoint(e.getPoint());
+                int viewCol = table.columnAtPoint(e.getPoint());
+                if (viewRow < 0) return;
+                if (e.getClickCount() >= 2 || viewCol == 3) openRecordPreview(viewRow);
+            }
+        });
+        table.setToolTipText("点击检查记录或双击任意行查看详情");
+        JScrollPane scroll = new JScrollPane(table);
+        scroll.setBorder(BorderFactory.createLineBorder(new Color(224, 231, 241)));
+        root.add(scroll, BorderLayout.CENTER);
+        root.add(pagingPanel(), BorderLayout.SOUTH);
+        return root;
     }
 
     private JComponent filterPanel() {
-        JPanel wrapper=new JPanel(new BorderLayout(6,8));wrapper.setOpaque(false);
-        JPanel filters=new JPanel(new FlowLayout(FlowLayout.LEFT,8,0));filters.setOpaque(false);range.setSelectedItem("本月");
-        filters.add(new JLabel("范围"));filters.add(range);filters.add(new JLabel("检查类型"));filters.add(type);filters.add(new JLabel("状态"));filters.add(statusFilter);
-        keyword.setPreferredSize(new Dimension(170,29));keyword.setToolTipText("可按检查记录、检查类型、地点搜索");filters.add(new JLabel("关键词"));filters.add(keyword);
-        JButton apply=primaryButton("筛选");apply.addActionListener(e->{page=1;applyFilters();});JButton clear=new JButton("清除筛选");clear.addActionListener(e->clearFilters());filters.add(apply);filters.add(clear);wrapper.add(filters,BorderLayout.NORTH);
-        JPanel actions=new JPanel(new FlowLayout(FlowLayout.LEFT,7,0));actions.setOpaque(false);
-        JButton selectPage=new JButton("◇  全选本页");selectPage.addActionListener(e->{for(ArchiveService.IndexEntry entry:currentPageEntries)selectedIds.add(entry.id);renderPage();});
-        JButton selectFiltered=new JButton("◇  全选筛选结果");selectFiltered.addActionListener(e->{for(ArchiveService.IndexEntry entry:filteredEntries)selectedIds.add(entry.id);renderPage();});
-        JButton clearSelection=new JButton("↻  清空选择");clearSelection.addActionListener(e->{selectedIds.clear();renderPage();});
-        JButton exportSelected=new JButton("▣  导出选中 PDF");exportSelected.addActionListener(e->exportPdf(selectedEntries(),"选中记录"));
-        JButton exportFiltered=new JButton("▣  导出筛选结果 PDF");exportFiltered.addActionListener(e->exportPdf(new ArrayList<>(filteredEntries),"筛选结果"));
-        actions.add(selectPage);actions.add(selectFiltered);actions.add(clearSelection);actions.add(exportSelected);actions.add(exportFiltered);wrapper.add(actions,BorderLayout.SOUTH);
-        range.addActionListener(e->{page=1;applyFilters();});type.addActionListener(e->{page=1;applyFilters();});statusFilter.addActionListener(e->{page=1;applyFilters();});keyword.addActionListener(e->{page=1;applyFilters();});return wrapper;
-    }
-    private JButton primaryButton(String text){JButton b=new JButton(text);b.setBackground(BLUE);b.setForeground(Color.WHITE);b.setFocusPainted(false);return b;}
+        JPanel wrapper = new JPanel(new BorderLayout(8, 9));
+        wrapper.setOpaque(false);
 
-    private JComponent pagingPanel(){JPanel panel=new JPanel(new BorderLayout(6,0));panel.setOpaque(false);JPanel left=new JPanel(new FlowLayout(FlowLayout.LEFT,6,0));left.setOpaque(false);left.add(new JLabel("每页显示"));left.add(pageSize);left.add(new JLabel("条"));pageSize.setSelectedItem(10);pageSize.addActionListener(e->{size=(Integer)pageSize.getSelectedItem();page=1;renderPage();});panel.add(left,BorderLayout.WEST);JPanel center=new JPanel(new FlowLayout(FlowLayout.CENTER,8,0));center.setOpaque(false);JButton previous=new JButton("上一页");JButton next=new JButton("下一页");previous.addActionListener(e->{if(page>1){page--;renderPage();}});next.addActionListener(e->{int pages=pageCount();if(page<pages){page++;renderPage();}});pageInfo.setPreferredSize(new Dimension(180,28));center.add(previous);center.add(pageInfo);center.add(next);panel.add(center,BorderLayout.CENTER);return panel;}
+        JPanel first = new JPanel(new BorderLayout(10, 0));
+        first.setOpaque(false);
+        JLabel heading = new JLabel("检查记录");
+        heading.setForeground(new Color(20, 35, 61));
+        heading.setFont(heading.getFont().deriveFont(Font.BOLD, 20f));
+        first.add(heading, BorderLayout.WEST);
+
+        JPanel filters = new JPanel(new FlowLayout(FlowLayout.RIGHT, 7, 0));
+        filters.setOpaque(false);
+        range.setSelectedItem("本月");
+        range.setPreferredSize(new Dimension(92, 34));
+        type.setPreferredSize(new Dimension(150, 34));
+        statusFilter.setPreferredSize(new Dimension(126, 34));
+        keyword.setPreferredSize(new Dimension(190, 34));
+        keyword.setToolTipText("可按检查记录、检查类型、地点搜索");
+        filters.add(new JLabel("范围")); filters.add(range);
+        filters.add(new JLabel("检查类型")); filters.add(type);
+        filters.add(new JLabel("状态")); filters.add(statusFilter);
+        filters.add(new JLabel("关键词")); filters.add(keyword);
+        JButton apply = actionButton("筛选", true);
+        apply.addActionListener(e -> { page = 1; applyFilters(); });
+        JButton clear = actionButton("清除筛选", false);
+        clear.addActionListener(e -> clearFilters());
+        filters.add(apply); filters.add(clear);
+        first.add(filters, BorderLayout.CENTER);
+        wrapper.add(first, BorderLayout.NORTH);
+
+        JPanel actions = new JPanel(new FlowLayout(FlowLayout.LEFT, 7, 0));
+        actions.setOpaque(false);
+        JButton selectPage = actionButton("全选本页", false);
+        selectPage.addActionListener(e -> { for (ArchiveService.IndexEntry entry : currentPageEntries) selectedIds.add(entry.id); renderPage(); });
+        JButton selectFiltered = actionButton("全选筛选结果", false);
+        selectFiltered.addActionListener(e -> { for (ArchiveService.IndexEntry entry : filteredEntries) selectedIds.add(entry.id); renderPage(); });
+        JButton clearSelection = actionButton("清空选择", false);
+        clearSelection.addActionListener(e -> { selectedIds.clear(); renderPage(); });
+        JButton exportSelected = actionButton("导出选中 PDF", false);
+        exportSelected.addActionListener(e -> exportPdf(selectedEntries(), "选中记录"));
+        JButton exportFiltered = actionButton("导出筛选结果 PDF", false);
+        exportFiltered.addActionListener(e -> exportPdf(new ArrayList<>(filteredEntries), "筛选结果"));
+        actions.add(selectPage); actions.add(selectFiltered); actions.add(clearSelection); actions.add(exportSelected); actions.add(exportFiltered);
+        wrapper.add(actions, BorderLayout.SOUTH);
+
+        range.addActionListener(e -> { page = 1; applyFilters(); });
+        type.addActionListener(e -> { page = 1; applyFilters(); });
+        statusFilter.addActionListener(e -> { page = 1; applyFilters(); });
+        keyword.addActionListener(e -> { page = 1; applyFilters(); });
+        return wrapper;
+    }
+
+    private JButton actionButton(String text, boolean primary) {
+        JButton button = new JButton(text);
+        button.setFocusPainted(false);
+        button.setFont(button.getFont().deriveFont(primary ? Font.BOLD : Font.PLAIN, 13f));
+        button.setMargin(new Insets(6, 11, 6, 11));
+        button.setPreferredSize(new Dimension(Math.max(primary ? 76 : 105, text.length() * 14 + 28), 34));
+        button.setBackground(primary ? BLUE : Color.WHITE);
+        button.setForeground(primary ? Color.WHITE : new Color(24, 78, 156));
+        button.setBorder(BorderFactory.createCompoundBorder(
+                BorderFactory.createLineBorder(primary ? BLUE : new Color(188, 204, 226)),
+                new EmptyBorder(2, 5, 2, 5)));
+        return button;
+    }
+
+    private JButton primaryButton(String text) { return actionButton(text, true); }
+
+    private JComponent pagingPanel() {
+        JPanel panel = new JPanel(new BorderLayout(6, 0));
+        panel.setOpaque(false);
+        panel.setBorder(new EmptyBorder(4, 0, 0, 0));
+        JPanel left = new JPanel(new FlowLayout(FlowLayout.LEFT, 6, 0));
+        left.setOpaque(false);
+        left.add(new JLabel("每页显示"));
+        pageSize.setPreferredSize(new Dimension(82, 32));
+        left.add(pageSize);
+        left.add(new JLabel("条"));
+        pageSize.setSelectedItem(10);
+        pageSize.addActionListener(e -> { size = (Integer) pageSize.getSelectedItem(); page = 1; renderPage(); });
+        panel.add(left, BorderLayout.WEST);
+
+        JPanel center = new JPanel(new FlowLayout(FlowLayout.CENTER, 8, 0));
+        center.setOpaque(false);
+        JButton previous = actionButton("上一页", false);
+        JButton next = actionButton("下一页", false);
+        previous.setPreferredSize(new Dimension(84, 32));
+        next.setPreferredSize(new Dimension(84, 32));
+        previous.addActionListener(e -> { if (page > 1) { page--; renderPage(); } });
+        next.addActionListener(e -> { int pages = pageCount(); if (page < pages) { page++; renderPage(); } });
+        pageInfo.setPreferredSize(new Dimension(210, 32));
+        center.add(previous); center.add(pageInfo); center.add(next);
+        panel.add(center, BorderLayout.CENTER);
+        return panel;
+    }
 
     private void clearFilters(){calendarMonth=YearMonth.now();selectedDate=LocalDate.now();range.setSelectedItem("全部");type.setSelectedItem("全部检查类型");statusFilter.setSelectedItem("全部状态");keyword.setText("");page=1;rebuildCalendar();applyFilters();}
     private void applyFilters(){if(allEntries==null)return;String rangeValue=String.valueOf(range.getSelectedItem()),typeValue=String.valueOf(type.getSelectedItem()),statusValue=String.valueOf(statusFilter.getSelectedItem()),q=keyword.getText().trim().toLowerCase(Locale.ROOT);List<ArchiveService.IndexEntry>out=new ArrayList<>();for(ArchiveService.IndexEntry entry:allEntries){LocalDate date;try{date=LocalDate.parse(entry.date);}catch(Exception invalid){continue;}if(!matchesRange(date,rangeValue))continue;if(!"全部检查类型".equals(typeValue)&&!Objects.equals(typeValue,blank(entry.type)))continue;if(!"全部状态".equals(statusValue)&&!Objects.equals(statusValue,statusText(entry.status)))continue;if(!q.isBlank()){String haystack=(blank(entry.title)+" "+blank(entry.type)+" "+blank(entry.location)).toLowerCase(Locale.ROOT);if(!haystack.contains(q))continue;}out.add(entry);}filteredEntries=out;int pages=pageCount();if(page>pages)page=pages;if(page<1)page=1;renderPage();}
@@ -294,12 +428,271 @@ public final class SafetyLedgerDesktop extends JFrame {
     private void refreshTypeChoices(){String previous=type.getSelectedItem()==null?"全部检查类型":String.valueOf(type.getSelectedItem());LinkedHashSet<String>values=new LinkedHashSet<>();values.add("全部检查类型");for(ArchiveService.IndexEntry entry:allEntries)if(!blank(entry.type).isBlank())values.add(entry.type);type.setModel(new DefaultComboBoxModel<>(values.toArray(new String[0])));type.setSelectedItem(values.contains(previous)?previous:"全部检查类型");}
     private void openRecordPreview(int viewRow){try{int modelRow=table.convertRowIndexToModel(viewRow);if(modelRow<0||modelRow>=currentPageEntries.size())throw new IllegalStateException("记录索引无效");RecordPreviewDialog.open(this,currentPageEntries.get(modelRow).folder);}catch(Exception error){showError("无法预览检查记录",error);}}
 
-    private void showSettings(){JTextField endpointField=new JTextField(config.endpoint,34),spaceField=new JTextField(config.space,24),archiveField=new JTextField(config.archiveRoot,30),deviceField=new JTextField(config.deviceName,24),shiftField=new JTextField(config.shiftDates,34);JPasswordField passwordField=new JPasswordField(config.password,24);deviceField.setEditable(false);shiftField.setToolTipText("多个日期用逗号分隔，例如：2026-08-14, 2026-08-18");JPanel panel=new JPanel(new GridBagLayout());GridBagConstraints c=new GridBagConstraints();c.insets=new Insets(5,5,5,5);c.fill=GridBagConstraints.HORIZONTAL;addSettingRow(panel,c,0,"云同步地址",endpointField,null);addSettingRow(panel,c,1,"同步空间",spaceField,null);addSettingRow(panel,c,2,"同步空间密码",passwordField,null);JButton choose=new JButton("选择文件夹");choose.addActionListener(e->{JFileChooser chooser=new JFileChooser(archiveField.getText());chooser.setFileSelectionMode(JFileChooser.DIRECTORIES_ONLY);if(chooser.showOpenDialog(this)==JFileChooser.APPROVE_OPTION)archiveField.setText(chooser.getSelectedFile().toPath().toString());});addSettingRow(panel,c,3,"电脑本地资料库",archiveField,choose);addSettingRow(panel,c,4,"本机设备名称",deviceField,null);addSettingRow(panel,c,5,"倒班日期",shiftField,null);int result=JOptionPane.showConfirmDialog(this,panel,"⚙ 设置",JOptionPane.OK_CANCEL_OPTION,JOptionPane.PLAIN_MESSAGE);if(result!=JOptionPane.OK_OPTION)return;try{config.endpoint=endpointField.getText().trim();config.space=spaceField.getText().trim();if(config.space.isBlank())config.space="safety-ledger";config.password=new String(passwordField.getPassword());config.archiveRoot=archiveField.getText().trim();config.shiftDates=shiftField.getText().trim();if(config.archiveRoot.isBlank())throw new IllegalArgumentException("请选择电脑本地资料库文件夹");Files.createDirectories(config.archivePath());config.save();holidayService=new HolidayCalendarService(config.privateDir());setStatus("设置已保存");selectedIds.clear();refreshTable();refreshHolidayAsync(calendarMonth.getYear());migrateWordLayoutAsync();}catch(Exception error){showError("保存设置失败",error);}}
-    private static void addSettingRow(JPanel panel,GridBagConstraints c,int row,String label,JComponent field,JComponent extra){c.gridy=row;c.gridx=0;c.weightx=0;panel.add(new JLabel(label),c);c.gridx=1;c.weightx=1;panel.add(field,c);if(extra!=null){c.gridx=2;c.weightx=0;panel.add(extra,c);}}
-    private void showDataTools(Component owner){JPopupMenu menu=new JPopupMenu();JMenuItem importItem=new JMenuItem("导入手机数据包");importItem.addActionListener(e->importPackage());JMenuItem exportItem=new JMenuItem("导出手机兼容数据包");exportItem.addActionListener(e->exportPortable());menu.add(importItem);menu.add(exportItem);menu.show(owner,0,owner.getHeight());}
+    private void showSettings() {
+        JTextField endpointField = new JTextField(config.endpoint, 36);
+        JTextField spaceField = new JTextField(config.space, 26);
+        JTextField archiveField = new JTextField(config.archiveRoot, 32);
+        JTextField deviceField = new JTextField(config.deviceName, 26);
+        JTextField shiftField = new JTextField(config.shiftDates, 36);
+        JPasswordField passwordField = new JPasswordField(config.password, 26);
+        deviceField.setEditable(false);
+        shiftField.setToolTipText("多个日期用逗号分隔，例如：2026-08-14, 2026-08-18");
 
-    private void testConnection(){if(config.endpoint.isBlank()||config.password.isBlank()){JOptionPane.showMessageDialog(this,"请先点击右上角“设置”填写云同步地址和同步空间密码。","提示",JOptionPane.INFORMATION_MESSAGE);return;}runTask("正在测试云端读写…",()->{CloudClient client=new CloudClient(config.endpoint,config.space,config.password.toCharArray());client.testReadWrite();if(client.isDeviceLoggedOut(config.deviceId))throw new SecurityException("此电脑已被管理员登出；请先在管理员手机中允许该设备重新加入");client.registerPcDevice(config.deviceId,config.deviceName);return"连接成功；本电脑已登记到设备管理";},null);}
-    private void sync(boolean manual){synchronized(syncLock){if(syncing){if(manual)setStatus("已有同步正在进行");return;}syncing=true;}SwingUtilities.invokeLater(()->setStatus("正在同步检查内容…"));CompletableFuture.runAsync(()->{try{if(config.endpoint.isBlank()||config.password.isBlank()){if(manual)SwingUtilities.invokeLater(()->JOptionPane.showMessageDialog(this,"请先在“设置”中配置云同步地址和密码。","提示",JOptionPane.INFORMATION_MESSAGE));return;}Files.createDirectories(config.privateDir());Path cache=config.privateDir().resolve("cloud-cache");Files.createDirectories(cache);Properties fingerprints=load(config.privateDir().resolve("cloud-fingerprints.properties"));CloudClient client=new CloudClient(config.endpoint,config.space,config.password.toCharArray());client.prepare();if(client.isDeviceLoggedOut(config.deviceId))throw new SecurityException("此电脑已被管理员登出；请先在管理员手机中允许该设备重新加入");client.registerPcDevice(config.deviceId,config.deviceName);List<String>names=client.listSnapshots();ArchiveService archiveService=new ArchiveService(config.archivePath());int changed=0,records=0;for(String name:names){String fp=client.fingerprint(name);Path local=cache.resolve(safeFile(name));boolean needs=!fp.equals(fingerprints.getProperty(name,""))||!Files.isRegularFile(local);SwingUtilities.invokeLater(()->setStatus("正在检查设备快照："+name));if(needs){client.download(name,local);try(DataPackageCodec.ExtractedPackage pkg=DataPackageCodec.extract(local,config.password.toCharArray())){List<ArchiveService.Record>written=archiveService.process(pkg,"云同步 · "+name);records+=written.size();Path latest=config.privateDir().resolve("latest");DataPackageCodec.copyTree(pkg.root,latest);}fingerprints.setProperty(name,fp);changed++;}}store(config.privateDir().resolve("cloud-fingerprints.properties"),fingerprints);int finalChanged=changed,finalRecords=records;SwingUtilities.invokeLater(()->{refreshTable();setStatus("同步完成 · 更新快照 "+finalChanged+" 个"+(finalRecords>0?" · 处理记录 "+finalRecords+" 条":"")+" · "+now());});}catch(Exception e){SwingUtilities.invokeLater(()->showError("同步失败",e));}finally{synchronized(syncLock){syncing=false;}}});}
+        JPanel syncPanel = new JPanel(new GridBagLayout());
+        syncPanel.setBorder(new EmptyBorder(10, 10, 10, 10));
+        GridBagConstraints c = new GridBagConstraints();
+        c.insets = new Insets(6, 5, 6, 5);
+        c.fill = GridBagConstraints.HORIZONTAL;
+        addSettingRow(syncPanel, c, 0, "云同步地址", endpointField, null);
+        addSettingRow(syncPanel, c, 1, "同步空间", spaceField, null);
+        addSettingRow(syncPanel, c, 2, "同步空间密码", passwordField, null);
+        JButton choose = actionButton("选择文件夹", false);
+        choose.addActionListener(e -> {
+            JFileChooser chooser = new JFileChooser(archiveField.getText());
+            chooser.setFileSelectionMode(JFileChooser.DIRECTORIES_ONLY);
+            if (chooser.showOpenDialog(this) == JFileChooser.APPROVE_OPTION) archiveField.setText(chooser.getSelectedFile().toPath().toString());
+        });
+        addSettingRow(syncPanel, c, 3, "电脑本地资料库", archiveField, choose);
+        addSettingRow(syncPanel, c, 4, "本机设备名称", deviceField, null);
+        addSettingRow(syncPanel, c, 5, "倒班日期", shiftField, null);
+
+        JPanel toolsPanel = new JPanel(new GridLayout(3, 2, 10, 10));
+        toolsPanel.setBorder(new EmptyBorder(16, 16, 16, 16));
+        JButton test = actionButton("测试连接", false);
+        JButton archive = actionButton("打开资料库", false);
+        JButton importData = actionButton("导入手机数据包", false);
+        JButton exportData = actionButton("导出手机兼容数据包", false);
+        JButton viewLog = actionButton("查看同步日志", false);
+        JButton exportLog = actionButton("导出同步日志", false);
+        test.addActionListener(e -> testConnection());
+        archive.addActionListener(e -> openArchive());
+        importData.addActionListener(e -> importPackage());
+        exportData.addActionListener(e -> exportPortable());
+        viewLog.addActionListener(e -> viewSyncLog());
+        exportLog.addActionListener(e -> exportSyncLog());
+        toolsPanel.add(test); toolsPanel.add(archive); toolsPanel.add(importData);
+        toolsPanel.add(exportData); toolsPanel.add(viewLog); toolsPanel.add(exportLog);
+
+        JTabbedPane tabs = new JTabbedPane();
+        tabs.addTab("同步与存储", syncPanel);
+        tabs.addTab("资料库 / 数据工具 / 日志", toolsPanel);
+        tabs.setPreferredSize(new Dimension(690, 340));
+
+        int result = JOptionPane.showConfirmDialog(this, tabs, "设置", JOptionPane.OK_CANCEL_OPTION, JOptionPane.PLAIN_MESSAGE);
+        if (result != JOptionPane.OK_OPTION) return;
+        try {
+            config.endpoint = endpointField.getText().trim();
+            config.space = spaceField.getText().trim();
+            if (config.space.isBlank()) config.space = "safety-ledger";
+            config.password = new String(passwordField.getPassword());
+            config.archiveRoot = archiveField.getText().trim();
+            config.shiftDates = shiftField.getText().trim();
+            if (config.archiveRoot.isBlank()) throw new IllegalArgumentException("请选择电脑本地资料库文件夹");
+            Files.createDirectories(config.archivePath());
+            config.save();
+            holidayService = new HolidayCalendarService(config.privateDir());
+            setStatus("设置已保存");
+            selectedIds.clear();
+            refreshTable();
+            refreshHolidayAsync(calendarMonth.getYear());
+            migrateWordLayoutAsync();
+        } catch (Exception error) {
+            showError("保存设置失败", error);
+        }
+    }
+
+    private static void addSettingRow(JPanel panel, GridBagConstraints c, int row, String label, JComponent field, JComponent extra) {
+        c.gridy = row; c.gridx = 0; c.weightx = 0;
+        panel.add(new JLabel(label), c);
+        c.gridx = 1; c.weightx = 1;
+        panel.add(field, c);
+        if (extra != null) { c.gridx = 2; c.weightx = 0; panel.add(extra, c); }
+    }
+
+    private void showDataTools(Component owner) {
+        JPopupMenu menu = new JPopupMenu();
+        JMenuItem importItem = new JMenuItem("导入手机数据包");
+        importItem.addActionListener(e -> importPackage());
+        JMenuItem exportItem = new JMenuItem("导出手机兼容数据包");
+        exportItem.addActionListener(e -> exportPortable());
+        menu.add(importItem); menu.add(exportItem);
+        menu.show(owner, 0, owner.getHeight());
+    }
+
+    private SyncLogger newSyncLogger() {
+        try {
+            SyncLogger logger = new SyncLogger(config.privateDir());
+            latestSyncLog = logger.file();
+            return logger;
+        } catch (Exception error) {
+            setStatus("无法创建同步日志：" + friendlyError(error));
+            return null;
+        }
+    }
+
+    private Path currentSyncLog() {
+        if (latestSyncLog != null && Files.isRegularFile(latestSyncLog)) return latestSyncLog;
+        return SyncLogger.latest(config.privateDir());
+    }
+
+    private void viewSyncLog() {
+        Path log = currentSyncLog();
+        JTextArea area = new JTextArea(SyncLogger.readTail(log, 160000), 30, 105);
+        area.setEditable(false);
+        area.setLineWrap(false);
+        area.setFont(new Font(Font.MONOSPACED, Font.PLAIN, 12));
+        JScrollPane scroll = new JScrollPane(area);
+        String title = log == null ? "同步日志" : "同步日志 · " + log.getFileName();
+        JOptionPane.showMessageDialog(this, scroll, title, JOptionPane.PLAIN_MESSAGE);
+    }
+
+    private void exportSyncLog() {
+        Path log = currentSyncLog();
+        if (log == null || !Files.isRegularFile(log)) {
+            JOptionPane.showMessageDialog(this, "暂无可导出的同步日志。请先执行一次测试连接或同步。", "提示", JOptionPane.INFORMATION_MESSAGE);
+            return;
+        }
+        JFileChooser chooser = new JFileChooser();
+        chooser.setSelectedFile(new java.io.File("安全检查台账-PC-同步日志-" + LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss")) + ".log"));
+        if (chooser.showSaveDialog(this) != JFileChooser.APPROVE_OPTION) return;
+        try {
+            Path destination = chooser.getSelectedFile().toPath();
+            Files.copy(log, destination, StandardCopyOption.REPLACE_EXISTING);
+            setStatus("同步日志已导出：" + destination);
+        } catch (Exception error) {
+            showError("导出同步日志失败", error);
+        }
+    }
+
+    private void showSyncError(String title, Exception error, SyncLogger logger) {
+        if (logger != null) logger.error(title, error);
+        Path log = logger == null ? currentSyncLog() : logger.file();
+        String message = friendlyError(error)
+                + "\n\n本地检查资料不会因此丢失。"
+                + (log == null ? "" : "\n详细同步日志：" + log);
+        Object[] options = {"确定", "查看日志", "导出日志"};
+        int choice = JOptionPane.showOptionDialog(this, message, title, JOptionPane.DEFAULT_OPTION,
+                JOptionPane.ERROR_MESSAGE, null, options, options[0]);
+        if (choice == 1) viewSyncLog();
+        if (choice == 2) exportSyncLog();
+        setStatus(title + "：" + friendlyError(error));
+    }
+
+    private void testConnection() {
+        if (config.endpoint.isBlank() || config.password.isBlank()) {
+            JOptionPane.showMessageDialog(this, "请先在“设置”中填写云同步地址和同步空间密码。", "提示", JOptionPane.INFORMATION_MESSAGE);
+            return;
+        }
+        SyncLogger logger = newSyncLogger();
+        setStatus("正在测试云端连接…");
+        CompletableFuture.runAsync(() -> {
+            try {
+                if (logger != null) logger.log("测试连接开始 · endpoint=" + config.endpoint + " · space=" + config.space);
+                CloudClient client = new CloudClient(config.endpoint, config.space, config.password.toCharArray(), logger);
+                client.testReadWrite();
+                if (client.isDeviceLoggedOut(config.deviceId)) throw new SecurityException("此电脑已被管理员登出；请先在管理员手机中允许该设备重新加入");
+                client.registerPcDevice(config.deviceId, config.deviceName);
+                if (logger != null) logger.log("测试连接全部完成");
+                SwingUtilities.invokeLater(() -> {
+                    setStatus("连接成功 · " + now());
+                    JOptionPane.showMessageDialog(this, "连接成功；本电脑已登记到设备管理。", "测试连接", JOptionPane.INFORMATION_MESSAGE);
+                });
+            } catch (Exception error) {
+                SwingUtilities.invokeLater(() -> showSyncError("测试连接失败", error, logger));
+            }
+        });
+    }
+
+    private void sync(boolean manual) {
+        synchronized (syncLock) {
+            if (syncing) {
+                if (manual) setStatus("同步正在进行，请稍候…");
+                return;
+            }
+            syncing = true;
+        }
+        SwingUtilities.invokeLater(() -> setStatus("正在同步检查内容…"));
+        SyncLogger logger = newSyncLogger();
+
+        CompletableFuture.runAsync(() -> {
+            try {
+                if (config.endpoint.isBlank() || config.password.isBlank()) {
+                    if (manual) SwingUtilities.invokeLater(() -> JOptionPane.showMessageDialog(this,
+                            "请先在“设置”中配置云同步地址和密码。", "提示", JOptionPane.INFORMATION_MESSAGE));
+                    return;
+                }
+                if (logger != null) logger.log((manual ? "手动" : "后台") + "同步开始 · endpoint=" + config.endpoint + " · space=" + config.space);
+                Files.createDirectories(config.privateDir());
+                Path cache = config.privateDir().resolve("cloud-cache");
+                Files.createDirectories(cache);
+                Path fingerprintFile = config.privateDir().resolve("cloud-fingerprints.properties");
+                Properties fingerprints = load(fingerprintFile);
+
+                CloudClient client = new CloudClient(config.endpoint, config.space, config.password.toCharArray(), logger);
+                client.prepare();
+                if (client.isDeviceLoggedOut(config.deviceId)) throw new SecurityException("此电脑已被管理员登出；请先在管理员手机中允许该设备重新加入");
+                client.registerPcDevice(config.deviceId, config.deviceName);
+                List<String> names = client.listSnapshots();
+                ArchiveService archiveService = new ArchiveService(config.archivePath());
+
+                int changed = 0, records = 0, failed = 0;
+                List<String> failedNames = new ArrayList<>();
+                for (String name : names) {
+                    try {
+                        String fp = client.fingerprint(name);
+                        Path local = cache.resolve(safeFile(name));
+                        boolean needs = !fp.equals(fingerprints.getProperty(name, "")) || !Files.isRegularFile(local);
+                        String stage = needs ? "正在更新设备快照：" : "设备快照无变化：";
+                        SwingUtilities.invokeLater(() -> setStatus(stage + name));
+                        if (!needs) {
+                            if (logger != null) logger.log("跳过未变化快照 · " + name);
+                            continue;
+                        }
+                        client.download(name, local);
+                        try (DataPackageCodec.ExtractedPackage pkg = DataPackageCodec.extract(local, config.password.toCharArray())) {
+                            List<ArchiveService.Record> written = archiveService.process(pkg, "云同步 · " + name);
+                            records += written.size();
+                            Path latest = config.privateDir().resolve("latest");
+                            DataPackageCodec.copyTree(pkg.root, latest);
+                            if (logger != null) logger.log("快照处理完成 · " + name + " · 记录 " + written.size() + " 条");
+                        }
+                        fingerprints.setProperty(name, fp);
+                        changed++;
+                    } catch (Exception snapshotError) {
+                        failed++;
+                        failedNames.add(name);
+                        if (logger != null) logger.error("处理设备快照 " + name, snapshotError);
+                    }
+                }
+                store(fingerprintFile, fingerprints);
+
+                if (!names.isEmpty() && failed == names.size()) {
+                    throw new IllegalStateException("检测到 " + failed + " 个设备快照，但全部处理失败。请查看同步日志定位具体步骤。" + (failedNames.isEmpty() ? "" : " 失败快照：" + String.join("、", failedNames)));
+                }
+
+                int finalChanged = changed, finalRecords = records, finalFailed = failed;
+                SwingUtilities.invokeLater(() -> {
+                    refreshTable();
+                    String text = "同步完成 · 更新快照 " + finalChanged + " 个"
+                            + (finalRecords > 0 ? " · 处理记录 " + finalRecords + " 条" : "")
+                            + (finalFailed > 0 ? " · " + finalFailed + " 个快照失败（已记录日志）" : "")
+                            + " · " + now();
+                    setStatus(text);
+                    if (manual && finalFailed > 0) {
+                        JOptionPane.showMessageDialog(this,
+                                "同步已完成，但有 " + finalFailed + " 个设备快照处理失败。\n其余成功内容已经保存，本地资料不会丢失。\n可在“设置 → 资料库 / 数据工具 / 日志”中查看或导出同步日志。",
+                                "部分同步完成", JOptionPane.WARNING_MESSAGE);
+                    }
+                });
+                if (logger != null) logger.log("同步结束 · changed=" + changed + " · records=" + records + " · failed=" + failed);
+            } catch (Exception error) {
+                SwingUtilities.invokeLater(() -> showSyncError("同步失败", error, logger));
+            } finally {
+                synchronized (syncLock) { syncing = false; }
+            }
+        });
+    }
+
     private void importPackage(){JFileChooser chooser=new JFileChooser();chooser.setDialogTitle("选择手机导出的 .safetydata 数据包");if(chooser.showOpenDialog(this)!=JFileChooser.APPROVE_OPTION)return;Path file=chooser.getSelectedFile().toPath();runTask("正在读取手机数据包…",()->{try(DataPackageCodec.ExtractedPackage pkg=DataPackageCodec.extract(file,config.password.toCharArray())){ArchiveService service=new ArchiveService(config.archivePath());int count=service.process(pkg,"本地导入 · "+file.getFileName()).size();DataPackageCodec.copyTree(pkg.root,config.privateDir().resolve("latest"));return"导入完成 · 已处理 "+count+" 条检查记录";}},this::refreshTable);}
     private void exportPortable(){Path latest=config.privateDir().resolve("latest");if(!Files.isRegularFile(latest.resolve("database.sqlite"))){JOptionPane.showMessageDialog(this,"还没有可导出的同步数据。请先同步云端或导入手机数据包。","提示",JOptionPane.INFORMATION_MESSAGE);return;}JFileChooser chooser=new JFileChooser();chooser.setSelectedFile(new java.io.File("安全检查台账-电脑导出-"+LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyyMMdd-HHmm"))+".safetydata"));if(chooser.showSaveDialog(this)!=JFileChooser.APPROVE_OPTION)return;Path out=chooser.getSelectedFile().toPath();runTask("正在生成手机兼容数据包…",()->{DataPackageCodec.createPortable(latest,out);return"数据包已导出，可由 Android 或其他 PC 端直接识别";},null);}
     private void exportPdf(List<ArchiveService.IndexEntry>entries,String label){if(entries==null||entries.isEmpty()){JOptionPane.showMessageDialog(this,"没有可导出的"+label+"。","提示",JOptionPane.INFORMATION_MESSAGE);return;}JFileChooser chooser=new JFileChooser();chooser.setSelectedFile(new java.io.File("安全检查台账-"+label+"-"+LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyyMMdd-HHmm"))+".pdf"));if(chooser.showSaveDialog(this)!=JFileChooser.APPROVE_OPTION)return;Path out=chooser.getSelectedFile().toPath();if(!out.getFileName().toString().toLowerCase(Locale.ROOT).endsWith(".pdf"))out=out.resolveSibling(out.getFileName()+".pdf");Path destination=out;runTask("正在生成 A4 PDF…",()->{List<DesktopPdfExporter.Entry>records=new ArrayList<>();for(ArchiveService.IndexEntry entry:entries)records.add(new DesktopPdfExporter.Entry(loadRecord(entry.folder),entry.folder));DesktopPdfExporter.export(records,destination);return"PDF 导出完成 · "+entries.size()+" 条记录 · "+destination;},null);}
