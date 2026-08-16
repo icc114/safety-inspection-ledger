@@ -506,7 +506,7 @@ public final class LedgerActivity extends Activity {
         for (MonthlyPlanConfig.Result result : summary.results) {
             if (shown >= 2) break;
             LinearLayout itemBox = Ui.column(this);
-            TextView name = Ui.text(this, compactProgressName(result.item.name), 8.5f, true);
+            TextView name = Ui.text(this, compactProgressName(result.item.name), 8, true);
             name.setPadding(0, 0, 0, 0);
             name.setSingleLine(true);
             name.setTextColor(Ui.TEXT);
@@ -515,7 +515,7 @@ public final class LedgerActivity extends Activity {
             String countText = result.item.target > 0
                     ? "已检 " + result.actual + " / " + result.item.target
                     : "已检 " + result.actual + " 次";
-            TextView count = Ui.text(this, countText, 8.5f, false);
+            TextView count = Ui.text(this, countText, 8, false);
             count.setPadding(0, 0, 0, 0);
             count.setSingleLine(true);
             count.setTextColor(result.reached() ? Color.rgb(38, 177, 91) : Ui.BLUE_DARK);
@@ -534,7 +534,7 @@ public final class LedgerActivity extends Activity {
 
         if (summary.results.isEmpty()) {
             TextView empty = Ui.text(this, "未设置计划
-点击这里新增", 8.5f, false);
+点击这里新增", 8, false);
             empty.setPadding(0, 0, 0, 0);
             empty.setGravity(Gravity.CENTER);
             empty.setTextColor(Ui.MUTED);

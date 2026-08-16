@@ -49,7 +49,7 @@ public final class MonthlyPlanActivity extends Activity {
         intro.addView(Ui.sectionTitle(this, "", "计划项目由你自己维护", null));
         TextView note = Ui.text(this,
                 "名称可以自由填写，例如“共享单车”“美团”“车棚”。统计关键词用于从当月检查记录中识别该项目；APP 会在模板名称、检查类型、被检查单位、地点和被检查人中查找关键词。多个关键词可用 | 分隔。\n\n计划次数填 0 表示“只统计实际检查次数，不设置达标目标”；填 1、4、10 等则同时显示实际次数和计划完成率。每保存一条正式检查记录计 1 次，草稿不计入。",
-                12.5f, false);
+                12, false);
         note.setTextColor(Ui.MUTED);
         intro.addView(note);
         content.addView(intro);
@@ -175,7 +175,7 @@ public final class MonthlyPlanActivity extends Activity {
             card.addView(targetRow);
 
             if (item.target == 0) {
-                TextView onlyCount = Ui.text(this, "当前为“只统计次数”，不会影响总体计划完成率。", 11.5f, false);
+                TextView onlyCount = Ui.text(this, "当前为“只统计次数”，不会影响总体计划完成率。", 11, false);
                 onlyCount.setTextColor(Ui.MUTED);
                 card.addView(onlyCount);
             }
