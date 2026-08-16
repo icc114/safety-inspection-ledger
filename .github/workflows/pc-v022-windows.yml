@@ -1,4 +1,4 @@
-name: PC 0.2.2 Windows Build
+name: PC 0.2.3 Windows Build
 
 on:
   push:
@@ -38,51 +38,60 @@ jobs:
         run: |
           New-Item -ItemType Directory -Force -Path dist | Out-Null
           New-Item -ItemType Directory -Force -Path package-input | Out-Null
-          Copy-Item "desktop/target/safety-ledger-pc-0.2.2-all.jar" "package-input/safety-ledger-pc-0.2.2-all.jar" -Force
+          Copy-Item "desktop/target/safety-ledger-pc-0.2.3-all.jar" "package-input/safety-ledger-pc-0.2.3-all.jar" -Force
 
-          # Windows jpackage rejects non-ASCII application names on this runner.
-          # The launcher uses an ASCII internal name; the actual app window remains Chinese.
+          # Keep the jpackage internal launcher name ASCII for Windows compatibility.
+          # The application window and package remain Chinese.
           jpackage `
             --type app-image `
             --name "SafetyLedgerPC" `
-            --app-version "0.2.2" `
+            --app-version "0.2.3" `
             --vendor "Safety Ledger" `
             --input "package-input" `
-            --main-jar "safety-ledger-pc-0.2.2-all.jar" `
+            --main-jar "safety-ledger-pc-0.2.3-all.jar" `
             --main-class "cn.safetyledger.pc.SafetyLedgerDesktop" `
             --java-options "-Dfile.encoding=UTF-8" `
+            --java-options "-Djava.net.useSystemProxies=true" `
+            --java-options "-Dawt.useSystemAAFontSettings=lcd" `
+            --java-options "-Dswing.aatext=true" `
+            --java-options "-Dsun.java2d.d3d=false" `
+            --java-options "-Dsun.java2d.opengl=false" `
             --dest "dist"
 
           @'
-          安全检查台账 PC 0.2.2
+          安全检查台账 PC 0.2.3
 
           使用方法：
           1. 解压整个压缩包，不要只单独复制 exe。
-          2. 双击 SafetyLedgerPC.exe 运行，软件窗口标题为“安全检查台账 PC 0.2.2”。
-          3. 原 0.2.1 的配置和本地资料库不会因升级被删除。
+          2. 双击 SafetyLedgerPC.exe 运行，软件窗口标题为“安全检查台账 PC 0.2.3”。
+          3. 原版本的配置和电脑本地资料库不会因升级被删除。
 
-          0.2.2 主要更新：
-          - 删除首页左侧日历，检查记录区域全宽显示。
-          - 顶部仅保留“立即同步”和“设置”，资料库、数据工具、测试连接、同步日志均放入设置。
-          - 新增同步日志查看和导出；同步失败时可直接打开/导出日志。
-          - 云同步增加临时网络错误自动重试、分快照容错和更详细的诊断信息。
-          - 优化窗口顶部应用图标的清晰度。
-          '@ | Set-Content -Path "dist/SafetyLedgerPC/README-PC-0.2.2.txt" -Encoding UTF8
+          0.2.3 主要更新：
+          - 优化 Windows 字体、按钮和高 DPI 显示，降低界面发虚、按钮文字不清晰的问题。
+          - 左上角应用图标重新绘制，并提供多尺寸高清图标。
+          - 设置重构为“云同步 / 数据与资料 / 日志与诊断”。
+          - 云同步增加“保存设置”“测试连接”和自动检查间隔。
+          - 自动检查优先读取轻量更新信号；云端无变化时不下载完整检查数据。
+          - 测试连接显示 DNS、Windows 系统代理、HTTP/WebDAV 网络诊断日志。
+          - 新增软件崩溃日志，仅在未捕获异常时生成。
+          - 网络客户端启用 Windows 系统代理并固定 HTTP/1.1，改善 VPN/代理环境连接。
+          - 针对截图中的异常绘制问题关闭 Java2D D3D/OpenGL 加速并启用 LCD 字体抗锯齿。
+          '@ | Set-Content -Path "dist/SafetyLedgerPC/README-PC-0.2.3.txt" -Encoding UTF8
 
-          Compress-Archive -Path "dist/SafetyLedgerPC" -DestinationPath "安全检查台账-PC-0.2.2-Windows.zip" -Force
+          Compress-Archive -Path "dist/SafetyLedgerPC" -DestinationPath "安全检查台账-PC-0.2.3-Windows.zip" -Force
 
       - name: Upload Windows package
         uses: actions/upload-artifact@v4
         with:
-          name: 安全检查台账-PC-0.2.2-Windows
-          path: 安全检查台账-PC-0.2.2-Windows.zip
+          name: 安全检查台账-PC-0.2.3-Windows
+          path: 安全检查台账-PC-0.2.3-Windows.zip
           if-no-files-found: error
           retention-days: 30
 
       - name: Upload fat JAR
         uses: actions/upload-artifact@v4
         with:
-          name: 安全检查台账-PC-0.2.2-fat-jar
-          path: desktop/target/safety-ledger-pc-0.2.2-all.jar
+          name: 安全检查台账-PC-0.2.3-fat-jar
+          path: desktop/target/safety-ledger-pc-0.2.3-all.jar
           if-no-files-found: error
           retention-days: 30
