@@ -114,13 +114,19 @@ public final class LedgerActivity extends Activity {
         settings.setBackground(Ui.shape(this, Color.TRANSPARENT, 0x55ffffff, 20));
         settings.setContentDescription("基础设置");
         settings.setOnClickListener(view -> Ui.start(this, SettingsActivity.class));
-        Button form = Ui.secondaryButton(this, "检查填报");
+        Button form = Ui.secondaryButton(this, "填报");
+        form.setTextSize(14f);
+        form.setGravity(Gravity.CENTER);
+        form.setIncludeFontPadding(false);
+        form.setCompoundDrawablesWithIntrinsicBounds(R.drawable.ic_edit_fill, 0, 0, 0);
+        form.setCompoundDrawablePadding(Ui.dp(this, 4));
+        form.setPadding(Ui.dp(this, 8), 0, Ui.dp(this, 8), 0);
         form.setOnClickListener(view -> startActivity(new Intent(this, MainActivity.class)));
         bar.addView(title);
         bar.addView(Ui.horizontalGap(this, 2));
         bar.addView(settings, new LinearLayout.LayoutParams(Ui.dp(this, 32), Ui.dp(this, 32)));
         bar.addView(Ui.horizontalGap(this, 0), Ui.weight(1));
-        bar.addView(form, new LinearLayout.LayoutParams(Ui.dp(this, 102), Ui.dp(this, 44)));
+        bar.addView(form, new LinearLayout.LayoutParams(Ui.dp(this, 82), Ui.dp(this, 40)));
         return bar;
     }
 
@@ -193,7 +199,7 @@ public final class LedgerActivity extends Activity {
 
     private LinearLayout filterCard() {
         LinearLayout card = Ui.card(this);
-        card.setPadding(Ui.dp(this, 9), Ui.dp(this, 7), Ui.dp(this, 9), Ui.dp(this, 7));
+        card.setPadding(Ui.dp(this, 8), Ui.dp(this, 5), Ui.dp(this, 8), Ui.dp(this, 5));
         LinearLayout filters = Ui.row(this);
         TextView rangeLabel = Ui.text(this, "显示范围", 12, true);
         rangeLabel.setPadding(0, 0, Ui.dp(this, 2), 0);
@@ -204,12 +210,12 @@ public final class LedgerActivity extends Activity {
         range.setSelection(1);
         type = spinner(types());
         statusFilter = spinner(new String[]{"全部状态", "草稿", "待整改", "整改中", "已整改完成", "检查完成"});
-        filters.addView(rangeLabel, new LinearLayout.LayoutParams(Ui.dp(this, 64), Ui.dp(this, 42)));
-        filters.addView(range, new LinearLayout.LayoutParams(Ui.dp(this, 64), Ui.dp(this, 42)));
+        filters.addView(rangeLabel, new LinearLayout.LayoutParams(Ui.dp(this, 58), Ui.dp(this, 36)));
+        filters.addView(range, new LinearLayout.LayoutParams(Ui.dp(this, 54), Ui.dp(this, 36)));
         filters.addView(Ui.horizontalGap(this, 4));
-        filters.addView(type, new LinearLayout.LayoutParams(0, Ui.dp(this, 42), 1));
+        filters.addView(type, new LinearLayout.LayoutParams(0, Ui.dp(this, 36), 1));
         filters.addView(Ui.horizontalGap(this, 4));
-        filters.addView(statusFilter, new LinearLayout.LayoutParams(0, Ui.dp(this, 42), 1));
+        filters.addView(statusFilter, new LinearLayout.LayoutParams(0, Ui.dp(this, 36), 1));
         card.addView(filters);
         AdapterView.OnItemSelectedListener listener = new SimpleSelect() {
             @Override void selected() { selected.clear(); page = 1; load(); }
@@ -242,9 +248,9 @@ public final class LedgerActivity extends Activity {
             showRecords();
         });
         header.addView(title, Ui.weight(1));
-        header.addView(multiToggle, new LinearLayout.LayoutParams(Ui.dp(this, 88), Ui.dp(this, 42)));
+        header.addView(multiToggle, new LinearLayout.LayoutParams(Ui.dp(this, 78), Ui.dp(this, 36)));
         header.addView(Ui.horizontalGap(this, 6));
-        header.addView(pageSize, new LinearLayout.LayoutParams(Ui.dp(this, 126), Ui.dp(this, 42)));
+        header.addView(pageSize, new LinearLayout.LayoutParams(Ui.dp(this, 94), Ui.dp(this, 36)));
         card.addView(header);
         selectionActions = Ui.column(this);
         LinearLayout actions = Ui.row(this);
@@ -282,45 +288,52 @@ public final class LedgerActivity extends Activity {
     }
 
     private Spinner spinner(String[] values) {
-    Spinner spinner = new Spinner(this);
-    ArrayAdapter<String> adapter = spinnerAdapter(values);
-    spinner.setAdapter(adapter);
-    spinner.setGravity(Gravity.CENTER);
-    spinner.setBackground(Ui.gradientShape(this, Color.WHITE, Color.rgb(245, 248, 253), Color.rgb(190, 205, 228), 11));
-    spinner.setPadding(Ui.dp(this, 4), 0, Ui.dp(this, 4), 0);
-    spinner.setMinimumWidth(0);
-    Ui.applyFunctionalDepth(this, spinner);
-    return spinner;
-}
+        Spinner spinner = new Spinner(this);
+        ArrayAdapter<String> adapter = spinnerAdapter(values);
+        spinner.setAdapter(adapter);
+        spinner.setGravity(Gravity.CENTER);
+        spinner.setBackground(Ui.gradientShape(this, Color.WHITE, Color.rgb(248, 250, 253),
+                Color.rgb(195, 208, 228), 9));
+        spinner.setPadding(0, 0, 0, 0);
+        spinner.setMinimumWidth(0);
+        if (android.os.Build.VERSION.SDK_INT >= 21) spinner.setElevation(Ui.dp(this, 1));
+        return spinner;
+    }
 
     private ArrayAdapter<String> spinnerAdapter(String[] values) {
-    ArrayAdapter<String> adapter = new ArrayAdapter<>(this, android.R.layout.simple_spinner_item, values) {
-        @Override public View getView(int position, View convertView, ViewGroup parent) {
-            View view = super.getView(position, convertView, parent);
-            if (view instanceof TextView text) {
-                text.setTextSize(12.5f);
+        ArrayAdapter<String> adapter = new ArrayAdapter<>(this,
+                android.R.layout.simple_spinner_item, values) {
+            private TextView selectedText(int position, View convertView) {
+                TextView text = convertView instanceof TextView
+                        ? (TextView) convertView : new TextView(LedgerActivity.this);
+                text.setText(getItem(position));
+                text.setTextSize(12.2f);
                 text.setSingleLine(true);
                 text.setGravity(Gravity.CENTER);
                 text.setIncludeFontPadding(false);
                 text.setTextColor(Ui.TEXT);
-                text.setPadding(Ui.dp(LedgerActivity.this, 2), 0, Ui.dp(LedgerActivity.this, 2), 0);
+                text.setPadding(0, 0, 0, 0);
+                return text;
             }
-            return view;
-        }
-        @Override public View getDropDownView(int position, View convertView, ViewGroup parent) {
-            View view = super.getDropDownView(position, convertView, parent);
-            if (view instanceof TextView text) {
+
+            @Override public View getView(int position, View convertView, ViewGroup parent) {
+                return selectedText(position, convertView);
+            }
+
+            @Override public View getDropDownView(int position, View convertView, ViewGroup parent) {
+                TextView text = convertView instanceof TextView
+                        ? (TextView) convertView : new TextView(LedgerActivity.this);
+                text.setText(getItem(position));
                 text.setTextSize(14f);
                 text.setTextColor(Ui.TEXT);
                 text.setGravity(Gravity.CENTER_VERTICAL);
-                text.setPadding(Ui.dp(LedgerActivity.this, 16), Ui.dp(LedgerActivity.this, 10), Ui.dp(LedgerActivity.this, 16), Ui.dp(LedgerActivity.this, 10));
+                text.setPadding(Ui.dp(LedgerActivity.this, 16), Ui.dp(LedgerActivity.this, 10),
+                        Ui.dp(LedgerActivity.this, 16), Ui.dp(LedgerActivity.this, 10));
+                return text;
             }
-            return view;
-        }
-    };
-    adapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
-    return adapter;
-}
+        };
+        return adapter;
+    }
 
     private String[] types() {
         List<Template> templates = repo.templates(true);
@@ -364,7 +377,7 @@ public final class LedgerActivity extends Activity {
             heading.setIncludeFontPadding(false);
             heading.setPadding(0, 0, 0, 0);
             heading.setGravity(Gravity.CENTER);
-            grid.addView(heading, cellParams(26));
+            grid.addView(heading, cellParams(22));
         }
 
         Set<String> marked = repo.markedDates(month.toString());
@@ -403,7 +416,7 @@ public final class LedgerActivity extends Activity {
                 }
             }
 
-            TextView cell = Ui.text(this, label.toString(), 12, true);
+            TextView cell = Ui.text(this, label.toString(), 11, true);
             cell.setText(label);
             cell.setLineSpacing(0, .80f);
             cell.setPadding(0, 0, 0, 0);
@@ -426,57 +439,89 @@ public final class LedgerActivity extends Activity {
                 syncCalendar();
                 load();
             });
-            grid.addView(cell, cellParams(31));
+            grid.addView(cell, cellParams(27));
         }
         left.addView(grid);
         TextView legend = Ui.text(this, "★ 有检查记录   班 调休上班   休 休息日/法定节假日", 9, false);
         legend.setPadding(0, 0, 0, 0);
         legend.setTextColor(Ui.MUTED);
         legend.setGravity(Gravity.CENTER);
-        left.addView(legend, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, Ui.dp(this, 21)));
+        left.addView(legend, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, Ui.dp(this, 19)));
 
         calendarBox.addView(left, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1));
         calendarBox.addView(Ui.horizontalGap(this, 3));
-        calendarBox.addView(monthProgressPanel(marked), new LinearLayout.LayoutParams(Ui.dp(this, 76), ViewGroup.LayoutParams.MATCH_PARENT));
+        calendarBox.addView(monthProgressPanel(), new LinearLayout.LayoutParams(Ui.dp(this, 116), ViewGroup.LayoutParams.MATCH_PARENT));
     }
 
-    private LinearLayout monthProgressPanel(Set<String> marked) {
+    private LinearLayout monthProgressPanel() {
         LinearLayout panel = Ui.column(this);
         panel.setGravity(Gravity.CENTER_HORIZONTAL);
-        panel.setPadding(Ui.dp(this, 3), Ui.dp(this, 6), Ui.dp(this, 3), Ui.dp(this, 6));
-        panel.setBackground(Ui.shape(this, Color.WHITE, Ui.LINE, 12));
-        TextView title = Ui.text(this, "本月检查\n进度", 10, true);
+        panel.setPadding(Ui.dp(this, 5), Ui.dp(this, 5), Ui.dp(this, 5), Ui.dp(this, 5));
+        panel.setBackground(Ui.shape(this, Color.WHITE, Ui.LINE, 11));
+
+        TextView title = Ui.text(this, "本月检查进度", 9, true);
         title.setPadding(0, 0, 0, 0);
         title.setGravity(Gravity.CENTER);
-        panel.addView(title);
-        addProgressSpacer(panel);
+        title.setSingleLine(true);
+        panel.addView(title, new LinearLayout.LayoutParams(-1, Ui.dp(this, 20)));
 
-        int planned = 4;
-        Set<Integer> completedWeeks = new HashSet<>();
-        for (String date : marked) {
-            try {
-                LocalDate parsed = LocalDate.parse(date);
-                if (YearMonth.from(parsed).equals(month)) completedWeeks.add((parsed.getDayOfMonth() - 1) / 7);
-            } catch (Exception ignored) {}
+        List<InspectionPlan.Entry> entries = InspectionPlan.entries(repo, month);
+        int planned = 0;
+        int completed = 0;
+        for (InspectionPlan.Entry entry : entries) {
+            planned += Math.max(0, entry.planned);
+            completed += Math.max(0, entry.completed);
         }
-        int completed = Math.min(planned, completedWeeks.size());
-        int percent = planned == 0 ? 0 : Math.round(completed * 100f / planned);
-        panel.addView(progressMetric("计划次数", planned + "次", Ui.BLUE));
-        addProgressSpacer(panel);
-        panel.addView(progressMetric("已完成", completed + "次", Color.rgb(38, 177, 91)));
-        addProgressSpacer(panel);
-        TextView rateLabel = Ui.text(this, "完成率", 9, true);
-        rateLabel.setPadding(0, 0, 0, 0);
-        rateLabel.setGravity(Gravity.CENTER);
-        panel.addView(rateLabel);
-        panel.addView(Ui.gap(this, 2));
+        int percent = planned <= 0 ? 0 : Math.round(completed * 100f / planned);
+
+        TextView summary = Ui.text(this, completed + "/" + planned + " 次", 12, true);
+        summary.setPadding(0, 0, 0, 0);
+        summary.setGravity(Gravity.CENTER);
+        summary.setTextColor(Ui.BLUE_DARK);
+        panel.addView(summary, new LinearLayout.LayoutParams(-1, Ui.dp(this, 22)));
+
         DonutProgressView rate = new DonutProgressView(this);
         rate.setProgress(percent);
-        LinearLayout.LayoutParams donutParams = new LinearLayout.LayoutParams(Ui.dp(this, 62), Ui.dp(this, 62));
+        LinearLayout.LayoutParams donutParams =
+                new LinearLayout.LayoutParams(Ui.dp(this, 50), Ui.dp(this, 50));
         donutParams.gravity = Gravity.CENTER_HORIZONTAL;
         panel.addView(rate, donutParams);
-        addProgressSpacer(panel);
+        panel.addView(Ui.gap(this, 4));
+        panel.addView(Ui.divider(this));
+        panel.addView(Ui.gap(this, 3));
+
+        int shown = 0;
+        for (InspectionPlan.Entry entry : entries) {
+            if (shown >= 3) break;
+            LinearLayout row = Ui.row(this);
+            TextView name = Ui.text(this, compactProgressName(entry.name), 8, false);
+            name.setPadding(0, 0, Ui.dp(this, 2), 0);
+            name.setSingleLine(true);
+            name.setTextColor(Ui.MUTED);
+            TextView count = Ui.text(this, entry.completed + "/" + entry.planned, 9, true);
+            count.setPadding(0, 0, 0, 0);
+            count.setGravity(Gravity.CENTER);
+            count.setTextColor(entry.completed >= entry.planned && entry.planned > 0
+                    ? Color.rgb(38, 177, 91) : Ui.BLUE_DARK);
+            row.addView(name, new LinearLayout.LayoutParams(0, Ui.dp(this, 24), 1));
+            row.addView(count, new LinearLayout.LayoutParams(Ui.dp(this, 34), Ui.dp(this, 24)));
+            panel.addView(row);
+            shown++;
+        }
+        if (entries.size() > shown) {
+            TextView more = Ui.text(this, "另有 " + (entries.size() - shown) + " 项", 8, false);
+            more.setTextColor(Ui.MUTED);
+            more.setGravity(Gravity.CENTER);
+            more.setPadding(0, 0, 0, 0);
+            panel.addView(more, new LinearLayout.LayoutParams(-1, Ui.dp(this, 18)));
+        }
         return panel;
+    }
+
+    private String compactProgressName(String name) {
+        if (name == null || name.isBlank()) return "未命名";
+        String value = name.replace("检查", "").replace("记录表", "").trim();
+        return value.length() > 6 ? value.substring(0, 6) + "…" : value;
     }
 
     private void addProgressSpacer(LinearLayout panel) {

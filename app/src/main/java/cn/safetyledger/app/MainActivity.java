@@ -104,7 +104,7 @@ public class MainActivity extends Activity {
         topTitle.setTextColor(Color.WHITE);
         Button topSave = Ui.secondaryButton(this, "保存");
         topSave.setOnClickListener(view -> save());
-        bar.addView(back, new LinearLayout.LayoutParams(Ui.dp(this, 40), Ui.dp(this, 40)));
+        bar.addView(back, new LinearLayout.LayoutParams(Ui.dp(this, 34), Ui.dp(this, 34)));
         bar.addView(topTitle, Ui.weight(1));
         bar.addView(topSave, new LinearLayout.LayoutParams(Ui.dp(this, 76), Ui.dp(this, 46)));
         root.addView(bar);

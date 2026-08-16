@@ -238,22 +238,28 @@ public static void applyFunctionalDepth(Context context, View view) {
     view.setStateListAnimator(animator);
 }
 
-    /** One common back control for Settings, Templates, Trash, details and other sub-pages. */
-public static TextView backButton(Activity activity) {
-    TextView back = new TextView(activity);
-    back.setText("");
-    back.setGravity(Gravity.CENTER);
-    back.setPadding(0, 0, 0, 0);
-    back.setIncludeFontPadding(false);
-    back.setCompoundDrawablesWithIntrinsicBounds(R.drawable.ic_back, 0, 0, 0);
-    back.setBackground(gradientShape(activity, Color.WHITE, Color.rgb(243, 247, 253), Color.rgb(176, 197, 226), 12));
-    applyFunctionalDepth(activity, back);
-    back.setClickable(true);
-    back.setFocusable(true);
-    back.setContentDescription("返回");
-    back.setOnClickListener(view -> activity.finish());
-    return back;
-}
+    /** One common compact back control for Settings, Templates, Trash and details. */
+    public static TextView backButton(Activity activity) {
+        TextView back = new TextView(activity);
+        back.setText("");
+        back.setGravity(Gravity.CENTER);
+        back.setPadding(0, 0, 0, 0);
+        back.setIncludeFontPadding(false);
+        android.graphics.drawable.Drawable icon = activity.getDrawable(R.drawable.ic_back_compact);
+        if (icon != null) {
+            int size = dp(activity, 20);
+            icon.setBounds(0, 0, size, size);
+            back.setCompoundDrawables(icon, null, null, null);
+        }
+        back.setBackground(gradientShape(activity, Color.WHITE, Color.rgb(246, 249, 253),
+                Color.rgb(181, 199, 224), 10));
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) back.setElevation(dp(activity, 2));
+        back.setClickable(true);
+        back.setFocusable(true);
+        back.setContentDescription("返回");
+        back.setOnClickListener(view -> activity.finish());
+        return back;
+    }
 
     public static TextView titleBar(Activity activity, String title) {
         LinearLayout bar = row(activity);
@@ -262,7 +268,7 @@ public static TextView backButton(Activity activity) {
         TextView back = backButton(activity);
         TextView text = text(activity, title, 21, true);
         text.setTextColor(Color.WHITE);
-        bar.addView(back, new LinearLayout.LayoutParams(dp(activity, 40), dp(activity, 40)));
+        bar.addView(back, new LinearLayout.LayoutParams(dp(activity, 34), dp(activity, 34)));
         bar.addView(horizontalGap(activity, 8));
         bar.addView(text, weight(1));
         activity.setContentView(bar);
@@ -276,7 +282,7 @@ public static TextView backButton(Activity activity) {
         TextView back = backButton(activity);
         TextView text = text(activity, title, 20, true);
         text.setTextColor(Color.WHITE);
-        bar.addView(back, new LinearLayout.LayoutParams(dp(activity, 40), dp(activity, 40)));
+        bar.addView(back, new LinearLayout.LayoutParams(dp(activity, 34), dp(activity, 34)));
         bar.addView(horizontalGap(activity, 8));
         bar.addView(text, weight(1));
         return bar;

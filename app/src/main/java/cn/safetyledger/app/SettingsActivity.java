@@ -86,6 +86,8 @@ public final class SettingsActivity extends Activity {
         content.setPadding(Ui.dp(this, 12), Ui.dp(this, 10), Ui.dp(this, 12), Ui.dp(this, 26));
         content.addView(managementCard());
         content.addView(Ui.gap(this, 10));
+        content.addView(monthlyPlanCard());
+        content.addView(Ui.gap(this, 10));
         content.addView(backupCard());
         content.addView(Ui.gap(this, 10));
         content.addView(deviceCard());
@@ -117,9 +119,79 @@ public final class SettingsActivity extends Activity {
         return card;
     }
 
+    private LinearLayout monthlyPlanCard() {
+        LinearLayout card = Ui.card(this);
+        card.addView(Ui.sectionTitle(this, "2", "每月检查计划",
+                "按检查项目设置月度目标，具体检查日期不限"));
+        TextView note = Ui.text(this,
+                "按“自然周”统计：同一检查项目在同一周完成多次，只计 1 次；具体哪一天检查不限制。通常每周检查一次可设置为 4 次/月，如当月工作安排需要 5 次可直接改为 5。草稿不计入完成进度。",
+                12, false);
+        note.setTextColor(Ui.MUTED);
+        card.addView(note);
+        card.addView(Ui.gap(this, 5));
+
+        List<cn.safetyledger.app.data.Entities.Template> templates = repo.templates(true);
+        List<EditText> inputs = new ArrayList<>();
+        if (templates.isEmpty()) {
+            TextView empty = Ui.text(this,
+                    "当前没有启用的检查模板，请先在“检查模板管理”中启用模板。",
+                    13, false);
+            empty.setTextColor(Ui.MUTED);
+            card.addView(empty);
+            return card;
+        }
+
+        for (cn.safetyledger.app.data.Entities.Template template : templates) {
+            LinearLayout row = Ui.row(this);
+            TextView name = Ui.text(this,
+                    template.name == null || template.name.isBlank()
+                            ? template.category : template.name,
+                    14, true);
+            name.setPadding(0, 0, Ui.dp(this, 6), 0);
+            EditText target = Ui.input(this, "4");
+            target.setSingleLine(true);
+            target.setGravity(Gravity.CENTER);
+            target.setIncludeFontPadding(false);
+            target.setInputType(InputType.TYPE_CLASS_NUMBER);
+            target.setText(String.valueOf(InspectionPlan.target(repo, template.id)));
+            target.setSelectAllOnFocus(true);
+            TextView unit = Ui.text(this, "次/月", 12, false);
+            unit.setPadding(Ui.dp(this, 4), 0, 0, 0);
+            unit.setTextColor(Ui.MUTED);
+            row.addView(name, Ui.weight(1));
+            row.addView(target,
+                    new LinearLayout.LayoutParams(Ui.dp(this, 58), Ui.dp(this, 40)));
+            row.addView(unit,
+                    new LinearLayout.LayoutParams(Ui.dp(this, 45), Ui.dp(this, 40)));
+            card.addView(row);
+            card.addView(Ui.gap(this, 4));
+            inputs.add(target);
+        }
+
+        Button save = Ui.button(this, "保存检查计划");
+        save.setTextSize(14f);
+        save.setOnClickListener(view -> {
+            for (int i = 0; i < templates.size(); i++) {
+                int value;
+                try {
+                    value = Integer.parseInt(inputs.get(i).getText().toString().trim());
+                } catch (Exception ignored) {
+                    value = InspectionPlan.DEFAULT_MONTHLY_TARGET;
+                }
+                value = Math.max(0, Math.min(31, value));
+                InspectionPlan.saveTarget(repo, templates.get(i).id, value);
+                inputs.get(i).setText(String.valueOf(value));
+            }
+            Ui.toast(this, "每月检查计划已保存；首页进度会按检查项目和自然周分别统计");
+        });
+        card.addView(Ui.gap(this, 3));
+        card.addView(save, new LinearLayout.LayoutParams(-1, Ui.dp(this, 44)));
+        return card;
+    }
+
     private LinearLayout backupCard() {
         LinearLayout card = Ui.card(this);
-        card.addView(Ui.sectionTitle(this, "2", "APP 数据备份与恢复", "类似手机系统备份，可离线复制到另一设备"));
+        card.addView(Ui.sectionTitle(this, "3", "APP 数据备份与恢复", "类似手机系统备份，可离线复制到另一设备"));
         TextView note = Ui.text(this,
                 "备份文件为 .safetydata，包含模板、记录、照片、签名和整改状态。无需另设密码，可直接复制到另一台手机或电脑后导入；文件仍带有 AES-256-GCM 完整性保护。PDF 不能作为数据备份导入。",
                 13, false);
@@ -152,7 +224,7 @@ public final class SettingsActivity extends Activity {
 
     private LinearLayout deviceCard() {
         LinearLayout card = Ui.card(this);
-        card.addView(Ui.sectionTitle(this, "3", "设备管理", "设备信息同步与检查内容同步相互独立"));
+        card.addView(Ui.sectionTitle(this, "4", "设备管理", "设备信息同步与检查内容同步相互独立"));
         deviceName = Ui.input(this, "设备名称，例如：管理员手机");
         deviceName.setSingleLine(true);
         deviceName.setText(repo.setting("device_name", Build.MANUFACTURER + " " + Build.MODEL));
@@ -192,7 +264,7 @@ public final class SettingsActivity extends Activity {
 
     private LinearLayout cloudCard() {
         LinearLayout card = Ui.card(this);
-        card.addView(Ui.sectionTitle(this, "4", "检查内容同步", "仅同步模板、检查记录、照片、签名和整改内容"));
+        card.addView(Ui.sectionTitle(this, "5", "检查内容同步", "仅同步模板、检查记录、照片、签名和整改内容"));
         provider = spinner(new String[]{"Cloudflare", "WebDAV / NAS"});
         endpoint = Ui.input(this, "Cloudflare Worker / WebDAV 服务地址");
         space = Ui.input(this, "同步空间名称");
@@ -280,7 +352,7 @@ public final class SettingsActivity extends Activity {
 
     private LinearLayout securityCard() {
         LinearLayout card = Ui.card(this);
-        card.addView(Ui.sectionTitle(this, "5", "安全与本地存储", null));
+        card.addView(Ui.sectionTitle(this, "6", "安全与本地存储", null));
         TextView deletion = Ui.text(this,
                 "永久删除不再设置额外的本机密码。启用云同步后，从回收站永久删除时统一验证“云同步空间密码”；云端回收站保留 30 天，管理员可在期限内恢复。",
                 13, false);
