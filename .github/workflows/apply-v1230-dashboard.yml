@@ -29,7 +29,8 @@ jobs:
           set -euo pipefail
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add app .github/workflows/android-build.yml
+          # Commit only application source. Workflow artifact naming is updated separately.
+          git add app
           if git diff --cached --quiet; then
             echo "No source changes to commit."
             exit 0
