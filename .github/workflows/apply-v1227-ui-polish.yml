@@ -1,0 +1,306 @@
+name: Apply 1.2.27 UI Polish
+
+on:
+  push:
+    branches:
+      - 'agent/v1226-ui-sync-smoothing'
+    paths:
+      - '.github/workflows/apply-v1227-ui-polish.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/v1226-ui-sync-smoothing
+          fetch-depth: 0
+      - name: Polish alignment and functional controls
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+
+          ui = Path('app/src/main/java/cn/safetyledger/app/Ui.java')
+          s = ui.read_text(encoding='utf-8')
+          if 'import android.animation.ObjectAnimator;' not in s:
+              s = s.replace('import android.app.Activity;\n', 'import android.animation.ObjectAnimator;\nimport android.animation.StateListAnimator;\nimport android.app.Activity;\n')
+
+          old = '''    public static Button button(Context context, String label) {
+              Button button = new Button(context);
+              button.setText(label);
+              button.setTextSize(15);
+              button.setTextColor(Color.WHITE);
+              button.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
+              button.setAllCaps(false);
+              button.setPadding(dp(context, 12), 0, dp(context, 12), 0);
+              button.setBackground(shape(context, BLUE, BLUE, 10));
+              button.setMinHeight(dp(context, 46));
+              button.setMinimumWidth(0);
+              button.setStateListAnimator(null);
+              return button;
+          }
+          '''
+          new = '''    public static Button button(Context context, String label) {
+              Button button = new Button(context);
+              button.setText(label);
+              button.setTextSize(15);
+              button.setTextColor(Color.WHITE);
+              button.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
+              button.setAllCaps(false);
+              button.setGravity(Gravity.CENTER);
+              button.setIncludeFontPadding(false);
+              button.setPadding(dp(context, 12), 0, dp(context, 12), 0);
+              button.setBackground(gradientShape(context, Color.rgb(55, 113, 231), BLUE, BLUE_DARK, 11));
+              button.setMinHeight(dp(context, 46));
+              button.setMinimumWidth(0);
+              applyFunctionalDepth(context, button);
+              return button;
+          }
+          '''
+          if old not in s:
+              raise SystemExit('button() source shape changed')
+          s = s.replace(old, new)
+
+          s = s.replace('''        button.setTextColor(BLUE_DARK);
+                  button.setBackground(shape(context, Color.WHITE, Color.rgb(190, 207, 233), 10));
+          ''', '''        button.setTextColor(BLUE_DARK);
+                  button.setBackground(gradientShape(context, Color.WHITE, Color.rgb(244, 247, 252),
+                          Color.rgb(181, 199, 226), 11));
+          ''')
+          s = s.replace('''        button.setTextColor(DANGER);
+                  button.setBackground(shape(context, Color.WHITE, Color.rgb(244, 190, 190), 9));
+          ''', '''        button.setTextColor(DANGER);
+                  button.setBackground(gradientShape(context, Color.WHITE, Color.rgb(255, 246, 246),
+                          Color.rgb(235, 174, 177), 10));
+          ''')
+          s = s.replace('''        button.setTextColor(selected ? Color.WHITE : TEXT);
+                  button.setBackground(shape(context, selected ? BLUE : Color.WHITE,
+                          selected ? BLUE : LINE, 8));
+          ''', '''        button.setTextColor(selected ? Color.WHITE : TEXT);
+                  button.setBackground(selected
+                          ? gradientShape(context, Color.rgb(55, 113, 231), BLUE, BLUE_DARK, 9)
+                          : gradientShape(context, Color.WHITE, Color.rgb(244, 247, 252), LINE, 9));
+                  applyFunctionalDepth(context, button);
+          ''')
+
+          marker = '''    /** One common back control for Settings, Templates, Trash, details and other sub-pages. */
+          '''
+          helpers = '''    public static GradientDrawable gradientShape(Context context, int top, int bottom,
+                                                       int stroke, int radius) {
+              GradientDrawable drawable = new GradientDrawable(
+                      GradientDrawable.Orientation.TOP_BOTTOM, new int[]{top, bottom});
+              if (stroke != Color.TRANSPARENT) drawable.setStroke(dp(context, 1), stroke);
+              drawable.setCornerRadius(dp(context, radius));
+              return drawable;
+          }
+
+              /** Adds a restrained shadow and press-depth response to functional controls. */
+              public static void applyFunctionalDepth(Context context, View view) {
+                  if (Build.VERSION.SDK_INT < Build.VERSION_CODES.LOLLIPOP) return;
+                  view.setElevation(dp(context, 2));
+                  StateListAnimator animator = new StateListAnimator();
+                  ObjectAnimator pressed = ObjectAnimator.ofFloat(view, "translationZ", 0f);
+                  pressed.setDuration(70);
+                  ObjectAnimator normal = ObjectAnimator.ofFloat(view, "translationZ", dp(context, 2));
+                  normal.setDuration(120);
+                  animator.addState(new int[]{android.R.attr.state_pressed}, pressed);
+                  animator.addState(new int[]{}, normal);
+                  view.setStateListAnimator(animator);
+              }
+
+          '''
+          if 'public static GradientDrawable gradientShape' not in s:
+              s = s.replace(marker, helpers + marker)
+
+          back_pattern = re.compile(r'''    /\*\* One common back control for Settings, Templates, Trash, details and other sub-pages\. \*/\n    public static TextView backButton\(Activity activity\) \{.*?\n    \}\n''', re.S)
+          back_new = '''    /** One common back control for Settings, Templates, Trash, details and other sub-pages. */
+              public static TextView backButton(Activity activity) {
+                  TextView back = new TextView(activity);
+                  back.setText("");
+                  back.setGravity(Gravity.CENTER);
+                  back.setPadding(0, 0, 0, 0);
+                  back.setIncludeFontPadding(false);
+                  back.setCompoundDrawablesWithIntrinsicBounds(R.drawable.ic_back, 0, 0, 0);
+                  back.setBackground(gradientShape(activity, Color.WHITE, Color.rgb(243, 247, 253),
+                          Color.rgb(176, 197, 226), 12));
+                  applyFunctionalDepth(activity, back);
+                  back.setClickable(true);
+                  back.setFocusable(true);
+                  back.setContentDescription("返回");
+                  back.setOnClickListener(view -> activity.finish());
+                  return back;
+              }
+          '''
+          s2, n = back_pattern.subn(back_new, s, count=1)
+          if n != 1:
+              raise SystemExit('backButton() source shape changed')
+          ui.write_text(s2, encoding='utf-8')
+
+          ledger = Path('app/src/main/java/cn/safetyledger/app/LedgerActivity.java')
+          s = ledger.read_text(encoding='utf-8')
+          s = s.replace('''        reset.setMinHeight(Ui.dp(this, 38));
+                  reset.setTextSize(11.5f);
+                  reset.setSingleLine(true);
+                  reset.setPadding(Ui.dp(this, 5), 0, Ui.dp(this, 5), 0);
+          ''', '''        reset.setMinHeight(Ui.dp(this, 42));
+                  reset.setTextSize(12f);
+                  reset.setSingleLine(true);
+                  reset.setGravity(Gravity.CENTER);
+                  reset.setIncludeFontPadding(false);
+                  reset.setPadding(Ui.dp(this, 6), 0, Ui.dp(this, 6), 0);
+          ''')
+          s = s.replace('''        dateNavigation.addView(previous, new LinearLayout.LayoutParams(Ui.dp(this, 40), Ui.dp(this, 40)));
+                  dateNavigation.addView(todayTitle, Ui.weight(1));
+                  dateNavigation.addView(next, new LinearLayout.LayoutParams(Ui.dp(this, 40), Ui.dp(this, 40)));
+                  dateNavigation.addView(Ui.horizontalGap(this, 5));
+                  dateNavigation.addView(reset, new LinearLayout.LayoutParams(Ui.dp(this, 90), Ui.dp(this, 40)));
+          ''', '''        dateNavigation.addView(previous, new LinearLayout.LayoutParams(Ui.dp(this, 42), Ui.dp(this, 42)));
+                  dateNavigation.addView(todayTitle, Ui.weight(1));
+                  dateNavigation.addView(next, new LinearLayout.LayoutParams(Ui.dp(this, 42), Ui.dp(this, 42)));
+                  dateNavigation.addView(Ui.horizontalGap(this, 6));
+                  dateNavigation.addView(reset, new LinearLayout.LayoutParams(Ui.dp(this, 92), Ui.dp(this, 42)));
+          ''')
+          s = s.replace('''        rangeLabel.setPadding(0, 0, Ui.dp(this, 2), 0);
+                  rangeLabel.setSingleLine(true);
+          ''', '''        rangeLabel.setPadding(0, 0, Ui.dp(this, 2), 0);
+                  rangeLabel.setSingleLine(true);
+                  rangeLabel.setGravity(Gravity.CENTER);
+                  rangeLabel.setIncludeFontPadding(false);
+          ''')
+          s = s.replace('''        filters.addView(rangeLabel, new LinearLayout.LayoutParams(Ui.dp(this, 64), Ui.dp(this, 40)));
+                  filters.addView(range, new LinearLayout.LayoutParams(Ui.dp(this, 58), Ui.dp(this, 40)));
+                  filters.addView(Ui.horizontalGap(this, 3));
+                  filters.addView(type, new LinearLayout.LayoutParams(0, Ui.dp(this, 40), 1));
+                  filters.addView(Ui.horizontalGap(this, 3));
+                  filters.addView(statusFilter, new LinearLayout.LayoutParams(0, Ui.dp(this, 40), 1));
+          ''', '''        filters.addView(rangeLabel, new LinearLayout.LayoutParams(Ui.dp(this, 64), Ui.dp(this, 42)));
+                  filters.addView(range, new LinearLayout.LayoutParams(Ui.dp(this, 64), Ui.dp(this, 42)));
+                  filters.addView(Ui.horizontalGap(this, 4));
+                  filters.addView(type, new LinearLayout.LayoutParams(0, Ui.dp(this, 42), 1));
+                  filters.addView(Ui.horizontalGap(this, 4));
+                  filters.addView(statusFilter, new LinearLayout.LayoutParams(0, Ui.dp(this, 42), 1));
+          ''')
+          s = s.replace('''        header.addView(multiToggle, new LinearLayout.LayoutParams(Ui.dp(this, 84), Ui.dp(this, 38)));
+                  header.addView(Ui.horizontalGap(this, 5));
+                  header.addView(pageSize, new LinearLayout.LayoutParams(Ui.dp(this, 134), Ui.dp(this, 40)));
+          ''', '''        header.addView(multiToggle, new LinearLayout.LayoutParams(Ui.dp(this, 88), Ui.dp(this, 42)));
+                  header.addView(Ui.horizontalGap(this, 6));
+                  header.addView(pageSize, new LinearLayout.LayoutParams(Ui.dp(this, 126), Ui.dp(this, 42)));
+          ''')
+
+          spinner_old = '''    private Spinner spinner(String[] values) {
+              Spinner spinner = new Spinner(this);
+              ArrayAdapter<String> adapter = spinnerAdapter(values);
+              spinner.setAdapter(adapter);
+              spinner.setBackground(Ui.shape(this, Color.WHITE, Ui.LINE, 10));
+              spinner.setPadding(Ui.dp(this, 5), 0, Ui.dp(this, 5), 0);
+              spinner.setMinimumWidth(0);
+              return spinner;
+          }
+          '''
+          spinner_new = '''    private Spinner spinner(String[] values) {
+              Spinner spinner = new Spinner(this);
+              ArrayAdapter<String> adapter = spinnerAdapter(values);
+              spinner.setAdapter(adapter);
+              spinner.setGravity(Gravity.CENTER);
+              spinner.setBackground(Ui.gradientShape(this, Color.WHITE, Color.rgb(245, 248, 253),
+                      Color.rgb(190, 205, 228), 11));
+              spinner.setPadding(Ui.dp(this, 4), 0, Ui.dp(this, 4), 0);
+              spinner.setMinimumWidth(0);
+              Ui.applyFunctionalDepth(this, spinner);
+              return spinner;
+          }
+          '''
+          if spinner_old not in s:
+              raise SystemExit('spinner() source shape changed')
+          s = s.replace(spinner_old, spinner_new)
+
+          adapter_old = '''                if (view instanceof TextView text) {
+                      text.setTextSize(12.5f);
+                      text.setSingleLine(true);
+                      text.setPadding(Ui.dp(LedgerActivity.this, 4), 0,
+                              Ui.dp(LedgerActivity.this, 2), 0);
+                  }
+                  return view;
+              }
+          };
+          adapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
+          return adapter;
+          '''
+          adapter_new = '''                if (view instanceof TextView text) {
+                      text.setTextSize(12.5f);
+                      text.setSingleLine(true);
+                      text.setGravity(Gravity.CENTER);
+                      text.setIncludeFontPadding(false);
+                      text.setTextColor(Ui.TEXT);
+                      text.setPadding(Ui.dp(LedgerActivity.this, 2), 0,
+                              Ui.dp(LedgerActivity.this, 2), 0);
+                  }
+                  return view;
+              }
+
+              @Override public View getDropDownView(int position, View convertView, ViewGroup parent) {
+                  View view = super.getDropDownView(position, convertView, parent);
+                  if (view instanceof TextView text) {
+                      text.setTextSize(14f);
+                      text.setTextColor(Ui.TEXT);
+                      text.setGravity(Gravity.CENTER_VERTICAL);
+                      text.setPadding(Ui.dp(LedgerActivity.this, 16), Ui.dp(LedgerActivity.this, 10),
+                              Ui.dp(LedgerActivity.this, 16), Ui.dp(LedgerActivity.this, 10));
+                  }
+                  return view;
+              }
+          };
+          adapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
+          return adapter;
+          '''
+          if adapter_old not in s:
+              raise SystemExit('spinnerAdapter source shape changed')
+          s = s.replace(adapter_old, adapter_new)
+          ledger.write_text(s, encoding='utf-8')
+
+          Path('app/src/main/res/drawable/ic_back.xml').write_text('''<?xml version="1.0" encoding="utf-8"?>
+          <vector xmlns:android="http://schemas.android.com/apk/res/android"
+              android:width="24dp"
+              android:height="24dp"
+              android:viewportWidth="24"
+              android:viewportHeight="24">
+              <path
+                  android:fillColor="#154BB7"
+                  android:pathData="M15.41,7.41L14,6l-6,6 6,6 1.41,-1.41L10.83,12z" />
+          </vector>
+          ''', encoding='utf-8')
+
+          gradle = Path('app/build.gradle')
+          g = gradle.read_text(encoding='utf-8')
+          g = g.replace("versionCode 29", "versionCode 30")
+          g = g.replace("versionName '1.2.26'", "versionName '1.2.27'")
+          gradle.write_text(g, encoding='utf-8')
+
+          for name in ['.github/workflows/android-build.yml', '.github/workflows/android-release.yml']:
+              p = Path(name)
+              if p.exists():
+                  t = p.read_text(encoding='utf-8').replace('1.2.26', '1.2.27')
+                  p.write_text(t, encoding='utf-8')
+
+          Path('app/VERSION_1.2.27.txt').write_text('''安全检查台账 Android 1.2.27\n- 返回箭头改为矢量图标，在白色按钮框内严格水平/垂直居中\n- 返回按钮增加渐变、高程阴影和按压反馈，提升立体感\n- 全局主要功能按钮统一居中文字、渐变和立体按压效果\n- “回到今天”、筛选下拉框、每页条数等控制统一高度与对齐\n- 首页筛选和每页条数的选中文字改为水平/垂直居中\n- 不改检查、同步、备份、导出等业务逻辑\n''', encoding='utf-8')
+          PY
+      - name: Commit UI polish
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add app .github/workflows/android-build.yml .github/workflows/android-release.yml
+          if git diff --cached --quiet; then
+            echo 'Already applied.'
+            exit 0
+          fi
+          git commit -m 'Polish Android 1.2.27 UI alignment and depth'
+          git push origin HEAD:agent/v1226-ui-sync-smoothing
