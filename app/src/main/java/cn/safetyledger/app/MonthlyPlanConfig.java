@@ -17,14 +17,7 @@ import java.util.Locale;
 import java.util.Set;
 import java.util.UUID;
 
-/**
- * User-managed monthly inspection plan and dashboard statistics.
- *
- * Plan names are entirely user-defined. Monthly target counts are independent from the
- * natural-week missed-inspection warning: the warning simply checks whether an already
- * completed Monday-Sunday week owned by the displayed month contained at least one formal
- * inspection matching any configured plan item.
- */
+/** User-managed monthly inspection plan and compact dashboard statistics. */
 public final class MonthlyPlanConfig {
     public static final String SETTING_KEY = "monthly_plan_items_v2";
     public static final int MAX_TARGET = 999;
@@ -52,10 +45,17 @@ public final class MonthlyPlanConfig {
     public static final class Result {
         public final Item item;
         public final int actual;
+        /** The immediately previous natural week owned by the displayed month had no matching record. */
+        public final boolean lastCompletedWeekMissed;
+        /** The current natural week owned by the displayed month already has a matching record. */
+        public final boolean currentWeekHasInspection;
 
-        Result(Item item, int actual) {
+        Result(Item item, int actual, boolean lastCompletedWeekMissed,
+               boolean currentWeekHasInspection) {
             this.item = item;
             this.actual = actual;
+            this.lastCompletedWeekMissed = lastCompletedWeekMissed;
+            this.currentWeekHasInspection = currentWeekHasInspection;
         }
 
         public int percent() {
@@ -65,6 +65,11 @@ public final class MonthlyPlanConfig {
 
         public boolean reached() {
             return item.target > 0 && actual >= item.target;
+        }
+
+        /** A green check is intentionally hidden until the current week has a record. */
+        public boolean shouldShowReachedBadge() {
+            return reached() && !lastCompletedWeekMissed && currentWeekHasInspection;
         }
     }
 
@@ -86,21 +91,24 @@ public final class MonthlyPlanConfig {
     public static final class Summary {
         public final int totalInspections;
         public final int plannedTotal;
-        /** Actual count across items that have a target. May exceed plannedTotal. */
         public final int actualAgainstPlan;
-        /** Actual count capped per item for percentage calculation. */
         public final int completedAgainstPlan;
         public final List<Result> results;
         public final List<WeekGap> missedWeeks;
+        public final boolean lastCompletedWeekMissed;
+        public final boolean currentWeekHasInspection;
 
         Summary(int totalInspections, int plannedTotal, int actualAgainstPlan,
-                int completedAgainstPlan, List<Result> results, List<WeekGap> missedWeeks) {
+                int completedAgainstPlan, List<Result> results, List<WeekGap> missedWeeks,
+                boolean lastCompletedWeekMissed, boolean currentWeekHasInspection) {
             this.totalInspections = totalInspections;
             this.plannedTotal = plannedTotal;
             this.actualAgainstPlan = actualAgainstPlan;
             this.completedAgainstPlan = completedAgainstPlan;
             this.results = results;
             this.missedWeeks = missedWeeks;
+            this.lastCompletedWeekMissed = lastCompletedWeekMissed;
+            this.currentWeekHasInspection = currentWeekHasInspection;
         }
 
         public int percent() {
@@ -114,6 +122,10 @@ public final class MonthlyPlanConfig {
 
         public boolean hasMissedWeek() {
             return !missedWeeks.isEmpty();
+        }
+
+        public boolean shouldShowReachedBadge() {
+            return reached() && !lastCompletedWeekMissed && currentWeekHasInspection;
         }
     }
 
@@ -161,8 +173,16 @@ public final class MonthlyPlanConfig {
         List<Item> items = load(repo);
         String from = month.atDay(1).toString();
         String to = month.atEndOfMonth().toString();
-        List<Inspection> records = repo.list(from, to, null, null, false, 1, 100000).rows;
-        List<Inspection> completedRecords = formal(records);
+        List<Inspection> completedRecords = formal(
+                repo.list(from, to, null, null, false, 1, 100000).rows);
+
+        LocalDate today = LocalDate.now();
+        LocalDate currentMonday = mondayOf(today);
+        LocalDate previousMonday = currentMonday.minusWeeks(1);
+        List<Inspection> statusRecords = formal(repo.list(previousMonday.toString(),
+                currentMonday.plusDays(6).toString(), null, null, false, 1, 100000).rows);
+        boolean previousOwned = weekOwnedBy(month, previousMonday);
+        boolean currentOwned = weekOwnedBy(month, currentMonday);
 
         List<Result> results = new ArrayList<>();
         int plannedTotal = 0;
@@ -173,7 +193,11 @@ public final class MonthlyPlanConfig {
             for (Inspection record : completedRecords) {
                 if (matches(item, record)) actual++;
             }
-            results.add(new Result(item.copy(), actual));
+            boolean previousMissed = previousOwned
+                    && !hasMatchingInspection(statusRecords, item, previousMonday);
+            boolean currentHas = currentOwned
+                    && hasMatchingInspection(statusRecords, item, currentMonday);
+            results.add(new Result(item.copy(), actual, previousMissed, currentHas));
             if (item.target > 0) {
                 plannedTotal += item.target;
                 actualAgainstPlan += actual;
@@ -181,15 +205,59 @@ public final class MonthlyPlanConfig {
             }
         }
 
+        boolean overallPreviousMissed = previousOwned
+                && !hasAnyPlanInspection(statusRecords, items, previousMonday);
+        boolean overallCurrentHas = currentOwned
+                && hasAnyPlanInspection(statusRecords, items, currentMonday);
         List<WeekGap> missedWeeks = calculateMissedWeeks(repo, month, items);
         return new Summary(completedRecords.size(), plannedTotal, actualAgainstPlan,
-                completedAgainstPlan, results, missedWeeks);
+                completedAgainstPlan, results, missedWeeks,
+                overallPreviousMissed, overallCurrentHas);
+    }
+
+    private static boolean hasMatchingInspection(List<Inspection> records, Item item,
+                                                 LocalDate monday) {
+        LocalDate sunday = monday.plusDays(6);
+        for (Inspection record : records) {
+            LocalDate date = recordDate(record);
+            if (date == null || date.isBefore(monday) || date.isAfter(sunday)) continue;
+            if (matches(item, record)) return true;
+        }
+        return false;
+    }
+
+    private static boolean hasAnyPlanInspection(List<Inspection> records, List<Item> items,
+                                                LocalDate monday) {
+        LocalDate sunday = monday.plusDays(6);
+        for (Inspection record : records) {
+            LocalDate date = recordDate(record);
+            if (date == null || date.isBefore(monday) || date.isAfter(sunday)) continue;
+            if (items == null || items.isEmpty()) return true;
+            for (Item item : items) {
+                if (matches(item, record)) return true;
+            }
+        }
+        return false;
+    }
+
+    private static LocalDate recordDate(Inspection record) {
+        try { return record == null || record.date == null ? null : LocalDate.parse(record.date); }
+        catch (Exception ignored) { return null; }
+    }
+
+    static LocalDate mondayOf(LocalDate date) {
+        return date.with(TemporalAdjusters.previousOrSame(DayOfWeek.MONDAY));
+    }
+
+    static boolean weekOwnedBy(YearMonth month, LocalDate monday) {
+        return month != null && monday != null && YearMonth.from(monday).equals(month);
     }
 
     private static List<WeekGap> calculateMissedWeeks(LedgerRepository repo, YearMonth month,
                                                        List<Item> items) {
         LocalDate firstMonday = firstOwnedMonday(month);
-        LocalDate lastMonday = month.atEndOfMonth().with(TemporalAdjusters.previousOrSame(DayOfWeek.MONDAY));
+        LocalDate lastMonday = month.atEndOfMonth()
+                .with(TemporalAdjusters.previousOrSame(DayOfWeek.MONDAY));
         if (firstMonday.isAfter(lastMonday)) return new ArrayList<>();
 
         LocalDate lastSunday = lastMonday.plusDays(6);
@@ -204,22 +272,22 @@ public final class MonthlyPlanConfig {
                 }
             }
             if (!qualifies) continue;
-            try { qualifyingDates.add(LocalDate.parse(record.date)); }
-            catch (Exception ignored) {}
+            LocalDate date = recordDate(record);
+            if (date != null) qualifyingDates.add(date);
         }
         return findMissedOwnedWeeks(month, LocalDate.now(), qualifyingDates);
     }
 
     /**
-     * A week belongs to the month containing its Monday. This is why, for August 2026,
-     * Aug 1-2 belong to July's final week and August week 1 starts on Monday Aug 3.
-     * The current unfinished week is never marked as missed.
+     * A week belongs to the month containing its Monday. The current unfinished week is never
+     * added to the historical missed-week list.
      */
     static List<WeekGap> findMissedOwnedWeeks(YearMonth month, LocalDate today,
                                                List<LocalDate> qualifyingDates) {
         List<WeekGap> gaps = new ArrayList<>();
         LocalDate monday = firstOwnedMonday(month);
-        LocalDate lastMonday = month.atEndOfMonth().with(TemporalAdjusters.previousOrSame(DayOfWeek.MONDAY));
+        LocalDate lastMonday = month.atEndOfMonth()
+                .with(TemporalAdjusters.previousOrSame(DayOfWeek.MONDAY));
         Set<LocalDate> dates = new HashSet<>(qualifyingDates == null ? List.of() : qualifyingDates);
         while (!monday.isAfter(lastMonday)) {
             LocalDate sunday = monday.plusDays(6);
@@ -254,10 +322,6 @@ public final class MonthlyPlanConfig {
         return out;
     }
 
-    /**
-     * Match against the fields most often used to distinguish an inspection. Multiple keywords
-     * may be separated by |, Chinese comma or ordinary comma; any matching token counts.
-     */
     private static boolean matches(Item item, Inspection record) {
         String matcher = item.keyword == null || item.keyword.trim().isBlank()
                 ? item.name : item.keyword;

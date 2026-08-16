@@ -8,32 +8,43 @@ import android.graphics.RectF;
 import android.graphics.Typeface;
 import android.view.View;
 
-/** Hollow monthly progress ring with a centered percentage label. */
+/** Hollow progress ring used by the monthly dashboard and each plan item. */
 public final class DonutProgressView extends View {
     private final Paint track = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final Paint progressPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final Paint textPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final RectF arc = new RectF();
     private int progress;
+    private int insetDp = 5;
+    private String centerText;
 
     public DonutProgressView(Context context) {
         super(context);
-        float stroke = Ui.dp(context, 4);
         track.setStyle(Paint.Style.STROKE);
-        track.setStrokeWidth(stroke);
         track.setStrokeCap(Paint.Cap.ROUND);
         track.setColor(Color.rgb(226, 233, 244));
-
         progressPaint.setStyle(Paint.Style.STROKE);
-        progressPaint.setStrokeWidth(stroke);
         progressPaint.setStrokeCap(Paint.Cap.ROUND);
         progressPaint.setColor(Ui.BLUE);
-
         textPaint.setColor(Ui.BLUE_DARK);
         textPaint.setTextAlign(Paint.Align.CENTER);
         textPaint.setTypeface(Typeface.create(Typeface.DEFAULT, Typeface.BOLD));
-        textPaint.setTextSize(Ui.dp(context, 13));
+        setCompact(false);
         setLayerType(View.LAYER_TYPE_SOFTWARE, null);
+    }
+
+    public void setCompact(boolean compact) {
+        float stroke = Ui.dp(getContext(), compact ? 3 : 4);
+        track.setStrokeWidth(stroke);
+        progressPaint.setStrokeWidth(stroke);
+        textPaint.setTextSize(Ui.dp(getContext(), compact ? 8 : 12));
+        insetDp = compact ? 4 : 5;
+        invalidate();
+    }
+
+    public void setCenterText(String value) {
+        centerText = value;
+        invalidate();
     }
 
     public void setProgress(int value) {
@@ -44,7 +55,7 @@ public final class DonutProgressView extends View {
 
     @Override protected void onDraw(Canvas canvas) {
         super.onDraw(canvas);
-        float pad = Ui.dp(getContext(), 6);
+        float pad = Ui.dp(getContext(), insetDp);
         float cx = getWidth() / 2f;
         float cy = getHeight() / 2f;
         float radius = Math.max(0f, Math.min(getWidth(), getHeight()) / 2f - pad);
@@ -54,6 +65,6 @@ public final class DonutProgressView extends View {
 
         Paint.FontMetrics fm = textPaint.getFontMetrics();
         float baseline = cy - (fm.ascent + fm.descent) / 2f;
-        canvas.drawText(progress + "%", cx, baseline, textPaint);
+        canvas.drawText(centerText == null ? progress + "%" : centerText, cx, baseline, textPaint);
     }
 }
