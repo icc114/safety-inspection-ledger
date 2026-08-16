@@ -1,5 +1,46 @@
 <?xml version="1.0" encoding="utf-8"?>
-<vector xmlns:android="http://schemas.android.com/apk/res/android" android:width="48dp" android:height="48dp" android:viewportWidth="48" android:viewportHeight="48">
-    <path android:fillColor="#0E7490" android:pathData="M6,4h36a2,2 0,0 1,2 2v36a2,2 0,0 1,-2 2h-36a2,2 0,0 1,-2 -2v-36a2,2 0,0 1,2 -2"/>
-    <path android:fillColor="#FFFFFF" android:pathData="M14,12h20v4h-20zM14,22h4v4h-4zM22,22h12v4h-12zM14,32h4v4h-4zM22,32h12v4h-12z"/>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- Full-bleed blue rounded tile: no baked-in white border. -->
+    <path
+        android:fillColor="#1677E8"
+        android:pathData="M18,2H90C99,2 106,9 106,18V90C106,99 99,106 90,106H18C9,106 2,99 2,90V18C2,9 9,2 18,2Z" />
+    <!-- Document and folded corner. -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M23,20H69L84,35V77H23Z" />
+    <path
+        android:fillColor="#EAF2FD"
+        android:pathData="M69,20V35H84Z" />
+    <!-- Checklist lines. -->
+    <path android:fillColor="#0B68D8" android:pathData="M34,31H65V35H34Z" />
+    <path android:fillColor="#0B68D8" android:pathData="M34,43H58V47H34Z" />
+    <path android:fillColor="#0B68D8" android:pathData="M43,58H59V62H43Z" />
+    <path android:fillColor="#0B68D8" android:pathData="M43,69H59V73H43Z" />
+    <!-- Check marks. -->
+    <path
+        android:fillColor="#0B68D8"
+        android:pathData="M29,56L33,60L40,52L43,55L33,66L26,59Z" />
+    <path
+        android:fillColor="#0B68D8"
+        android:pathData="M29,67L33,71L40,63L43,66L33,77L26,70Z" />
+    <!-- Yellow inspection star. -->
+    <path
+        android:fillColor="#FFB000"
+        android:pathData="M69,42L71.8,48L78.2,48.7L73.4,53L74.8,59.2L69,56L63.2,59.2L64.6,53L59.8,48.7L66.2,48Z" />
+    <!-- White shield rim. -->
+    <path
+        android:fillColor="#F8FBFF"
+        android:pathData="M64,67L79,61L94,67L93,84L88,94L79,101L70,94L65,84Z" />
+    <!-- Blue shield. -->
+    <path
+        android:fillColor="#075BD0"
+        android:pathData="M67,69L79,64L91,69L90,82L86,91L79,96L72,91L68,82Z" />
+    <!-- Shield check. -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M72,80L77,85L86,74L89,77L77,91L69,83Z" />
 </vector>
