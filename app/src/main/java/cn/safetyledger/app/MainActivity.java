@@ -99,9 +99,7 @@ public class MainActivity extends Activity {
         LinearLayout bar = Ui.row(this);
         bar.setPadding(Ui.dp(this, 10), Ui.dp(this, 6), Ui.dp(this, 10), Ui.dp(this, 6));
         bar.setBackgroundColor(Ui.BLUE);
-        Button back = Ui.secondaryButton(this, "‹");
-        back.setTextSize(22);
-        back.setOnClickListener(view -> finish());
+        TextView back = Ui.backButton(this);
         TextView topTitle = Ui.text(this, "本地检查表\n检查填报", 20, true);
         topTitle.setTextColor(Color.WHITE);
         Button topSave = Ui.secondaryButton(this, "保存");

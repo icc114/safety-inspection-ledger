@@ -100,9 +100,7 @@ public final class RecordDetailActivity extends Activity {
         LinearLayout bar = Ui.row(this);
         bar.setPadding(Ui.dp(this, 10), Ui.dp(this, 6), Ui.dp(this, 10), Ui.dp(this, 6));
         bar.setBackgroundColor(Ui.BLUE);
-        Button back = Ui.secondaryButton(this, "‹");
-        back.setTextSize(22);
-        back.setOnClickListener(view -> finish());
+        TextView back = Ui.backButton(this);
         TextView title = Ui.text(this, "检查记录详情", 20, true);
         title.setTextColor(Color.WHITE);
         TextView status = Ui.text(this, status(model.status), 14, true);
