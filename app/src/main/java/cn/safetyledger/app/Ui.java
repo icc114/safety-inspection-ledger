@@ -1,5 +1,7 @@
 package cn.safetyledger.app;
 
+import android.animation.ObjectAnimator;
+import android.animation.StateListAnimator;
 import android.app.Activity;
 import android.content.Context;
 import android.content.Intent;
@@ -70,18 +72,20 @@ public final class Ui {
         button.setTextColor(Color.WHITE);
         button.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
         button.setAllCaps(false);
+        button.setGravity(Gravity.CENTER);
+        button.setIncludeFontPadding(false);
         button.setPadding(dp(context, 12), 0, dp(context, 12), 0);
-        button.setBackground(shape(context, BLUE, BLUE, 10));
+        button.setBackground(gradientShape(context, Color.rgb(55, 113, 231), BLUE, BLUE_DARK, 11));
         button.setMinHeight(dp(context, 46));
         button.setMinimumWidth(0);
-        button.setStateListAnimator(null);
+        applyFunctionalDepth(context, button);
         return button;
     }
 
     public static Button secondaryButton(Context context, String label) {
         Button button = button(context, label);
         button.setTextColor(BLUE_DARK);
-        button.setBackground(shape(context, Color.WHITE, Color.rgb(190, 207, 233), 10));
+        button.setBackground(gradientShape(context, Color.WHITE, Color.rgb(244, 247, 252), Color.rgb(181, 199, 226), 11));
         return button;
     }
 
@@ -96,7 +100,7 @@ public final class Ui {
     public static Button dangerButton(Context context, String label) {
         Button button = compactButton(context, label, false);
         button.setTextColor(DANGER);
-        button.setBackground(shape(context, Color.WHITE, Color.rgb(244, 190, 190), 9));
+        button.setBackground(gradientShape(context, Color.WHITE, Color.rgb(255, 246, 246), Color.rgb(235, 174, 177), 10));
         return button;
     }
 
@@ -118,8 +122,10 @@ public final class Ui {
 
     public static void styleChoice(Context context, Button button, boolean selected) {
         button.setTextColor(selected ? Color.WHITE : TEXT);
-        button.setBackground(shape(context, selected ? BLUE : Color.WHITE,
-                selected ? BLUE : LINE, 8));
+        button.setBackground(selected
+                ? gradientShape(context, Color.rgb(55, 113, 231), BLUE, BLUE_DARK, 9)
+                : gradientShape(context, Color.WHITE, Color.rgb(244, 247, 252), LINE, 9));
+        applyFunctionalDepth(context, button);
     }
 
     public static EditText input(Context context, String hint) {
@@ -212,22 +218,42 @@ public final class Ui {
         return drawable;
     }
 
+    public static GradientDrawable gradientShape(Context context, int top, int bottom, int stroke, int radius) {
+    GradientDrawable drawable = new GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM, new int[]{top, bottom});
+    if (stroke != Color.TRANSPARENT) drawable.setStroke(dp(context, 1), stroke);
+    drawable.setCornerRadius(dp(context, radius));
+    return drawable;
+}
+
+public static void applyFunctionalDepth(Context context, View view) {
+    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.LOLLIPOP) return;
+    view.setElevation(dp(context, 2));
+    StateListAnimator animator = new StateListAnimator();
+    ObjectAnimator pressed = ObjectAnimator.ofFloat(view, "translationZ", 0f);
+    pressed.setDuration(70);
+    ObjectAnimator normal = ObjectAnimator.ofFloat(view, "translationZ", dp(context, 2));
+    normal.setDuration(120);
+    animator.addState(new int[]{android.R.attr.state_pressed}, pressed);
+    animator.addState(new int[]{}, normal);
+    view.setStateListAnimator(animator);
+}
+
     /** One common back control for Settings, Templates, Trash, details and other sub-pages. */
-    public static TextView backButton(Activity activity) {
-        TextView back = new TextView(activity);
-        back.setText("‹");
-        back.setTextSize(36);
-        back.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
-        back.setTextColor(BLUE_DARK);
-        back.setGravity(Gravity.CENTER);
-        back.setIncludeFontPadding(false);
-        back.setPadding(0, 0, 0, dp(activity, 2));
-        back.setBackground(shape(activity, Color.WHITE, Color.rgb(188, 207, 235), 11));
-        if (Build.VERSION.SDK_INT >= 21) back.setElevation(dp(activity, 3));
-        back.setContentDescription("返回");
-        back.setOnClickListener(view -> activity.finish());
-        return back;
-    }
+public static TextView backButton(Activity activity) {
+    TextView back = new TextView(activity);
+    back.setText("");
+    back.setGravity(Gravity.CENTER);
+    back.setPadding(0, 0, 0, 0);
+    back.setIncludeFontPadding(false);
+    back.setCompoundDrawablesWithIntrinsicBounds(R.drawable.ic_back, 0, 0, 0);
+    back.setBackground(gradientShape(activity, Color.WHITE, Color.rgb(243, 247, 253), Color.rgb(176, 197, 226), 12));
+    applyFunctionalDepth(activity, back);
+    back.setClickable(true);
+    back.setFocusable(true);
+    back.setContentDescription("返回");
+    back.setOnClickListener(view -> activity.finish());
+    return back;
+}
 
     public static TextView titleBar(Activity activity, String title) {
         LinearLayout bar = row(activity);

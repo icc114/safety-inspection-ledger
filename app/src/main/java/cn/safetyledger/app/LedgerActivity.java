@@ -138,10 +138,12 @@ public final class LedgerActivity extends Activity {
         todayTitle = Ui.text(this, "", 17, true);
         todayTitle.setGravity(Gravity.CENTER);
         Button reset = Ui.secondaryButton(this, "回到今天");
-        reset.setMinHeight(Ui.dp(this, 38));
-        reset.setTextSize(11.5f);
+        reset.setMinHeight(Ui.dp(this, 42));
+        reset.setTextSize(12f);
         reset.setSingleLine(true);
-        reset.setPadding(Ui.dp(this, 5), 0, Ui.dp(this, 5), 0);
+        reset.setGravity(Gravity.CENTER);
+        reset.setIncludeFontPadding(false);
+        reset.setPadding(Ui.dp(this, 6), 0, Ui.dp(this, 6), 0);
 
         previous.setOnClickListener(view -> changeCalendarMonth(-1));
         next.setOnClickListener(view -> changeCalendarMonth(1));
@@ -155,11 +157,11 @@ public final class LedgerActivity extends Activity {
             load();
         });
 
-        dateNavigation.addView(previous, new LinearLayout.LayoutParams(Ui.dp(this, 40), Ui.dp(this, 40)));
+        dateNavigation.addView(previous, new LinearLayout.LayoutParams(Ui.dp(this, 42), Ui.dp(this, 42)));
         dateNavigation.addView(todayTitle, Ui.weight(1));
-        dateNavigation.addView(next, new LinearLayout.LayoutParams(Ui.dp(this, 40), Ui.dp(this, 40)));
-        dateNavigation.addView(Ui.horizontalGap(this, 5));
-        dateNavigation.addView(reset, new LinearLayout.LayoutParams(Ui.dp(this, 90), Ui.dp(this, 40)));
+        dateNavigation.addView(next, new LinearLayout.LayoutParams(Ui.dp(this, 42), Ui.dp(this, 42)));
+        dateNavigation.addView(Ui.horizontalGap(this, 6));
+        dateNavigation.addView(reset, new LinearLayout.LayoutParams(Ui.dp(this, 92), Ui.dp(this, 42)));
         card.addView(dateNavigation);
         card.addView(Ui.gap(this, 4));
 
@@ -196,16 +198,18 @@ public final class LedgerActivity extends Activity {
         TextView rangeLabel = Ui.text(this, "显示范围", 12, true);
         rangeLabel.setPadding(0, 0, Ui.dp(this, 2), 0);
         rangeLabel.setSingleLine(true);
+        rangeLabel.setGravity(Gravity.CENTER);
+        rangeLabel.setIncludeFontPadding(false);
         range = spinner(new String[]{"当日", "本月", "本季度", "本年度", "全部"});
         range.setSelection(1);
         type = spinner(types());
         statusFilter = spinner(new String[]{"全部状态", "草稿", "待整改", "整改中", "已整改完成", "检查完成"});
-        filters.addView(rangeLabel, new LinearLayout.LayoutParams(Ui.dp(this, 64), Ui.dp(this, 40)));
-        filters.addView(range, new LinearLayout.LayoutParams(Ui.dp(this, 58), Ui.dp(this, 40)));
-        filters.addView(Ui.horizontalGap(this, 3));
-        filters.addView(type, new LinearLayout.LayoutParams(0, Ui.dp(this, 40), 1));
-        filters.addView(Ui.horizontalGap(this, 3));
-        filters.addView(statusFilter, new LinearLayout.LayoutParams(0, Ui.dp(this, 40), 1));
+        filters.addView(rangeLabel, new LinearLayout.LayoutParams(Ui.dp(this, 64), Ui.dp(this, 42)));
+        filters.addView(range, new LinearLayout.LayoutParams(Ui.dp(this, 64), Ui.dp(this, 42)));
+        filters.addView(Ui.horizontalGap(this, 4));
+        filters.addView(type, new LinearLayout.LayoutParams(0, Ui.dp(this, 42), 1));
+        filters.addView(Ui.horizontalGap(this, 4));
+        filters.addView(statusFilter, new LinearLayout.LayoutParams(0, Ui.dp(this, 42), 1));
         card.addView(filters);
         AdapterView.OnItemSelectedListener listener = new SimpleSelect() {
             @Override void selected() { selected.clear(); page = 1; load(); }
@@ -238,9 +242,9 @@ public final class LedgerActivity extends Activity {
             showRecords();
         });
         header.addView(title, Ui.weight(1));
-        header.addView(multiToggle, new LinearLayout.LayoutParams(Ui.dp(this, 84), Ui.dp(this, 38)));
-        header.addView(Ui.horizontalGap(this, 5));
-        header.addView(pageSize, new LinearLayout.LayoutParams(Ui.dp(this, 134), Ui.dp(this, 40)));
+        header.addView(multiToggle, new LinearLayout.LayoutParams(Ui.dp(this, 88), Ui.dp(this, 42)));
+        header.addView(Ui.horizontalGap(this, 6));
+        header.addView(pageSize, new LinearLayout.LayoutParams(Ui.dp(this, 126), Ui.dp(this, 42)));
         card.addView(header);
         selectionActions = Ui.column(this);
         LinearLayout actions = Ui.row(this);
@@ -278,32 +282,45 @@ public final class LedgerActivity extends Activity {
     }
 
     private Spinner spinner(String[] values) {
-        Spinner spinner = new Spinner(this);
-        ArrayAdapter<String> adapter = spinnerAdapter(values);
-        spinner.setAdapter(adapter);
-        spinner.setBackground(Ui.shape(this, Color.WHITE, Ui.LINE, 10));
-        spinner.setPadding(Ui.dp(this, 5), 0, Ui.dp(this, 5), 0);
-        spinner.setMinimumWidth(0);
-        return spinner;
-    }
+    Spinner spinner = new Spinner(this);
+    ArrayAdapter<String> adapter = spinnerAdapter(values);
+    spinner.setAdapter(adapter);
+    spinner.setGravity(Gravity.CENTER);
+    spinner.setBackground(Ui.gradientShape(this, Color.WHITE, Color.rgb(245, 248, 253), Color.rgb(190, 205, 228), 11));
+    spinner.setPadding(Ui.dp(this, 4), 0, Ui.dp(this, 4), 0);
+    spinner.setMinimumWidth(0);
+    Ui.applyFunctionalDepth(this, spinner);
+    return spinner;
+}
 
     private ArrayAdapter<String> spinnerAdapter(String[] values) {
-        ArrayAdapter<String> adapter = new ArrayAdapter<>(this,
-                android.R.layout.simple_spinner_item, values) {
-            @Override public View getView(int position, View convertView, ViewGroup parent) {
-                View view = super.getView(position, convertView, parent);
-                if (view instanceof TextView text) {
-                    text.setTextSize(12.5f);
-                    text.setSingleLine(true);
-                    text.setPadding(Ui.dp(LedgerActivity.this, 4), 0,
-                            Ui.dp(LedgerActivity.this, 2), 0);
-                }
-                return view;
+    ArrayAdapter<String> adapter = new ArrayAdapter<>(this, android.R.layout.simple_spinner_item, values) {
+        @Override public View getView(int position, View convertView, ViewGroup parent) {
+            View view = super.getView(position, convertView, parent);
+            if (view instanceof TextView text) {
+                text.setTextSize(12.5f);
+                text.setSingleLine(true);
+                text.setGravity(Gravity.CENTER);
+                text.setIncludeFontPadding(false);
+                text.setTextColor(Ui.TEXT);
+                text.setPadding(Ui.dp(LedgerActivity.this, 2), 0, Ui.dp(LedgerActivity.this, 2), 0);
             }
-        };
-        adapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
-        return adapter;
-    }
+            return view;
+        }
+        @Override public View getDropDownView(int position, View convertView, ViewGroup parent) {
+            View view = super.getDropDownView(position, convertView, parent);
+            if (view instanceof TextView text) {
+                text.setTextSize(14f);
+                text.setTextColor(Ui.TEXT);
+                text.setGravity(Gravity.CENTER_VERTICAL);
+                text.setPadding(Ui.dp(LedgerActivity.this, 16), Ui.dp(LedgerActivity.this, 10), Ui.dp(LedgerActivity.this, 16), Ui.dp(LedgerActivity.this, 10));
+            }
+            return view;
+        }
+    };
+    adapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
+    return adapter;
+}
 
     private String[] types() {
         List<Template> templates = repo.templates(true);
