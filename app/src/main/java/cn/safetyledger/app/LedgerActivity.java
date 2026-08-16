@@ -85,15 +85,6 @@ public final class LedgerActivity extends Activity {
         load();
     }
 
-    @Override
-    protected void onResume() {
-        super.onResume();
-        if (repo != null && calendarBox != null) {
-            syncCalendar();
-            load();
-        }
-    }
-
     private void render() {
         LinearLayout root = Ui.column(this);
         root.setBackgroundColor(Ui.BG);
