@@ -1,0 +1,38 @@
+name: Apply 1.2.30 Weekly Miss Dashboard
+
+on:
+  push:
+    branches:
+      - 'agent/v1230-weekly-miss-dashboard'
+    paths:
+      - 'tools/apply-v1230-dashboard.py'
+      - '.github/workflows/apply-v1230-dashboard.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout branch
+        uses: actions/checkout@v4
+        with:
+          ref: agent/v1230-weekly-miss-dashboard
+          fetch-depth: 0
+      - name: Apply 1.2.30 source changes
+        run: python3 tools/apply-v1230-dashboard.py
+      - name: Commit source changes
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add app .github/workflows/android-build.yml
+          if git diff --cached --quiet; then
+            echo "No source changes to commit."
+            exit 0
+          fi
+          git commit -m "Implement 1.2.30 monthly progress and weekly miss warning"
+          git push origin HEAD:agent/v1230-weekly-miss-dashboard
