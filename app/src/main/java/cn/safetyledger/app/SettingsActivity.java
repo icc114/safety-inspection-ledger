@@ -806,9 +806,7 @@ public final class SettingsActivity extends Activity {
                     if (!message.contains("已有同步任务正在运行")) syncNotification(message);
                     new AlertDialog.Builder(this)
                             .setTitle(message.startsWith("网络连接问题：") ? "网络连接问题" : "同步失败")
-                            .setMessage(message + "
-
-已自动写入同步诊断日志。请在本页点击“查看 / 导出同步日志”，导出 TXT 后即可直接发给开发者排查。")
+                            .setMessage(message + "\n\n已自动写入同步诊断日志。请在本页点击“查看 / 导出同步日志”，导出 TXT 后即可直接发给开发者排查。")
                             .setPositiveButton("确定", null).show();
                 });
             }
