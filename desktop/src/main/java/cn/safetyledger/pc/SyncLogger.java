@@ -24,10 +24,11 @@ public final class SyncLogger {
             purgeOldLogs(directory, 30);
             file = directory.resolve("pc-sync-" + LocalDateTime.now().format(FILE_TS) + ".log");
             Files.writeString(file,
-                    "安全检查台账 PC 0.2.2 同步日志\n"
+                    "安全检查台账 PC 0.2.3 网络/同步日志\n"
                             + "启动时间: " + LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss")) + "\n"
                             + "Java: " + System.getProperty("java.version") + "\n"
                             + "OS: " + System.getProperty("os.name") + " " + System.getProperty("os.version") + "\n"
+                            + "系统代理: " + String.valueOf(java.net.ProxySelector.getDefault()) + "\n"
                             + "------------------------------------------------------------\n",
                     StandardCharsets.UTF_8, StandardOpenOption.CREATE, StandardOpenOption.APPEND);
         } catch (Exception error) {

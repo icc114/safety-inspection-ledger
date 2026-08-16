@@ -1,11 +1,14 @@
-name = "safety-ledger-sync"
+name = "safety-inspection-ledger-cloud"
 main = "worker.js"
-compatibility_date = "2026-08-01"
+compatibility_date = "2026-08-16"
 
-[[r2_buckets]]
-binding = "SAFETY_LEDGER_BUCKET"
-bucket_name = "safety-ledger-sync"
+# 现有部署可直接继续使用 D1。把 database_id 换成你当前 safety-inspection-ledger 的 D1 ID。
+[[d1_databases]]
+binding = "DB"
+database_name = "safety-inspection-ledger"
+database_id = "REPLACE_WITH_EXISTING_D1_DATABASE_ID"
 
-# Do not put passwords in this file. Configure one of:
-# wrangler secret put SYNC_TOKEN
-# or both SYNC_USERNAME and SYNC_PASSWORD
+# 如果以后改用 R2，只需绑定 bucket 为 SAFETY_LEDGER_BUCKET；Worker 会自动优先使用 R2。
+# [[r2_buckets]]
+# binding = "SAFETY_LEDGER_BUCKET"
+# bucket_name = "safety-inspection-ledger"

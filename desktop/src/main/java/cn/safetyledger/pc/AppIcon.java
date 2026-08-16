@@ -3,110 +3,47 @@ package cn.safetyledger.pc;
 import javax.swing.*;
 import java.awt.*;
 import java.awt.geom.Path2D;
+import java.awt.geom.RoundRectangle2D;
 import java.awt.image.BufferedImage;
 
-/** High-contrast supersampled runtime icon matching the mobile blue document/star/shield identity. */
+/** Crisp multi-size vector icon. Shapes are intentionally simple so 16–64 px Windows rendering stays sharp. */
 public final class AppIcon {
     private AppIcon() {}
 
     public static Image image(int size) {
-        int target = Math.max(24, size);
-        int source = Math.max(128, target * 4);
-        BufferedImage hi = new BufferedImage(source, source, BufferedImage.TYPE_INT_ARGB);
-        Graphics2D g = hi.createGraphics();
-        try {
-            g.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
-            g.setRenderingHint(RenderingHints.KEY_RENDERING, RenderingHints.VALUE_RENDER_QUALITY);
-            double k = source / 108.0;
-            g.scale(k, k);
+        int target=Math.max(16,size), source=Math.max(512,target*8);
+        BufferedImage hi=new BufferedImage(source,source,BufferedImage.TYPE_INT_ARGB);
+        Graphics2D g=hi.createGraphics();
+        try{
+            g.setRenderingHint(RenderingHints.KEY_ANTIALIASING,RenderingHints.VALUE_ANTIALIAS_ON);
+            g.setRenderingHint(RenderingHints.KEY_STROKE_CONTROL,RenderingHints.VALUE_STROKE_PURE);
+            g.setRenderingHint(RenderingHints.KEY_RENDERING,RenderingHints.VALUE_RENDER_QUALITY);
+            double k=source/100.0;g.scale(k,k);
+            g.setColor(new Color(255,255,255,250));g.fill(new RoundRectangle2D.Double(1.5,1.5,97,97,21,21));
+            g.setColor(new Color(20,105,224));g.fill(new RoundRectangle2D.Double(5,5,90,90,18,18));
 
-            // White edge keeps the icon readable on the blue desktop header.
-            g.setColor(new Color(255, 255, 255, 245));
-            g.fillRoundRect(2, 2, 104, 104, 29, 29);
-            g.setColor(new Color(20, 111, 238));
-            g.fillRoundRect(6, 6, 96, 96, 25, 25);
-
-            // Simple directional shading, deliberately bold enough to survive 32–48 px rendering.
-            GradientPaint gradient = new GradientPaint(12, 8, new Color(54, 139, 255), 96, 100, new Color(7, 74, 190));
-            g.setPaint(gradient);
-            g.fillRoundRect(8, 8, 92, 92, 23, 23);
-
-            g.setColor(new Color(5, 49, 142, 70));
-            Path2D shadow = new Path2D.Double();
-            shadow.moveTo(27, 84); shadow.lineTo(77, 33); shadow.lineTo(98, 53);
-            shadow.lineTo(98, 82); shadow.curveTo(98, 92, 92, 98, 82, 98);
-            shadow.lineTo(42, 98); shadow.closePath(); g.fill(shadow);
-
+            // document
             g.setColor(Color.WHITE);
-            Path2D paper = new Path2D.Double();
-            paper.moveTo(25, 21); paper.lineTo(62, 21); paper.lineTo(77, 36); paper.lineTo(77, 78);
-            paper.curveTo(77, 82, 74, 85, 70, 85); paper.lineTo(25, 85); paper.curveTo(21, 85, 18, 82, 18, 78);
-            paper.lineTo(18, 28); paper.curveTo(18, 24, 21, 21, 25, 21); paper.closePath(); g.fill(paper);
+            Path2D paper=new Path2D.Double();paper.moveTo(24,18);paper.lineTo(59,18);paper.lineTo(73,32);paper.lineTo(73,78);
+            paper.curveTo(73,82,70,85,66,85);paper.lineTo(24,85);paper.curveTo(20,85,17,82,17,78);paper.lineTo(17,25);paper.curveTo(17,21,20,18,24,18);paper.closePath();g.fill(paper);
+            g.setColor(new Color(216,234,255));Path2D fold=new Path2D.Double();fold.moveTo(59,18);fold.lineTo(73,32);fold.lineTo(64,32);fold.curveTo(61,32,59,30,59,27);fold.closePath();g.fill(fold);
 
-            g.setColor(new Color(226, 239, 255));
-            Path2D fold = new Path2D.Double();
-            fold.moveTo(62, 21); fold.lineTo(77, 36); fold.lineTo(67, 36); fold.curveTo(64, 36, 62, 34, 62, 31); fold.closePath(); g.fill(fold);
+            g.setStroke(new BasicStroke(4.2f,BasicStroke.CAP_ROUND,BasicStroke.JOIN_ROUND));
+            g.setColor(new Color(20,105,224));
+            check(g,25,39);check(g,25,56);check(g,25,73);
+            g.setStroke(new BasicStroke(4.0f,BasicStroke.CAP_ROUND,BasicStroke.JOIN_ROUND));
+            g.drawLine(41,39,61,39);g.drawLine(41,56,61,56);g.drawLine(41,73,55,73);
 
-            g.setColor(new Color(13, 94, 216));
-            g.fillRoundRect(28, 34, 34, 6, 5, 5);
-            g.fillRoundRect(40, 49, 24, 6, 5, 5);
-            g.fillRoundRect(40, 64, 20, 6, 5, 5);
-            drawCheck(g, 24, 44, 12, new Color(13, 94, 216));
-            drawCheck(g, 24, 59, 12, new Color(13, 94, 216));
-            drawStar(g, 67, 53, 9, new Color(255, 177, 0));
-
-            // Shield is slightly oversized so it remains obvious in the Windows title bar.
-            g.setColor(Color.WHITE);
-            g.fill(shield(80, 77, 20, 24));
-            g.setColor(new Color(7, 82, 203));
-            g.fill(shield(80, 77, 16, 19));
-            drawCheck(g, 71, 70, 16, Color.WHITE);
-        } finally {
-            g.dispose();
-        }
-
-        BufferedImage out = new BufferedImage(target, target, BufferedImage.TYPE_INT_ARGB);
-        Graphics2D down = out.createGraphics();
-        try {
-            down.setRenderingHint(RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_BICUBIC);
-            down.setRenderingHint(RenderingHints.KEY_RENDERING, RenderingHints.VALUE_RENDER_QUALITY);
-            down.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
-            down.drawImage(hi, 0, 0, target, target, null);
-        } finally {
-            down.dispose();
-        }
+            // bottom-right shield
+            Path2D shield=new Path2D.Double();shield.moveTo(75,55);shield.lineTo(92,61);shield.lineTo(92,73);shield.curveTo(92,84,85,91,75,95);shield.curveTo(65,91,58,84,58,73);shield.lineTo(58,61);shield.closePath();
+            g.setColor(new Color(255,255,255));g.setStroke(new BasicStroke(6f,BasicStroke.JOIN_ROUND,BasicStroke.CAP_ROUND));g.draw(shield);
+            g.setColor(new Color(255,178,25));g.fill(shield);
+            g.setColor(Color.WHITE);g.setStroke(new BasicStroke(4.8f,BasicStroke.CAP_ROUND,BasicStroke.JOIN_ROUND));g.drawLine(66,74,72,80);g.drawLine(72,80,84,68);
+        }finally{g.dispose();}
+        BufferedImage out=new BufferedImage(target,target,BufferedImage.TYPE_INT_ARGB);Graphics2D d=out.createGraphics();
+        try{d.setRenderingHint(RenderingHints.KEY_INTERPOLATION,RenderingHints.VALUE_INTERPOLATION_BICUBIC);d.setRenderingHint(RenderingHints.KEY_RENDERING,RenderingHints.VALUE_RENDER_QUALITY);d.drawImage(hi,0,0,target,target,null);}finally{d.dispose();}
         return out;
     }
-
-    public static Icon icon(int size) { return new ImageIcon(image(size)); }
-
-    private static Path2D shield(double cx, double cy, double w, double h) {
-        Path2D p = new Path2D.Double();
-        p.moveTo(cx - w, cy - h * .55); p.lineTo(cx + 3, cy - h); p.lineTo(cx + w, cy - h * .55);
-        p.lineTo(cx + w, cy + h * .18); p.curveTo(cx + w, cy + h * .65, cx + 9, cy + h * .92, cx, cy + h);
-        p.curveTo(cx - 9, cy + h * .92, cx - w, cy + h * .65, cx - w, cy + h * .18); p.closePath();
-        return p;
-    }
-
-    private static void drawCheck(Graphics2D g, int x, int y, int size, Color color) {
-        Stroke old = g.getStroke();
-        g.setColor(color);
-        g.setStroke(new BasicStroke(Math.max(3f, size / 4f), BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND));
-        g.drawLine(x, y + size / 2, x + size / 3, y + size * 4 / 5);
-        g.drawLine(x + size / 3, y + size * 4 / 5, x + size, y);
-        g.setStroke(old);
-    }
-
-    private static void drawStar(Graphics2D g, double cx, double cy, double r, Color color) {
-        Path2D p = new Path2D.Double();
-        for (int i = 0; i < 10; i++) {
-            double rr = (i % 2 == 0) ? r : r * .45;
-            double a = -Math.PI / 2 + i * Math.PI / 5;
-            double x = cx + Math.cos(a) * rr, y = cy + Math.sin(a) * rr;
-            if (i == 0) p.moveTo(x, y); else p.lineTo(x, y);
-        }
-        p.closePath();
-        g.setColor(color);
-        g.fill(p);
-    }
+    public static Icon icon(int size){return new ImageIcon(image(size));}
+    private static void check(Graphics2D g,int x,int y){g.drawLine(x,y,x+4,y+4);g.drawLine(x+4,y+4,x+10,y-5);}
 }

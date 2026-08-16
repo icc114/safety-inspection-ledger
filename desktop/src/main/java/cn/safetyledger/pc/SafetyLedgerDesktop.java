@@ -62,6 +62,8 @@ public final class SafetyLedgerDesktop extends JFrame {
     private PcConfig config;
     private HolidayCalendarService holidayService;
     private volatile Path latestSyncLog;
+    private volatile ScheduledFuture<?> autoSyncFuture;
+    private volatile String lastCloudRevision = "";
 
     private YearMonth calendarMonth = YearMonth.now();
     private LocalDate selectedDate = LocalDate.now();
@@ -73,10 +75,12 @@ public final class SafetyLedgerDesktop extends JFrame {
     private final Set<String> selectedIds = new LinkedHashSet<>();
 
     public SafetyLedgerDesktop() {
-        super("安全检查台账 PC 0.2.2");
+        super("安全检查台账 PC 0.2.3");
         config = PcConfig.load();
         holidayService = new HolidayCalendarService(config.privateDir());
-        setIconImage(AppIcon.image(64));
+        CrashLogger.install(config.privateDir());
+        setIconImages(List.of(AppIcon.image(16), AppIcon.image(20), AppIcon.image(24), AppIcon.image(32),
+                AppIcon.image(48), AppIcon.image(64), AppIcon.image(128), AppIcon.image(256)));
         buildUi();
         refreshTable();
         setSize(1400, 820);
@@ -86,9 +90,7 @@ public final class SafetyLedgerDesktop extends JFrame {
         addWindowListener(new WindowAdapter() {
             @Override public void windowClosed(WindowEvent e) { scheduler.shutdownNow(); }
         });
-        scheduler.scheduleWithFixedDelay(() -> {
-            if (!config.endpoint.isBlank() && !config.password.isBlank()) sync(false);
-        }, 20, 120, TimeUnit.SECONDS);
+        scheduleAutoSync();
         SwingUtilities.invokeLater(this::migrateWordLayoutAsync);
         refreshHolidayAsync(calendarMonth.getYear());
     }
@@ -130,17 +132,17 @@ public final class SafetyLedgerDesktop extends JFrame {
 
     private JComponent topBar() {
         JPanel bar = new JPanel(new BorderLayout(12, 0));
-        bar.setBorder(new EmptyBorder(10, 16, 10, 16));
+        bar.setBorder(new EmptyBorder(8, 18, 8, 18));
         bar.setBackground(BLUE);
 
         JPanel brand = new JPanel(new FlowLayout(FlowLayout.LEFT, 10, 0));
         brand.setOpaque(false);
-        JLabel icon = new JLabel(AppIcon.icon(46));
-        icon.setPreferredSize(new Dimension(48, 48));
+        JLabel icon = new JLabel(AppIcon.icon(56));
+        icon.setPreferredSize(new Dimension(58, 58));
         brand.add(icon);
         JLabel titleLabel = new JLabel("安全检查台账");
         titleLabel.setForeground(Color.WHITE);
-        titleLabel.setFont(titleLabel.getFont().deriveFont(Font.BOLD, 24f));
+        titleLabel.setFont(titleLabel.getFont().deriveFont(Font.BOLD, 23f));
         brand.add(titleLabel);
         bar.add(brand, BorderLayout.WEST);
 
@@ -160,7 +162,10 @@ public final class SafetyLedgerDesktop extends JFrame {
 
     private JButton headerButton(String text, boolean prominent) {
         JButton button = new JButton(text);
+        button.setUI(new javax.swing.plaf.basic.BasicButtonUI());
         button.setFocusPainted(false);
+        button.setOpaque(true);
+        button.setContentAreaFilled(true);
         button.setFont(button.getFont().deriveFont(Font.BOLD, 14f));
         button.setMargin(new Insets(8, 16, 8, 16));
         button.setPreferredSize(new Dimension(prominent ? 128 : 102, 42));
@@ -291,17 +296,17 @@ public final class SafetyLedgerDesktop extends JFrame {
         root.add(filterPanel(), BorderLayout.NORTH);
 
         table.setAutoCreateRowSorter(true);
-        table.setRowHeight(38);
+        table.setRowHeight(44);
         table.setSelectionMode(ListSelectionModel.MULTIPLE_INTERVAL_SELECTION);
         table.setGridColor(new Color(228, 233, 241));
         table.setShowHorizontalLines(true);
         table.setShowVerticalLines(false);
         table.setFillsViewportHeight(true);
-        table.setFont(table.getFont().deriveFont(13f));
-        table.getTableHeader().setPreferredSize(new Dimension(10, 40));
+        table.setFont(table.getFont().deriveFont(14f));
+        table.getTableHeader().setPreferredSize(new Dimension(10, 43));
         table.getTableHeader().setBackground(new Color(247, 249, 252));
         table.getTableHeader().setForeground(new Color(35, 49, 71));
-        table.getTableHeader().setFont(table.getTableHeader().getFont().deriveFont(Font.BOLD, 13f));
+        table.getTableHeader().setFont(table.getTableHeader().getFont().deriveFont(Font.BOLD, 14f));
         int[] widths = {50, 100, 72, 220, 145, 210, 120};
         for (int i = 0; i < widths.length; i++) table.getColumnModel().getColumn(i).setPreferredWidth(widths[i]);
         table.getColumnModel().getColumn(6).setCellRenderer(new StatusRenderer());
@@ -376,10 +381,13 @@ public final class SafetyLedgerDesktop extends JFrame {
 
     private JButton actionButton(String text, boolean primary) {
         JButton button = new JButton(text);
+        button.setUI(new javax.swing.plaf.basic.BasicButtonUI());
         button.setFocusPainted(false);
-        button.setFont(button.getFont().deriveFont(primary ? Font.BOLD : Font.PLAIN, 13f));
+        button.setOpaque(true);
+        button.setContentAreaFilled(true);
+        button.setFont(button.getFont().deriveFont(primary ? Font.BOLD : Font.PLAIN, 14f));
         button.setMargin(new Insets(6, 11, 6, 11));
-        button.setPreferredSize(new Dimension(Math.max(primary ? 76 : 105, text.length() * 14 + 28), 34));
+        button.setPreferredSize(new Dimension(Math.max(primary ? 82 : 112, text.length() * 15 + 30), 36));
         button.setBackground(primary ? BLUE : Color.WHITE);
         button.setForeground(primary ? Color.WHITE : new Color(24, 78, 156));
         button.setBorder(BorderFactory.createCompoundBorder(
@@ -428,77 +436,103 @@ public final class SafetyLedgerDesktop extends JFrame {
     private void refreshTypeChoices(){String previous=type.getSelectedItem()==null?"全部检查类型":String.valueOf(type.getSelectedItem());LinkedHashSet<String>values=new LinkedHashSet<>();values.add("全部检查类型");for(ArchiveService.IndexEntry entry:allEntries)if(!blank(entry.type).isBlank())values.add(entry.type);type.setModel(new DefaultComboBoxModel<>(values.toArray(new String[0])));type.setSelectedItem(values.contains(previous)?previous:"全部检查类型");}
     private void openRecordPreview(int viewRow){try{int modelRow=table.convertRowIndexToModel(viewRow);if(modelRow<0||modelRow>=currentPageEntries.size())throw new IllegalStateException("记录索引无效");RecordPreviewDialog.open(this,currentPageEntries.get(modelRow).folder);}catch(Exception error){showError("无法预览检查记录",error);}}
 
+
     private void showSettings() {
-        JTextField endpointField = new JTextField(config.endpoint, 36);
-        JTextField spaceField = new JTextField(config.space, 26);
-        JTextField archiveField = new JTextField(config.archiveRoot, 32);
-        JTextField deviceField = new JTextField(config.deviceName, 26);
-        JTextField shiftField = new JTextField(config.shiftDates, 36);
-        JPasswordField passwordField = new JPasswordField(config.password, 26);
+        JDialog dialog = new JDialog(this, "设置", true);
+        dialog.setDefaultCloseOperation(WindowConstants.DISPOSE_ON_CLOSE);
+        dialog.setLayout(new BorderLayout(0, 0));
+        dialog.getContentPane().setBackground(BG);
+
+        JTextField endpointField = new JTextField(config.endpoint, 40);
+        JTextField spaceField = new JTextField(config.space, 28);
+        JPasswordField passwordField = new JPasswordField(config.password, 28);
+        JTextField archiveField = new JTextField(config.archiveRoot, 34);
+        JTextField deviceField = new JTextField(config.deviceName, 28);
+        JTextField shiftField = new JTextField(config.shiftDates, 34);
         deviceField.setEditable(false);
-        shiftField.setToolTipText("多个日期用逗号分隔，例如：2026-08-14, 2026-08-18");
 
-        JPanel syncPanel = new JPanel(new GridBagLayout());
-        syncPanel.setBorder(new EmptyBorder(10, 10, 10, 10));
-        GridBagConstraints c = new GridBagConstraints();
-        c.insets = new Insets(6, 5, 6, 5);
-        c.fill = GridBagConstraints.HORIZONTAL;
-        addSettingRow(syncPanel, c, 0, "云同步地址", endpointField, null);
-        addSettingRow(syncPanel, c, 1, "同步空间", spaceField, null);
-        addSettingRow(syncPanel, c, 2, "同步空间密码", passwordField, null);
-        JButton choose = actionButton("选择文件夹", false);
-        choose.addActionListener(e -> {
-            JFileChooser chooser = new JFileChooser(archiveField.getText());
-            chooser.setFileSelectionMode(JFileChooser.DIRECTORIES_ONLY);
-            if (chooser.showOpenDialog(this) == JFileChooser.APPROVE_OPTION) archiveField.setText(chooser.getSelectedFile().toPath().toString());
-        });
-        addSettingRow(syncPanel, c, 3, "电脑本地资料库", archiveField, choose);
-        addSettingRow(syncPanel, c, 4, "本机设备名称", deviceField, null);
-        addSettingRow(syncPanel, c, 5, "倒班日期", shiftField, null);
+        SyncIntervalOption[] options = {
+                new SyncIntervalOption("关闭自动检查", 0), new SyncIntervalOption("每 1 分钟", 1),
+                new SyncIntervalOption("每 2 分钟", 2), new SyncIntervalOption("每 5 分钟", 5),
+                new SyncIntervalOption("每 10 分钟", 10), new SyncIntervalOption("每 15 分钟", 15),
+                new SyncIntervalOption("每 30 分钟", 30), new SyncIntervalOption("每 60 分钟", 60)};
+        JComboBox<SyncIntervalOption> intervalBox = new JComboBox<>(options);
+        for (SyncIntervalOption option : options) if (option.minutes == config.syncIntervalMinutes) intervalBox.setSelectedItem(option);
 
-        JPanel toolsPanel = new JPanel(new GridLayout(3, 2, 10, 10));
-        toolsPanel.setBorder(new EmptyBorder(16, 16, 16, 16));
+        JPanel cloudPanel = new JPanel(new BorderLayout(0, 12));
+        cloudPanel.setBackground(Color.WHITE);
+        cloudPanel.setBorder(new EmptyBorder(18, 22, 18, 22));
+        JPanel cloudForm = new JPanel(new GridBagLayout());
+        cloudForm.setOpaque(false);
+        GridBagConstraints c = new GridBagConstraints(); c.insets = new Insets(7, 5, 7, 5); c.fill = GridBagConstraints.HORIZONTAL;
+        addSettingRow(cloudForm, c, 0, "云同步地址", endpointField, null);
+        addSettingRow(cloudForm, c, 1, "同步空间", spaceField, null);
+        addSettingRow(cloudForm, c, 2, "同步空间密码", passwordField, null);
+        addSettingRow(cloudForm, c, 3, "自动检查间隔", intervalBox, null);
+        JLabel signalHint = new JLabel("自动检查只读取一个很小的云端更新信号；信号未变化时不会下载检查数据。", SwingConstants.LEFT);
+        signalHint.setForeground(MUTED); signalHint.setFont(signalHint.getFont().deriveFont(12f));
+        c.gridy=4;c.gridx=1;c.weightx=1;cloudForm.add(signalHint,c);
+        cloudPanel.add(cloudForm, BorderLayout.NORTH);
+
+        JTextArea testLogArea = new JTextArea("这里显示最近一次“测试连接”的网络诊断日志。", 12, 72);
+        testLogArea.setEditable(false); testLogArea.setLineWrap(true); testLogArea.setWrapStyleWord(true);
+        testLogArea.setFont(new Font("Microsoft YaHei UI", Font.PLAIN, 12));
+        JScrollPane testLogScroll = new JScrollPane(testLogArea);
+        testLogScroll.setBorder(BorderFactory.createTitledBorder("连接测试 / 网络日志"));
+        cloudPanel.add(testLogScroll, BorderLayout.CENTER);
+        JLabel saveState = new JLabel(" "); saveState.setForeground(SUCCESS);
+        JButton saveCloud = actionButton("保存设置", true);
         JButton test = actionButton("测试连接", false);
-        JButton archive = actionButton("打开资料库", false);
-        JButton importData = actionButton("导入手机数据包", false);
-        JButton exportData = actionButton("导出手机兼容数据包", false);
-        JButton viewLog = actionButton("查看同步日志", false);
-        JButton exportLog = actionButton("导出同步日志", false);
-        test.addActionListener(e -> testConnection());
-        archive.addActionListener(e -> openArchive());
-        importData.addActionListener(e -> importPackage());
-        exportData.addActionListener(e -> exportPortable());
-        viewLog.addActionListener(e -> viewSyncLog());
-        exportLog.addActionListener(e -> exportSyncLog());
-        toolsPanel.add(test); toolsPanel.add(archive); toolsPanel.add(importData);
-        toolsPanel.add(exportData); toolsPanel.add(viewLog); toolsPanel.add(exportLog);
+        test.setPreferredSize(new Dimension(118,36));
+        saveCloud.addActionListener(e -> {
+            try {
+                saveSettings(endpointField, spaceField, passwordField, archiveField, shiftField, intervalBox);
+                saveState.setText("设置已保存 · " + now());
+            } catch (Exception error) { showError("保存设置失败", error); }
+        });
+        test.addActionListener(e -> testConnection(endpointField.getText().trim(), spaceField.getText().trim(), new String(passwordField.getPassword()), testLogArea));
+        JPanel cloudActions = new JPanel(new FlowLayout(FlowLayout.RIGHT, 8, 0)); cloudActions.setOpaque(false);
+        cloudActions.add(saveState); cloudActions.add(test); cloudActions.add(saveCloud); cloudPanel.add(cloudActions, BorderLayout.SOUTH);
 
-        JTabbedPane tabs = new JTabbedPane();
-        tabs.addTab("同步与存储", syncPanel);
-        tabs.addTab("资料库 / 数据工具 / 日志", toolsPanel);
-        tabs.setPreferredSize(new Dimension(690, 340));
+        JPanel dataPanel = new JPanel(new BorderLayout(0, 14)); dataPanel.setBackground(Color.WHITE); dataPanel.setBorder(new EmptyBorder(20,22,20,22));
+        JPanel storageForm = new JPanel(new GridBagLayout()); storageForm.setOpaque(false);
+        GridBagConstraints d = new GridBagConstraints(); d.insets=new Insets(7,5,7,5);d.fill=GridBagConstraints.HORIZONTAL;
+        JButton choose = actionButton("选择文件夹", false);
+        choose.addActionListener(e -> { JFileChooser chooser=new JFileChooser(archiveField.getText());chooser.setFileSelectionMode(JFileChooser.DIRECTORIES_ONLY);if(chooser.showOpenDialog(dialog)==JFileChooser.APPROVE_OPTION)archiveField.setText(chooser.getSelectedFile().toPath().toString()); });
+        addSettingRow(storageForm,d,0,"电脑本地资料库",archiveField,choose);
+        addSettingRow(storageForm,d,1,"本机设备名称",deviceField,null);
+        addSettingRow(storageForm,d,2,"倒班日期",shiftField,null);
+        JLabel dataHint=new JLabel("检查记录长期保存在电脑资料库中；.safetydata 用于 Android/PC 之间手动导入导出。",SwingConstants.LEFT);dataHint.setForeground(MUTED);dataHint.setFont(dataHint.getFont().deriveFont(12f));
+        d.gridy=3;d.gridx=1;d.weightx=1;storageForm.add(dataHint,d);dataPanel.add(storageForm,BorderLayout.NORTH);
+        JPanel dataButtons=new JPanel(new GridLayout(2,2,12,12));dataButtons.setOpaque(false);dataButtons.setBorder(new EmptyBorder(10,40,10,40));
+        JButton openArchive=actionButton("打开本地资料库",false);JButton importData=actionButton("导入检查数据",false);JButton exportData=actionButton("导出检查数据",false);JButton saveData=actionButton("保存存储设置",true);
+        openArchive.addActionListener(e->openArchive());importData.addActionListener(e->importPackage());exportData.addActionListener(e->exportPortable());
+        saveData.addActionListener(e->{try{saveSettings(endpointField,spaceField,passwordField,archiveField,shiftField,intervalBox);}catch(Exception error){showError("保存设置失败",error);}});
+        dataButtons.add(openArchive);dataButtons.add(importData);dataButtons.add(exportData);dataButtons.add(saveData);dataPanel.add(dataButtons,BorderLayout.CENTER);
 
-        int result = JOptionPane.showConfirmDialog(this, tabs, "设置", JOptionPane.OK_CANCEL_OPTION, JOptionPane.PLAIN_MESSAGE);
-        if (result != JOptionPane.OK_OPTION) return;
-        try {
-            config.endpoint = endpointField.getText().trim();
-            config.space = spaceField.getText().trim();
-            if (config.space.isBlank()) config.space = "safety-ledger";
-            config.password = new String(passwordField.getPassword());
-            config.archiveRoot = archiveField.getText().trim();
-            config.shiftDates = shiftField.getText().trim();
-            if (config.archiveRoot.isBlank()) throw new IllegalArgumentException("请选择电脑本地资料库文件夹");
-            Files.createDirectories(config.archivePath());
-            config.save();
-            holidayService = new HolidayCalendarService(config.privateDir());
-            setStatus("设置已保存");
-            selectedIds.clear();
-            refreshTable();
-            refreshHolidayAsync(calendarMonth.getYear());
-            migrateWordLayoutAsync();
-        } catch (Exception error) {
-            showError("保存设置失败", error);
-        }
+        JPanel logPanel=new JPanel(new BorderLayout(0,14));logPanel.setBackground(Color.WHITE);logPanel.setBorder(new EmptyBorder(20,22,20,22));
+        JTextArea logInfo=new JTextArea("网络/同步日志：记录 DNS、系统代理、HTTP 请求阶段、状态码和同步步骤，不记录同步密码。\n\n软件崩溃日志：仅在 PC 客户端发生未捕获异常时生成，用于排查闪退或窗口异常。平时不会产生无意义日志。",5,70);
+        logInfo.setEditable(false);logInfo.setOpaque(false);logInfo.setLineWrap(true);logInfo.setWrapStyleWord(true);logInfo.setForeground(MUTED);logPanel.add(logInfo,BorderLayout.NORTH);
+        JPanel logButtons=new JPanel(new GridLayout(3,2,12,12));logButtons.setOpaque(false);logButtons.setBorder(new EmptyBorder(18,60,18,60));
+        JButton viewSync=actionButton("查看网络/同步日志",false);JButton exportSync=actionButton("导出网络/同步日志",false);JButton viewCrash=actionButton("查看软件崩溃日志",false);JButton exportCrash=actionButton("导出软件崩溃日志",false);JButton openLogs=actionButton("打开日志文件夹",false);JButton clearLabel=actionButton("说明：日志自动清理",false);clearLabel.setEnabled(false);
+        viewSync.addActionListener(e->viewSyncLog());exportSync.addActionListener(e->exportSyncLog());viewCrash.addActionListener(e->viewCrashLog());exportCrash.addActionListener(e->exportCrashLog());openLogs.addActionListener(e->openLogFolder());
+        logButtons.add(viewSync);logButtons.add(exportSync);logButtons.add(viewCrash);logButtons.add(exportCrash);logButtons.add(openLogs);logButtons.add(clearLabel);logPanel.add(logButtons,BorderLayout.CENTER);
+
+        JTabbedPane tabs=new JTabbedPane();tabs.addTab("云同步",cloudPanel);tabs.addTab("数据与资料",dataPanel);tabs.addTab("日志与诊断",logPanel);
+        tabs.setBorder(new EmptyBorder(8,10,4,10)); dialog.add(tabs,BorderLayout.CENTER);
+        JButton close=actionButton("关闭",false);close.setPreferredSize(new Dimension(92,36));close.addActionListener(e->dialog.dispose());
+        JPanel bottom=new JPanel(new FlowLayout(FlowLayout.RIGHT,10,8));bottom.setBackground(BG);bottom.add(close);dialog.add(bottom,BorderLayout.SOUTH);
+        dialog.setSize(920,640);dialog.setMinimumSize(new Dimension(820,560));dialog.setLocationRelativeTo(this);dialog.setVisible(true);
+    }
+
+    private void saveSettings(JTextField endpointField,JTextField spaceField,JPasswordField passwordField,JTextField archiveField,
+                              JTextField shiftField,JComboBox<SyncIntervalOption> intervalBox)throws Exception{
+        config.endpoint=endpointField.getText().trim();config.space=spaceField.getText().trim();if(config.space.isBlank())config.space="safety-ledger";
+        config.password=new String(passwordField.getPassword());config.archiveRoot=archiveField.getText().trim();config.shiftDates=shiftField.getText().trim();
+        SyncIntervalOption option=(SyncIntervalOption)intervalBox.getSelectedItem();config.syncIntervalMinutes=option==null?5:option.minutes;
+        if(config.archiveRoot.isBlank())throw new IllegalArgumentException("请选择电脑本地资料库文件夹");
+        Files.createDirectories(config.archivePath());config.save();holidayService=new HolidayCalendarService(config.privateDir());CrashLogger.install(config.privateDir());
+        lastCloudRevision="";scheduleAutoSync();selectedIds.clear();refreshTable();migrateWordLayoutAsync();setStatus("设置已保存 · 自动检查间隔："+(config.syncIntervalMinutes==0?"关闭":config.syncIntervalMinutes+" 分钟"));
     }
 
     private static void addSettingRow(JPanel panel, GridBagConstraints c, int row, String label, JComponent field, JComponent extra) {
@@ -517,6 +551,34 @@ public final class SafetyLedgerDesktop extends JFrame {
         exportItem.addActionListener(e -> exportPortable());
         menu.add(importItem); menu.add(exportItem);
         menu.show(owner, 0, owner.getHeight());
+    }
+
+
+    private synchronized void scheduleAutoSync() {
+        if (autoSyncFuture != null) autoSyncFuture.cancel(false);
+        autoSyncFuture = null;
+        if (config.syncIntervalMinutes <= 0 || config.endpoint.isBlank() || config.password.isBlank()) return;
+        long interval = Math.max(1, config.syncIntervalMinutes);
+        autoSyncFuture = scheduler.scheduleWithFixedDelay(this::pollCloudSignal, 15, interval * 60L, TimeUnit.SECONDS);
+    }
+
+    private void pollCloudSignal() {
+        if (syncing || config.endpoint.isBlank() || config.password.isBlank()) return;
+        try {
+            CloudClient client = new CloudClient(config.endpoint, config.space, config.password.toCharArray());
+            String revision = client.revision();
+            if (revision.isBlank()) { sync(false); return; }
+            if (lastCloudRevision.isBlank() || !revision.equals(lastCloudRevision)) {
+                SwingUtilities.invokeLater(() -> setStatus("检测到云端更新，正在同步…"));
+                sync(false);
+            } else {
+                SwingUtilities.invokeLater(() -> setStatus("云端无更新 · " + now()));
+            }
+        } catch (Exception error) {
+            SyncLogger logger = newSyncLogger();
+            if (logger != null) { logger.log("自动更新信号检查失败"); logger.error("自动更新信号检查", error); }
+            SwingUtilities.invokeLater(() -> setStatus("自动检查云端失败（已记录日志）：" + friendlyError(error)));
+        }
     }
 
     private SyncLogger newSyncLogger() {
@@ -564,6 +626,12 @@ public final class SafetyLedgerDesktop extends JFrame {
         }
     }
 
+
+    private Path currentCrashLog(){return CrashLogger.latest(config.privateDir());}
+    private void viewCrashLog(){Path log=currentCrashLog();JTextArea area=new JTextArea(CrashLogger.readTail(log,160000),30,105);area.setEditable(false);area.setLineWrap(false);area.setFont(new Font(Font.MONOSPACED,Font.PLAIN,12));JOptionPane.showMessageDialog(this,new JScrollPane(area),log==null?"软件崩溃日志":"软件崩溃日志 · "+log.getFileName(),JOptionPane.PLAIN_MESSAGE);}
+    private void exportCrashLog(){Path log=currentCrashLog();if(log==null||!Files.isRegularFile(log)){JOptionPane.showMessageDialog(this,"暂无软件崩溃日志。只有发生未捕获异常/闪退时才会生成。","提示",JOptionPane.INFORMATION_MESSAGE);return;}JFileChooser chooser=new JFileChooser();chooser.setSelectedFile(new java.io.File("安全检查台账-PC-崩溃日志-"+LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss"))+".log"));if(chooser.showSaveDialog(this)!=JFileChooser.APPROVE_OPTION)return;try{Files.copy(log,chooser.getSelectedFile().toPath(),StandardCopyOption.REPLACE_EXISTING);}catch(Exception error){showError("导出崩溃日志失败",error);}}
+    private void openLogFolder(){try{Path dir=config.privateDir().resolve("logs");Files.createDirectories(dir);Desktop.getDesktop().open(dir.toFile());}catch(Exception error){showError("打开日志文件夹失败",error);}}
+
     private void showSyncError(String title, Exception error, SyncLogger logger) {
         if (logger != null) logger.error(title, error);
         Path log = logger == null ? currentSyncLog() : logger.file();
@@ -578,27 +646,27 @@ public final class SafetyLedgerDesktop extends JFrame {
         setStatus(title + "：" + friendlyError(error));
     }
 
-    private void testConnection() {
-        if (config.endpoint.isBlank() || config.password.isBlank()) {
-            JOptionPane.showMessageDialog(this, "请先在“设置”中填写云同步地址和同步空间密码。", "提示", JOptionPane.INFORMATION_MESSAGE);
-            return;
+
+    private void testConnection(String endpoint, String space, String password, JTextArea output) {
+        if (endpoint.isBlank() || password.isBlank()) {
+            output.setText("请先填写云同步地址和同步空间密码。"); return;
         }
         SyncLogger logger = newSyncLogger();
+        output.setText("正在测试连接……\n将检查 DNS、Windows 系统代理、/health、WebDAV 读写和设备登记。\n");
         setStatus("正在测试云端连接…");
         CompletableFuture.runAsync(() -> {
             try {
-                if (logger != null) logger.log("测试连接开始 · endpoint=" + config.endpoint + " · space=" + config.space);
-                CloudClient client = new CloudClient(config.endpoint, config.space, config.password.toCharArray(), logger);
+                if (logger != null) logger.log("测试连接开始 · endpoint=" + endpoint + " · space=" + space);
+                CloudClient client = new CloudClient(endpoint, space, password.toCharArray(), logger);
                 client.testReadWrite();
                 if (client.isDeviceLoggedOut(config.deviceId)) throw new SecurityException("此电脑已被管理员登出；请先在管理员手机中允许该设备重新加入");
                 client.registerPcDevice(config.deviceId, config.deviceName);
-                if (logger != null) logger.log("测试连接全部完成");
-                SwingUtilities.invokeLater(() -> {
-                    setStatus("连接成功 · " + now());
-                    JOptionPane.showMessageDialog(this, "连接成功；本电脑已登记到设备管理。", "测试连接", JOptionPane.INFORMATION_MESSAGE);
-                });
+                String revision = client.revision();
+                if (logger != null) logger.log("测试连接全部完成 · signal=" + (revision.isBlank()?"兼容模式":revision));
+                SwingUtilities.invokeLater(() -> { setStatus("连接成功 · " + now()); output.setText(SyncLogger.readTail(logger==null?null:logger.file(),50000)); output.setCaretPosition(output.getDocument().getLength()); });
             } catch (Exception error) {
-                SwingUtilities.invokeLater(() -> showSyncError("测试连接失败", error, logger));
+                if (logger != null) logger.error("测试连接失败", error);
+                SwingUtilities.invokeLater(() -> { setStatus("测试连接失败：" + friendlyError(error)); output.setText(SyncLogger.readTail(logger==null?null:logger.file(),50000)+"\n\n用户提示："+friendlyError(error)); output.setCaretPosition(output.getDocument().getLength()); });
             }
         });
     }
@@ -680,13 +748,15 @@ public final class SafetyLedgerDesktop extends JFrame {
                     setStatus(text);
                     if (manual && finalFailed > 0) {
                         JOptionPane.showMessageDialog(this,
-                                "同步已完成，但有 " + finalFailed + " 个设备快照处理失败。\n其余成功内容已经保存，本地资料不会丢失。\n可在“设置 → 资料库 / 数据工具 / 日志”中查看或导出同步日志。",
+                                "同步已完成，但有 " + finalFailed + " 个设备快照处理失败。\n其余成功内容已经保存，本地资料不会丢失。\n可在“设置 → 日志与诊断”中查看或导出同步日志。",
                                 "部分同步完成", JOptionPane.WARNING_MESSAGE);
                     }
                 });
+                try { String revision = client.revision(); if (!revision.isBlank()) lastCloudRevision = revision; } catch (Exception signalError) { if (logger != null) logger.error("同步完成后读取更新信号", signalError); }
                 if (logger != null) logger.log("同步结束 · changed=" + changed + " · records=" + records + " · failed=" + failed);
             } catch (Exception error) {
-                SwingUtilities.invokeLater(() -> showSyncError("同步失败", error, logger));
+                if (manual) SwingUtilities.invokeLater(() -> showSyncError("同步失败", error, logger));
+                else { if (logger != null) logger.error("后台同步失败", error); SwingUtilities.invokeLater(() -> setStatus("后台同步失败（已记录日志）：" + friendlyError(error))); }
             } finally {
                 synchronized (syncLock) { syncing = false; }
             }
@@ -702,7 +772,7 @@ public final class SafetyLedgerDesktop extends JFrame {
     private void migrateWordLayoutAsync(){runTask("正在检查 Word A4 版式…",()->{int changed=WordLayoutMigrator.migrate(config.archivePath());return changed>0?"已按新版 A4 结构更新 "+changed+" 份系统 Word 检查单":"Word A4 版式已是最新";},this::refreshTable);}
     private <T>void runTask(String message,Callable<T>work,Runnable after){setStatus(message);CompletableFuture.supplyAsync(()->{try{return work.call();}catch(Exception e){throw new CompletionException(e);}}).whenComplete((result,error)->SwingUtilities.invokeLater(()->{if(error!=null){Throwable cause=error instanceof CompletionException&&error.getCause()!=null?error.getCause():error;showError("操作失败",cause);}else{setStatus(String.valueOf(result)+" · "+now());if(after!=null)after.run();}}));}
     private void setStatus(String text){status.setText(text);}private void showError(String title,Throwable error){String msg=friendlyError(error);setStatus(title+"："+msg);JOptionPane.showMessageDialog(this,msg,title,JOptionPane.ERROR_MESSAGE);}
-    private static String friendlyError(Throwable error){String fallback=error==null?"未知错误":error.getClass().getSimpleName();for(Throwable current=error;current!=null;current=current.getCause()){String m=current.getMessage();if(m!=null&&!m.isBlank())fallback=m;String s=m==null?"":m.toLowerCase(Locale.ROOT);if(current instanceof java.net.ConnectException||current instanceof java.net.UnknownHostException||current instanceof java.net.http.HttpTimeoutException||s.contains("failed to connect")||s.contains("timed out")||s.contains("timeout")||s.contains("unable to resolve")||s.contains("network is unreachable")||s.contains("no route to host"))return"网络连接问题：暂时无法连接云同步服务器。请检查电脑网络、VPN/代理和云同步地址后重试；电脑本地资料不会因此丢失。";}return fallback;}
+    private static String friendlyError(Throwable error){String fallback=error==null?"未知错误":error.getClass().getSimpleName();for(Throwable current=error;current!=null;current=current.getCause()){String m=current.getMessage();if(m!=null&&!m.isBlank())fallback=m;String s=m==null?"":m.toLowerCase(Locale.ROOT);if(current instanceof java.net.ConnectException||current instanceof java.net.UnknownHostException||current instanceof java.net.http.HttpTimeoutException||s.contains("failed to connect")||s.contains("timed out")||s.contains("timeout")||s.contains("unable to resolve")||s.contains("network is unreachable")||s.contains("no route to host"))return"网络连接问题：暂时无法连接云同步服务器。PC 0.2.3 已启用 Windows 系统代理；请在“设置 → 云同步 → 测试连接”查看 DNS/代理/HTTP 诊断日志。电脑本地资料不会因此丢失。";}return fallback;}
     private static String statusText(String value){if(value==null)return"";return switch(value){case"DRAFT"->"草稿";case"PENDING_RECTIFICATION"->"待整改";case"RECTIFYING"->"整改中";case"RECTIFIED"->"已整改完成";case"COMPLETED"->"检查完成";default->value;};}
     private static String blank(String value){return value==null?"":value;}private static String now(){return LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss"));}private static String safeFile(String name){return name.replaceAll("[^A-Za-z0-9._-]","_");}
     private static Properties load(Path file)throws Exception{Properties p=new Properties();if(Files.isRegularFile(file))try(var in=Files.newInputStream(file)){p.load(in);}return p;}private static void store(Path file,Properties p)throws Exception{Files.createDirectories(file.getParent());try(var out=Files.newOutputStream(file)){p.store(out,"Safety Ledger PC cloud fingerprints");}}
@@ -715,5 +785,23 @@ public final class SafetyLedgerDesktop extends JFrame {
         @Override protected void paintComponent(Graphics raw){super.paintComponent(raw);Graphics2D g=(Graphics2D)raw.create();try{g.setRenderingHint(RenderingHints.KEY_ANTIALIASING,RenderingHints.VALUE_ANTIALIAS_ON);int pad=7,w=getWidth()-pad*2,h=getHeight()-pad*2,s=Math.min(w,h);int x=(getWidth()-s)/2,y=(getHeight()-s)/2;g.setStroke(new BasicStroke(6f,BasicStroke.CAP_ROUND,BasicStroke.JOIN_ROUND));g.setColor(new Color(226,232,240));g.drawArc(x,y,s,s,0,360);g.setColor(BLUE);g.drawArc(x,y,s,s,90,-Math.round(360*fraction));}finally{g.dispose();}}
     }
 
-    public static void main(String[]args){SwingUtilities.invokeLater(()->{try{UIManager.setLookAndFeel(UIManager.getSystemLookAndFeelClassName());}catch(Exception ignored){}UIManager.put("Button.arc",8);new SafetyLedgerDesktop().setVisible(true);});}
+
+    private static void installUiDefaults(){
+        String[] preferred={"Microsoft YaHei UI","Microsoft YaHei","Noto Sans CJK SC","Segoe UI","Dialog"};
+        Set<String> available=new HashSet<>(Arrays.asList(GraphicsEnvironment.getLocalGraphicsEnvironment().getAvailableFontFamilyNames()));
+        String family="Dialog";for(String f:preferred)if(available.contains(f)){family=f;break;}
+        Font normal=new Font(family,Font.PLAIN,14),bold=new Font(family,Font.BOLD,14);
+        String[] normalKeys={"Label.font","Button.font","ComboBox.font","TextField.font","PasswordField.font","TabbedPane.font","OptionPane.font","Menu.font","MenuItem.font","CheckBox.font","RadioButton.font","ToolTip.font","Table.font"};
+        for(String key:normalKeys)UIManager.put(key,normal);UIManager.put("TableHeader.font",bold);UIManager.put("TitledBorder.font",bold);
+        UIManager.put("control",Color.WHITE);UIManager.put("Table.selectionBackground",new Color(224,237,255));UIManager.put("Table.selectionForeground",new Color(24,42,67));
+    }
+
+    private static final class SyncIntervalOption { final String label; final int minutes; SyncIntervalOption(String label,int minutes){this.label=label;this.minutes=minutes;} @Override public String toString(){return label;} }
+
+    public static void main(String[]args){
+        System.setProperty("java.net.useSystemProxies","true");System.setProperty("awt.useSystemAAFontSettings","lcd");System.setProperty("swing.aatext","true");
+        System.setProperty("sun.java2d.d3d","false");System.setProperty("sun.java2d.opengl","false");
+        SwingUtilities.invokeLater(()->{try{UIManager.setLookAndFeel(UIManager.getSystemLookAndFeelClassName());}catch(Exception ignored){}installUiDefaults();new SafetyLedgerDesktop().setVisible(true);});
+    }
+
 }

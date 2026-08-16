@@ -18,8 +18,9 @@ public final class PcConfig {
     public String endpoint="", space="safety-ledger", password="",
             archiveRoot=Path.of(System.getProperty("user.home"),"安全检查台账资料库").toString();
     public String deviceId=UUID.randomUUID().toString(), deviceName=defaultName();
-    /** Optional comma/semicolon-separated ISO dates that should carry the blue “班” marker. */
     public String shiftDates="";
+    /** 0 disables background cloud checks; otherwise this is the lightweight signal polling interval. */
+    public int syncIntervalMinutes=5;
 
     public static PcConfig load(){
         PcConfig c=new PcConfig();
@@ -30,13 +31,15 @@ public final class PcConfig {
             c.endpoint=p.getProperty("endpoint","");c.space=p.getProperty("space","safety-ledger");
             c.archiveRoot=p.getProperty("archiveRoot",c.archiveRoot);c.deviceId=p.getProperty("deviceId",c.deviceId);
             c.deviceName=p.getProperty("deviceName",defaultName());c.shiftDates=p.getProperty("shiftDates","");
+            try{c.syncIntervalMinutes=Integer.parseInt(p.getProperty("syncIntervalMinutes","5"));}catch(Exception ignored){c.syncIntervalMinutes=5;}
+            if(c.syncIntervalMinutes<0)c.syncIntervalMinutes=0;
             String secret=p.getProperty("password","");if(!secret.isBlank())c.password=decrypt(secret);return c;
         }catch(Exception ignored){return c;}
     }
     public void save()throws Exception{
         Files.createDirectories(HOME);Properties p=new Properties();p.setProperty("endpoint",endpoint);p.setProperty("space",space);
         p.setProperty("archiveRoot",archiveRoot);p.setProperty("deviceId",deviceId);p.setProperty("deviceName",deviceName);
-        p.setProperty("shiftDates",shiftDates==null?"":shiftDates);
+        p.setProperty("shiftDates",shiftDates==null?"":shiftDates);p.setProperty("syncIntervalMinutes",String.valueOf(syncIntervalMinutes));
         p.setProperty("password",password.isBlank()?"":encrypt(password));try(OutputStream out=Files.newOutputStream(FILE)){p.store(out,"Safety Ledger PC config");}
     }
     public Path archivePath(){return Path.of(archiveRoot).toAbsolutePath().normalize();}

@@ -2,6 +2,9 @@ package cn.safetyledger.pc;
 
 import java.io.IOException;
 import java.net.URI;
+import java.net.InetAddress;
+import java.net.Proxy;
+import java.net.ProxySelector;
 import java.net.URLDecoder;
 import java.net.URLEncoder;
 import java.net.http.HttpClient;
@@ -25,10 +28,7 @@ public final class CloudClient {
     private static final Set<Integer> RETRY_CODES = Set.of(408, 425, 429, 500, 502, 503, 504);
     private static final int MAX_ATTEMPTS = 3;
 
-    private final HttpClient http = HttpClient.newBuilder()
-            .connectTimeout(Duration.ofSeconds(15))
-            .followRedirects(HttpClient.Redirect.NORMAL)
-            .build();
+    private final HttpClient http = buildHttpClient();
     private final String endpoint;
     private final String rawSpace;
     private final String wireSpace;
@@ -51,6 +51,8 @@ public final class CloudClient {
 
     public void testReadWrite() throws Exception {
         log("开始云端读写测试");
+        logNetworkEnvironment();
+        healthCheck();
         prepare();
         String name = ".safety-pc-probe-" + UUID.randomUUID() + ".txt";
         URI url = fileUrl(name);
@@ -62,6 +64,69 @@ public final class CloudClient {
         }
         sendBytes("DELETE", url, new byte[0], null, 200, 202, 204, 404);
         log("云端读写测试通过");
+    }
+
+
+    public String revision() throws Exception {
+        URI uri = URI.create(spaceUrl() + ".sync-signal");
+        HttpResponse<byte[]> response = send("GET", uri, HttpRequest.BodyPublishers.noBody(), null, HttpResponse.BodyHandlers.ofByteArray());
+        if (response.statusCode() == 404 || response.statusCode() == 405) {
+            log("云端未提供轻量更新信号接口，将兼容使用完整同步检查");
+            return "";
+        }
+        if (response.statusCode() / 100 != 2) throw failure("读取云端更新信号失败", response.statusCode(), response.body());
+        String text = new String(response.body(), StandardCharsets.UTF_8);
+        Matcher matcher = Pattern.compile("\\\"revision\\\"\\s*:\\s*\\\"([^\\\"]*)\\\"").matcher(text);
+        String value = matcher.find() ? matcher.group(1) : text.trim();
+        log("云端更新信号 · revision=" + (value.length() > 24 ? value.substring(0,24) : value));
+        return value;
+    }
+
+    public void logNetworkEnvironment() {
+        try {
+            URI base = URI.create(endpoint);
+            String host = base.getHost();
+            log("网络诊断 · endpoint=" + safeUri(base) + " · java=" + System.getProperty("java.version"));
+            if (host != null) {
+                InetAddress[] addresses = InetAddress.getAllByName(host);
+                StringBuilder resolved = new StringBuilder();
+                for (InetAddress address : addresses) { if (resolved.length() > 0) resolved.append(", "); resolved.append(address.getHostAddress()); }
+                log("DNS 解析 · " + host + " -> " + resolved);
+            }
+            ProxySelector selector = ProxySelector.getDefault();
+            List<Proxy> proxies = selector == null ? List.of() : selector.select(base);
+            log("系统代理 · " + (proxies == null || proxies.isEmpty() ? "未检测到" : proxies.toString()));
+        } catch (Exception error) {
+            log("网络诊断失败 · " + error.getClass().getSimpleName() + " · " + String.valueOf(error.getMessage()));
+        }
+    }
+
+    private void healthCheck() throws Exception {
+        URI uri = URI.create(endpoint + "health");
+        try {
+            HttpRequest request = HttpRequest.newBuilder(uri).timeout(Duration.ofSeconds(12)).GET()
+                    .header("User-Agent", "SafetyLedger-PC/0.2.3").build();
+            HttpResponse<byte[]> response = http.send(request, HttpResponse.BodyHandlers.ofByteArray());
+            String body = new String(response.body(), StandardCharsets.UTF_8).replaceAll("\\s+", " ").trim();
+            if (body.length() > 260) body = body.substring(0,260);
+            log("健康检查 /health -> " + response.statusCode() + (body.isBlank() ? "" : " · " + body));
+            if (response.statusCode() == 503) throw new IOException("云同步服务尚未部署完整：" + body);
+        } catch (IOException error) {
+            log("健康检查网络异常 · " + error.getClass().getSimpleName() + " · " + String.valueOf(error.getMessage()));
+            throw error;
+        } catch (InterruptedException interrupted) {
+            Thread.currentThread().interrupt(); throw interrupted;
+        }
+    }
+
+    private static HttpClient buildHttpClient() {
+        HttpClient.Builder builder = HttpClient.newBuilder()
+                .connectTimeout(Duration.ofSeconds(15))
+                .followRedirects(HttpClient.Redirect.NORMAL)
+                .version(HttpClient.Version.HTTP_1_1);
+        ProxySelector selector = ProxySelector.getDefault();
+        if (selector != null) builder.proxy(selector);
+        return builder.build();
     }
 
     public void prepare() throws Exception {
@@ -217,7 +282,7 @@ public final class CloudClient {
     private HttpRequest.Builder request(URI uri) {
         return HttpRequest.newBuilder(uri)
                 .timeout(Duration.ofSeconds(120))
-                .header("User-Agent", "SafetyLedger-PC/0.2.2")
+                .header("User-Agent", "SafetyLedger-PC/0.2.3")
                 .header("Authorization", authorization)
                 .header("X-Safety-Ledger-Space", wireSpace);
     }
