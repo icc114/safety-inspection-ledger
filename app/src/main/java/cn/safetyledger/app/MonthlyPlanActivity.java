@@ -23,6 +23,7 @@ import java.util.UUID;
 
 /** User-editable monthly inspection targets and matching rules. */
 public final class MonthlyPlanActivity extends Activity {
+    private static final int MAX_PLAN_ITEMS = 4;
     private LedgerRepository repo;
     private final List<MonthlyPlanConfig.Item> draft = new ArrayList<>();
     private LinearLayout listBox;
@@ -48,7 +49,7 @@ public final class MonthlyPlanActivity extends Activity {
         LinearLayout intro = Ui.card(this);
         intro.addView(Ui.sectionTitle(this, "", "计划项目由你自己维护", null));
         TextView note = Ui.text(this,
-                "名称完全由你自己填写，例如“共享单车”“美团”“车棚”，可新增、删除、改名和调整顺序。统计关键词用于从当月检查记录中识别该项目；APP 会在模板名称、检查类型、被检查单位、地点和被检查人中查找关键词，多个关键词可用 | 分隔。\n\n计划次数填 0 表示只统计实际检查次数；填 1、4、10 等则同时显示目标、已检次数和完成率。每保存一条正式检查记录计 1 次，草稿不计入。首页的红色“漏”是独立的自然周提醒：周一至周日为一周，跨月周归属于周一所在月份，本周未结束前不会判定漏检。",
+                "最多设置 4 个计划项目，名称完全由你自己填写，例如“共享单车”“美团”“车棚”，可新增、删除、改名和调整顺序。统计关键词用于从当月检查记录中识别该项目；APP 会在模板名称、检查类型、被检查单位、地点和被检查人中查找关键词，多个关键词可用 | 分隔。\n\n计划次数填 0 表示只统计实际检查次数；填 1、4、10 等则同时显示目标、已检次数和完成率。每保存一条正式检查记录计 1 次，草稿不计入。首页会根据计划项目数量自动排版：1-2 项放大显示，3-4 项自动紧凑排列。",
                 12, false);
         note.setTextColor(Ui.MUTED);
         intro.addView(note);
@@ -62,6 +63,10 @@ public final class MonthlyPlanActivity extends Activity {
         Button add = Ui.secondaryButton(this, "＋ 新增计划项目");
         add.setTextSize(14f);
         add.setOnClickListener(view -> {
+            if (draft.size() >= MAX_PLAN_ITEMS) {
+                Ui.toast(this, "最多设置 4 个每月检查计划项目");
+                return;
+            }
             draft.add(new MonthlyPlanConfig.Item(UUID.randomUUID().toString(), "", "", 1));
             renderList();
         });
@@ -219,6 +224,10 @@ public final class MonthlyPlanActivity extends Activity {
     }
 
     private void savePlans() {
+        if (draft.size() > MAX_PLAN_ITEMS) {
+            Ui.toast(this, "每月检查计划最多保留 4 个项目，请先删除多余项目");
+            return;
+        }
         for (int i = 0; i < draft.size(); i++) {
             MonthlyPlanConfig.Item item = draft.get(i);
             item.name = item.name == null ? "" : item.name.trim();

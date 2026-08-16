@@ -452,23 +452,23 @@ public final class LedgerActivity extends Activity {
 
         calendarBox.addView(left, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1));
         calendarBox.addView(Ui.horizontalGap(this, 3));
-        calendarBox.addView(monthProgressPanel(), new LinearLayout.LayoutParams(Ui.dp(this, 104), ViewGroup.LayoutParams.MATCH_PARENT));
+        calendarBox.addView(monthProgressPanel(), new LinearLayout.LayoutParams(Ui.dp(this, 108), ViewGroup.LayoutParams.MATCH_PARENT));
     }
 
     private LinearLayout monthProgressPanel() {
         LinearLayout panel = Ui.column(this);
         panel.setGravity(Gravity.CENTER_HORIZONTAL);
-        panel.setPadding(Ui.dp(this, 4), Ui.dp(this, 3), Ui.dp(this, 4), Ui.dp(this, 3));
+        panel.setPadding(Ui.dp(this, 3), Ui.dp(this, 3), Ui.dp(this, 3), Ui.dp(this, 3));
         panel.setBackground(Ui.shape(this, Color.WHITE, Ui.LINE, 11));
 
         MonthlyPlanConfig.Summary summary = MonthlyPlanConfig.summarize(repo, month);
 
         LinearLayout titleRow = Ui.row(this);
-        TextView title = Ui.text(this, "本月检查进度", 9, true);
+        TextView title = Ui.text(this, "本月检查进度", 8, true);
         title.setPadding(0, 0, 0, 0);
         title.setGravity(Gravity.CENTER_VERTICAL);
         title.setSingleLine(true);
-        TextView info = Ui.text(this, "!", 9, true);
+        TextView info = Ui.text(this, "!", 8, true);
         info.setGravity(Gravity.CENTER);
         info.setPadding(0, 0, 0, 0);
         info.setIncludeFontPadding(false);
@@ -476,11 +476,12 @@ public final class LedgerActivity extends Activity {
         info.setBackground(Ui.shape(this, Color.rgb(244, 248, 255), Color.rgb(170, 193, 226), 20));
         info.setContentDescription("检查进度说明");
         info.setOnClickListener(this::showProgressHelp);
-        titleRow.addView(title, new LinearLayout.LayoutParams(0, Ui.dp(this, 18), 1));
-        titleRow.addView(info, new LinearLayout.LayoutParams(Ui.dp(this, 17), Ui.dp(this, 17)));
+        titleRow.addView(title, new LinearLayout.LayoutParams(0, Ui.dp(this, 17), 1));
+        titleRow.addView(info, new LinearLayout.LayoutParams(Ui.dp(this, 16), Ui.dp(this, 16)));
         panel.addView(titleRow);
 
         DonutProgressView rate = new DonutProgressView(this);
+        rate.setCompact(true);
         if (summary.plannedTotal > 0) {
             rate.setProgress(summary.percent());
         } else {
@@ -488,44 +489,34 @@ public final class LedgerActivity extends Activity {
             rate.setCenterText(summary.totalInspections + "次");
         }
         LinearLayout.LayoutParams donutParams =
-                new LinearLayout.LayoutParams(Ui.dp(this, 46), Ui.dp(this, 46));
+                new LinearLayout.LayoutParams(Ui.dp(this, 39), Ui.dp(this, 39));
         donutParams.gravity = Gravity.CENTER_HORIZONTAL;
         panel.addView(rate, donutParams);
 
         LinearLayout overall = Ui.row(this);
         overall.setGravity(Gravity.CENTER_VERTICAL);
-        overall.addView(progressMetric("目标 " + summary.plannedTotal, Ui.DANGER), Ui.weight(1));
-        overall.addView(progressMetric("已检 " + summary.actualAgainstPlan,
-                Color.rgb(38, 177, 91)), Ui.weight(1));
-        TextView overallStatus = dashboardStatus(summary.lastCompletedWeekMissed,
-                summary.shouldShowReachedBadge());
+        overall.addView(progressNumber(String.valueOf(summary.plannedTotal), Ui.DANGER, 8), Ui.weight(1));
+        overall.addView(progressNumber(String.valueOf(summary.actualAgainstPlan),
+                Color.rgb(38, 177, 91), 8), Ui.weight(1));
+        TextView overallStatus = overallDashboardStatus(summary);
         if (overallStatus != null) {
             overall.addView(overallStatus,
-                    new LinearLayout.LayoutParams(Ui.dp(this, 21), Ui.dp(this, 21)));
+                    new LinearLayout.LayoutParams(Ui.dp(this, 19), Ui.dp(this, 19)));
         }
-        panel.addView(overall, new LinearLayout.LayoutParams(-1, Ui.dp(this, 22)));
+        panel.addView(overall, new LinearLayout.LayoutParams(-1, Ui.dp(this, 20)));
 
         panel.addView(Ui.divider(this));
 
-        int shown = 0;
-        for (MonthlyPlanConfig.Result result : summary.results) {
-            if (shown >= 2) break;
-            panel.addView(planItemProgress(result));
-            shown++;
-        }
-
-        if (summary.results.isEmpty()) {
+        int count = Math.min(4, summary.results.size());
+        if (count == 0) {
             TextView empty = Ui.text(this, "未设置计划\n点击新增", 8, false);
             empty.setPadding(0, 0, 0, 0);
             empty.setGravity(Gravity.CENTER);
             empty.setTextColor(Ui.MUTED);
-            panel.addView(empty, new LinearLayout.LayoutParams(-1, Ui.dp(this, 44)));
-        } else if (summary.results.size() > shown) {
-            TextView more = Ui.text(this, "＋" + (summary.results.size() - shown) + "项", 8, false);
-            more.setPadding(0, 0, 0, 0);
-            more.setGravity(Gravity.CENTER);
-            more.setTextColor(Ui.MUTED);
-            panel.addView(more, new LinearLayout.LayoutParams(-1, Ui.dp(this, 13)));
+            panel.addView(empty, new LinearLayout.LayoutParams(-1, 0, 1));
+        } else {
+            LinearLayout adaptive = adaptivePlanGrid(summary.results.subList(0, count));
+            panel.addView(adaptive, new LinearLayout.LayoutParams(-1, 0, 1));
         }
 
         panel.setClickable(true);
@@ -534,20 +525,71 @@ public final class LedgerActivity extends Activity {
         return panel;
     }
 
-    private LinearLayout planItemProgress(MonthlyPlanConfig.Result result) {
+    /**
+     * Adaptive dashboard:
+     * 1 item = one large tile; 2 items = two larger stacked tiles;
+     * 3 items = one large tile + two compact tiles; 4 items = compact 2 x 2 grid.
+     * This avoids a large empty area when the user only configured one or two plans.
+     */
+    private LinearLayout adaptivePlanGrid(List<MonthlyPlanConfig.Result> results) {
+        LinearLayout root = Ui.column(this);
+        root.setPadding(0, Ui.dp(this, 2), 0, 0);
+        int count = results.size();
+        if (count == 1) {
+            root.addView(planItemProgress(results.get(0), false), new LinearLayout.LayoutParams(-1, 0, 1));
+            return root;
+        }
+        if (count == 2) {
+            root.addView(planItemProgress(results.get(0), false), new LinearLayout.LayoutParams(-1, 0, 1));
+            root.addView(Ui.gap(this, 1));
+            root.addView(planItemProgress(results.get(1), false), new LinearLayout.LayoutParams(-1, 0, 1));
+            return root;
+        }
+        if (count == 3) {
+            // First item receives the full width so the panel still feels balanced rather than leaving a blank cell.
+            root.addView(planItemProgress(results.get(0), true), new LinearLayout.LayoutParams(-1, 0, 1));
+            LinearLayout row = Ui.row(this);
+            row.addView(planItemProgress(results.get(1), true), new LinearLayout.LayoutParams(0, -1, 1));
+            row.addView(Ui.horizontalGap(this, 2));
+            row.addView(planItemProgress(results.get(2), true), new LinearLayout.LayoutParams(0, -1, 1));
+            root.addView(row, new LinearLayout.LayoutParams(-1, 0, 1));
+            return root;
+        }
+
+        LinearLayout row1 = Ui.row(this);
+        row1.addView(planItemProgress(results.get(0), true), new LinearLayout.LayoutParams(0, -1, 1));
+        row1.addView(Ui.horizontalGap(this, 2));
+        row1.addView(planItemProgress(results.get(1), true), new LinearLayout.LayoutParams(0, -1, 1));
+        LinearLayout row2 = Ui.row(this);
+        row2.addView(planItemProgress(results.get(2), true), new LinearLayout.LayoutParams(0, -1, 1));
+        row2.addView(Ui.horizontalGap(this, 2));
+        row2.addView(planItemProgress(results.get(3), true), new LinearLayout.LayoutParams(0, -1, 1));
+        root.addView(row1, new LinearLayout.LayoutParams(-1, 0, 1));
+        root.addView(Ui.gap(this, 1));
+        root.addView(row2, new LinearLayout.LayoutParams(-1, 0, 1));
+        return root;
+    }
+
+    private LinearLayout planItemProgress(MonthlyPlanConfig.Result result, boolean compact) {
         LinearLayout box = Ui.column(this);
-        box.setPadding(0, Ui.dp(this, 2), 0, Ui.dp(this, 2));
+        box.setGravity(Gravity.CENTER_HORIZONTAL);
+        box.setPadding(Ui.dp(this, compact ? 1 : 2), Ui.dp(this, 1),
+                Ui.dp(this, compact ? 1 : 2), Ui.dp(this, 1));
+        box.setBackground(Ui.shape(this, Color.rgb(251, 253, 255), Color.TRANSPARENT, 8));
 
         LinearLayout nameRow = Ui.row(this);
-        TextView name = Ui.text(this, compactProgressName(result.item.name), 8, true);
+        nameRow.setGravity(Gravity.CENTER_VERTICAL);
+        TextView name = Ui.text(this, compactProgressName(result.item.name, compact ? 4 : 7),
+                compact ? 7 : 8, true);
         name.setPadding(0, 0, 0, 0);
         name.setSingleLine(true);
+        name.setGravity(Gravity.CENTER_VERTICAL);
         name.setTextColor(Ui.TEXT);
-        nameRow.addView(name, new LinearLayout.LayoutParams(0, Ui.dp(this, 15), 1));
-        TextView status = dashboardStatus(result.lastCompletedWeekMissed,
-                result.shouldShowReachedBadge());
+        nameRow.addView(name, new LinearLayout.LayoutParams(0, Ui.dp(this, compact ? 13 : 15), 1));
+        TextView status = itemDashboardStatus(result);
         if (status != null) {
-            nameRow.addView(status, new LinearLayout.LayoutParams(Ui.dp(this, 18), Ui.dp(this, 18)));
+            int badge = Ui.dp(this, compact ? 16 : 18);
+            nameRow.addView(status, new LinearLayout.LayoutParams(badge, badge));
         }
         box.addView(nameRow);
 
@@ -559,21 +601,23 @@ public final class LedgerActivity extends Activity {
             donut.setProgress(0);
             donut.setCenterText(result.actual + "次");
         }
-        LinearLayout.LayoutParams donutParams =
-                new LinearLayout.LayoutParams(Ui.dp(this, 32), Ui.dp(this, 32));
+        int donutSize = Ui.dp(this, compact ? 25 : 32);
+        LinearLayout.LayoutParams donutParams = new LinearLayout.LayoutParams(donutSize, donutSize);
         donutParams.gravity = Gravity.CENTER_HORIZONTAL;
         box.addView(donut, donutParams);
 
         LinearLayout metrics = Ui.row(this);
-        metrics.addView(progressMetric("目标 " + result.item.target, Ui.DANGER), Ui.weight(1));
-        metrics.addView(progressMetric("已检 " + result.actual,
-                Color.rgb(38, 177, 91)), Ui.weight(1));
-        box.addView(metrics, new LinearLayout.LayoutParams(-1, Ui.dp(this, 14)));
+        // No repeated labels here: red number = target; green number = checked count.
+        metrics.addView(progressNumber(String.valueOf(result.item.target), Ui.DANGER,
+                compact ? 7 : 8), Ui.weight(1));
+        metrics.addView(progressNumber(String.valueOf(result.actual),
+                Color.rgb(38, 177, 91), compact ? 7 : 8), Ui.weight(1));
+        box.addView(metrics, new LinearLayout.LayoutParams(-1, Ui.dp(this, compact ? 12 : 14)));
         return box;
     }
 
-    private TextView progressMetric(String value, int color) {
-        TextView metric = Ui.text(this, value, 7, true);
+    private TextView progressNumber(String value, int color, int sizeSp) {
+        TextView metric = Ui.text(this, value, sizeSp, true);
         metric.setPadding(0, 0, 0, 0);
         metric.setGravity(Gravity.CENTER);
         metric.setSingleLine(true);
@@ -582,14 +626,27 @@ public final class LedgerActivity extends Activity {
         return metric;
     }
 
-    private TextView dashboardStatus(boolean missedLastWeek, boolean showReached) {
-        if (missedLastWeek) return statusBadge("漏", Color.rgb(218, 57, 62));
-        if (showReached) return statusBadge("✓", Color.rgb(38, 177, 91));
+    /** Reaching the monthly target suppresses a stale weekly leak warning. */
+    private TextView itemDashboardStatus(MonthlyPlanConfig.Result result) {
+        if (result.reached()) {
+            return result.currentWeekHasInspection
+                    ? statusBadge("✓", Color.rgb(38, 177, 91)) : null;
+        }
+        if (result.lastCompletedWeekMissed) return statusBadge("漏", Color.rgb(218, 57, 62));
+        return null;
+    }
+
+    private TextView overallDashboardStatus(MonthlyPlanConfig.Summary summary) {
+        if (summary.reached()) {
+            return summary.currentWeekHasInspection
+                    ? statusBadge("✓", Color.rgb(38, 177, 91)) : null;
+        }
+        if (summary.lastCompletedWeekMissed) return statusBadge("漏", Color.rgb(218, 57, 62));
         return null;
     }
 
     private TextView statusBadge(String value, int color) {
-        TextView badge = Ui.text(this, value, 9, true);
+        TextView badge = Ui.text(this, value, 8, true);
         badge.setGravity(Gravity.CENTER);
         badge.setPadding(0, 0, 0, 0);
         badge.setIncludeFontPadding(false);
@@ -600,7 +657,7 @@ public final class LedgerActivity extends Activity {
 
     private void showProgressHelp(View anchor) {
         TextView help = Ui.text(this,
-                "红：月度目标   绿：本月已检\n✓：目标完成且本周已有检查\n漏：上周整周没有对应检查\n本周尚未检查时不提前判漏。",
+                "红色数字：月度目标   绿色数字：本月已检\n✓：目标完成且本周已有检查\n漏：目标未完成且上周整周没有对应检查\n目标已完成后不再提示漏检；本周未结束不提前判漏。",
                 11, false);
         help.setTextColor(Ui.TEXT);
         help.setPadding(Ui.dp(this, 10), Ui.dp(this, 9), Ui.dp(this, 10), Ui.dp(this, 9));
@@ -655,8 +712,11 @@ public final class LedgerActivity extends Activity {
             } else {
                 message.append("（只统计，不设目标）");
             }
-            if (result.lastCompletedWeekMissed) message.append("  漏");
-            else if (result.shouldShowReachedBadge()) message.append("  ✓");
+            if (result.reached()) {
+                if (result.currentWeekHasInspection) message.append("  ✓");
+            } else if (result.lastCompletedWeekMissed) {
+                message.append("  漏");
+            }
             message.append('\n');
         }
         new AlertDialog.Builder(this)
@@ -667,10 +727,11 @@ public final class LedgerActivity extends Activity {
                 .show();
     }
 
-    private String compactProgressName(String name) {
+    private String compactProgressName(String name, int maxLength) {
         if (name == null || name.isBlank()) return "未命名";
         String value = name.trim();
-        return value.length() > 6 ? value.substring(0, 6) + "…" : value;
+        int limit = Math.max(2, maxLength);
+        return value.length() > limit ? value.substring(0, limit) + "…" : value;
     }
 
     private void addProgressSpacer(LinearLayout panel) {
