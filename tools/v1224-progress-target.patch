@@ -1,0 +1,17 @@
+diff --git a/app/src/main/java/cn/safetyledger/app/LedgerActivity.java b/app/src/main/java/cn/safetyledger/app/LedgerActivity.java
+--- a/app/src/main/java/cn/safetyledger/app/LedgerActivity.java
++++ b/app/src/main/java/cn/safetyledger/app/LedgerActivity.java
+@@ -420,7 +420,8 @@ public final class LedgerActivity extends Activity {
+-        int planned = (month.lengthOfMonth() + 6) / 7;
++        // Product rule: monthly reminder target is four weekly safety inspections.
++        int planned = 4;
+         Set<Integer> completedWeeks = new HashSet<>();
+
+diff --git a/desktop/src/main/java/cn/safetyledger/pc/DesktopUiPatch.java b/desktop/src/main/java/cn/safetyledger/pc/DesktopUiPatch.java
+--- a/desktop/src/main/java/cn/safetyledger/pc/DesktopUiPatch.java
++++ b/desktop/src/main/java/cn/safetyledger/pc/DesktopUiPatch.java
+@@ -188,7 +188,8 @@ public final class DesktopUiPatch {
+-            int planned = (month.lengthOfMonth() + 6) / 7;
++            // Product rule: monthly reminder target is four weekly safety inspections.
++            int planned = 4;
+             Set<Integer> doneWeeks = new HashSet<>();
