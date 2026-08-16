@@ -1,0 +1,39 @@
+name: Apply 1.2.32 Adaptive Progress Dashboard
+
+on:
+  push:
+    branches:
+      - 'agent/v1232-adaptive-progress-grid'
+    paths:
+      - 'tools/apply-v1232-adaptive-progress.py'
+      - '.github/workflows/apply-v1232-adaptive-progress.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/v1232-adaptive-progress-grid
+          fetch-depth: 0
+      - name: Apply adaptive progress changes
+        run: python3 tools/apply-v1232-adaptive-progress.py
+      - name: Commit source changes
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add app/src/main/java/cn/safetyledger/app/LedgerActivity.java \
+                  app/src/main/java/cn/safetyledger/app/MonthlyPlanActivity.java \
+                  app/build.gradle \
+                  .github/workflows/android-build.yml \
+                  app/VERSION_1.2.32.txt
+          if git diff --cached --quiet; then
+            echo "Nothing to commit"
+            exit 0
+          fi
+          git commit -m "Implement adaptive 1-4 item monthly progress grid"
+          git push origin HEAD:agent/v1232-adaptive-progress-grid
