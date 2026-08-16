@@ -1,0 +1,83 @@
+name: PC 0.2.2 Windows Build
+
+on:
+  push:
+    branches:
+      - agent/pc-v022-mobile-ui-sync-log-final
+    paths:
+      - desktop/**
+      - .github/workflows/pc-v022-windows.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: agent/pc-v022-mobile-ui-sync-log-final
+
+      - name: Set up Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: maven
+
+      - name: Test and build fat JAR
+        shell: pwsh
+        run: mvn -f desktop/pom.xml --batch-mode test package
+
+      - name: Build portable Windows app image
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path dist | Out-Null
+          jpackage `
+            --type app-image `
+            --name "安全检查台账 PC" `
+            --app-version "0.2.2" `
+            --vendor "Safety Ledger" `
+            --input "desktop/target" `
+            --main-jar "safety-ledger-pc-0.2.2-all.jar" `
+            --main-class "cn.safetyledger.pc.SafetyLedgerDesktop" `
+            --java-options "-Dfile.encoding=UTF-8" `
+            --dest "dist"
+
+          @'
+          安全检查台账 PC 0.2.2
+
+          使用方法：
+          1. 解压整个压缩包，不要只单独复制 exe。
+          2. 双击“安全检查台账 PC.exe”运行。
+          3. 原 0.2.1 的配置和本地资料库不会因升级被删除。
+
+          0.2.2 主要更新：
+          - 删除首页左侧日历，检查记录区域全宽显示。
+          - 顶部仅保留“立即同步”和“设置”，资料库、数据工具、测试连接、同步日志均放入设置。
+          - 新增同步日志查看和导出；同步失败时可直接打开/导出日志。
+          - 云同步增加临时网络错误自动重试、分快照容错和更详细的诊断信息。
+          - 优化窗口顶部应用图标的清晰度。
+          '@ | Set-Content -Path "dist/安全检查台账 PC/使用说明.txt" -Encoding UTF8
+
+          Compress-Archive -Path "dist/安全检查台账 PC" -DestinationPath "安全检查台账-PC-0.2.2-Windows.zip" -Force
+
+      - name: Upload Windows package
+        uses: actions/upload-artifact@v4
+        with:
+          name: 安全检查台账-PC-0.2.2-Windows
+          path: 安全检查台账-PC-0.2.2-Windows.zip
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Upload fat JAR
+        uses: actions/upload-artifact@v4
+        with:
+          name: 安全检查台账-PC-0.2.2-fat-jar
+          path: desktop/target/safety-ledger-pc-0.2.2-all.jar
+          if-no-files-found: error
+          retention-days: 30
