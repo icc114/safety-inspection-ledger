@@ -1,0 +1,160 @@
+diff --git a/desktop/src/main/java/cn/safetyledger/pc/RecordPreviewDialog.java b/desktop/src/main/java/cn/safetyledger/pc/RecordPreviewDialog.java
+index c085bc6..f606c40 100644
+--- a/desktop/src/main/java/cn/safetyledger/pc/RecordPreviewDialog.java
++++ b/desktop/src/main/java/cn/safetyledger/pc/RecordPreviewDialog.java
+@@ -26,8 +26,10 @@ public final class RecordPreviewDialog extends JDialog {
+         this.folder = folder;
+         this.record = record;
+         buildUi();
+-        setSize(980, 760);
+-        setMinimumSize(new Dimension(820, 620));
++        BufferedImage appIcon = appIcon();
++        if (appIcon != null) setIconImage(appIcon);
++        setSize(1180, 720);
++        setMinimumSize(new Dimension(960, 600));
+         setLocationRelativeTo(owner);
+     }
+ 
+@@ -46,37 +48,90 @@ public final class RecordPreviewDialog extends JDialog {
+     }
+ 
+     private void buildUi() {
+-        setLayout(new BorderLayout(8, 8));
+-        JPanel header = new JPanel(new BorderLayout(8, 8));
+-        header.setBorder(new EmptyBorder(14, 16, 6, 16));
++        getContentPane().setBackground(new Color(247, 249, 252));
++        setLayout(new BorderLayout(10, 10));
++        ((JComponent)getContentPane()).setBorder(new EmptyBorder(10, 12, 10, 12));
++
++        JPanel header = new JPanel(new BorderLayout(14, 0));
++        header.setBackground(Color.WHITE);
++        header.setBorder(BorderFactory.createCompoundBorder(
++                BorderFactory.createLineBorder(new Color(220, 228, 238)), new EmptyBorder(12, 16, 12, 16)));
++
++        JPanel brand = new JPanel(new BorderLayout(10, 0));
++        brand.setOpaque(false);
++        BufferedImage icon = appIcon();
++        JLabel iconLabel = new JLabel();
++        iconLabel.setPreferredSize(new Dimension(100, 100));
++        if (icon != null) iconLabel.setIcon(new ImageIcon(icon.getScaledInstance(92, 92, Image.SCALE_SMOOTH)));
++        brand.add(iconLabel, BorderLayout.WEST);
++        JSeparator divider = new JSeparator(SwingConstants.VERTICAL);
++        divider.setPreferredSize(new Dimension(1, 96));
++        brand.add(divider, BorderLayout.EAST);
++        header.add(brand, BorderLayout.WEST);
++
++        JPanel summaryRoot = new JPanel(new BorderLayout(0, 7));
++        summaryRoot.setOpaque(false);
+         JLabel title = new JLabel(formTitle(record.templateName));
+         title.setFont(title.getFont().deriveFont(Font.BOLD, 22f));
+-        header.add(title, BorderLayout.NORTH);
+-
+-        JPanel summary = new JPanel(new GridLayout(3, 4, 10, 6));
++        summaryRoot.add(title, BorderLayout.NORTH);
++        JPanel summary = new JPanel(new GridLayout(3, 4, 14, 7));
++        summary.setOpaque(false);
+         addInfo(summary, "检查日期", record.date);
+         addInfo(summary, "检查时间", record.time);
+         addInfo(summary, "检查类型", record.type);
+         addInfo(summary, "状态", status(record.status));
+         addInfo(summary, "检查地点", record.location);
+         addInfo(summary, "记录编号", shortId(record.id));
+-        header.add(summary, BorderLayout.CENTER);
++        summaryRoot.add(summary, BorderLayout.CENTER);
++        header.add(summaryRoot, BorderLayout.CENTER);
+         add(header, BorderLayout.NORTH);
+ 
+-        JTabbedPane tabs = new JTabbedPane();
+-        tabs.addTab("检查事项", itemsPanel());
+-        tabs.addTab("整改 / 复查", detailPanel());
+-        tabs.addTab("照片", photoPanel());
+-        add(tabs, BorderLayout.CENTER);
++        CardLayout cards = new CardLayout();
++        JPanel content = new JPanel(cards);
++        content.setBackground(Color.WHITE);
++        content.setBorder(BorderFactory.createLineBorder(new Color(220, 228, 238)));
++        content.add(itemsPanel(), "items");
++        content.add(detailPanel(), "rectify");
++        content.add(photoPanel(), "photos");
+ 
+-        JPanel actions = new JPanel(new FlowLayout(FlowLayout.RIGHT, 8, 8));
++        JPanel nav = new JPanel();
++        nav.setLayout(new BoxLayout(nav, BoxLayout.Y_AXIS));
++        nav.setPreferredSize(new Dimension(150, 0));
++        nav.setBackground(Color.WHITE);
++        nav.setBorder(BorderFactory.createCompoundBorder(
++                BorderFactory.createLineBorder(new Color(220, 228, 238)), new EmptyBorder(10, 8, 10, 8)));
++        ButtonGroup group = new ButtonGroup();
++        JToggleButton items = navButton("检查项目");
++        JToggleButton rectify = navButton("整改 / 复查");
++        JToggleButton photos = navButton("现场照片");
++        group.add(items); group.add(rectify); group.add(photos);
++        nav.add(items); nav.add(Box.createVerticalStrut(7));
++        nav.add(rectify); nav.add(Box.createVerticalStrut(7));
++        nav.add(photos); nav.add(Box.createVerticalGlue());
++        items.setSelected(true);
++        items.addActionListener(e -> cards.show(content, "items"));
++        rectify.addActionListener(e -> cards.show(content, "rectify"));
++        photos.addActionListener(e -> cards.show(content, "photos"));
++
++        JPanel center = new JPanel(new BorderLayout(10, 0));
++        center.setOpaque(false);
++        center.add(nav, BorderLayout.WEST);
++        center.add(content, BorderLayout.CENTER);
++        add(center, BorderLayout.CENTER);
++
++        JPanel actions = new JPanel(new FlowLayout(FlowLayout.RIGHT, 8, 4));
++        actions.setOpaque(false);
+         JButton word = new JButton("打开 Word");
+         word.addActionListener(e -> openFile(folder.resolve("检查记录.docx"), "找不到检查记录.docx"));
+         JButton openFolder = new JButton("打开本地文件夹");
+         openFolder.addActionListener(e -> openFile(folder, "找不到本地记录文件夹"));
++        JButton export = new JButton("导出 PDF");
++        export.addActionListener(e -> exportPdf());
+         JButton close = new JButton("关闭");
++        close.setBackground(new Color(35, 103, 183));
++        close.setForeground(Color.WHITE);
+         close.addActionListener(e -> dispose());
+-        actions.add(word); actions.add(openFolder); actions.add(close);
++        actions.add(word); actions.add(openFolder); actions.add(export); actions.add(close);
+         add(actions, BorderLayout.SOUTH);
+ 
+         getRootPane().setDefaultButton(close);
+@@ -84,6 +139,37 @@ public final class RecordPreviewDialog extends JDialog {
+                 KeyStroke.getKeyStroke("ESCAPE"), JComponent.WHEN_IN_FOCUSED_WINDOW);
+     }
+ 
++    private JToggleButton navButton(String text) {
++        JToggleButton button = new JToggleButton(text);
++        button.setFocusPainted(false);
++        button.setHorizontalAlignment(SwingConstants.LEFT);
++        button.setFont(button.getFont().deriveFont(Font.BOLD, 14f));
++        button.setMaximumSize(new Dimension(Integer.MAX_VALUE, 48));
++        button.setPreferredSize(new Dimension(134, 48));
++        return button;
++    }
++
++    private void exportPdf() {
++        JFileChooser chooser = new JFileChooser();
++        chooser.setDialogTitle("导出检查记录 PDF");
++        String base = record.date == null || record.date.isBlank() ? "检查记录" : record.date + "-检查记录";
++        chooser.setSelectedFile(new java.io.File(base + ".pdf"));
++        if (chooser.showSaveDialog(this) != JFileChooser.APPROVE_OPTION) return;
++        Path target = chooser.getSelectedFile().toPath();
++        if (!target.getFileName().toString().toLowerCase().endsWith(".pdf")) target = target.resolveSibling(target.getFileName() + ".pdf");
++        try {
++            DesktopPdfExporter.export(java.util.List.of(new DesktopPdfExporter.Entry(record, folder)), target);
++            JOptionPane.showMessageDialog(this, "PDF 已导出：\n" + target, "导出完成", JOptionPane.INFORMATION_MESSAGE);
++        } catch (Exception error) {
++            JOptionPane.showMessageDialog(this, "PDF 导出失败：" + error.getMessage(), "导出失败", JOptionPane.ERROR_MESSAGE);
++        }
++    }
++
++    private static BufferedImage appIcon() {
++        try { return ImageIO.read(RecordPreviewDialog.class.getResourceAsStream("/app-icon.png")); }
++        catch (Exception ignored) { return null; }
++    }
++
+     private JPanel itemsPanel() {
+         JPanel panel = new JPanel(new BorderLayout(6, 6));
+         panel.setBorder(new EmptyBorder(10, 10, 10, 10));
