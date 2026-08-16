@@ -14,12 +14,17 @@
         android:allowBackup="false"
         android:fullBackupContent="false"
         android:dataExtractionRules="@xml/data_extraction_rules"
-        android:icon="@drawable/ic_app"
+        android:icon="@drawable/ic_app_bitmap"
+        android:roundIcon="@drawable/ic_app_bitmap"
         android:label="安全检查台账"
         android:theme="@style/AppTheme"
         android:usesCleartextTraffic="false">
         <service
             android:name=".sync.CloudSyncJobService"
+            android:exported="false"
+            android:permission="android.permission.BIND_JOB_SERVICE" />
+        <service
+            android:name=".holiday.HolidaySyncJobService"
             android:exported="false"
             android:permission="android.permission.BIND_JOB_SERVICE" />
         <activity android:name=".PhotoPreviewActivity" />
