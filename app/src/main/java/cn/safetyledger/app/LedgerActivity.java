@@ -485,7 +485,7 @@ public final class LedgerActivity extends Activity {
 
         LinearLayout overall = Ui.row(this);
         overall.setGravity(Gravity.CENTER_VERTICAL);
-        TextView count = Ui.text(this, "", 8.5f, true);
+        TextView count = Ui.text(this, "", 9, true);
         count.setText(planCountSpan(summary.plannedTotal, summary.actualAgainstPlan));
         count.setPadding(0, 0, 0, 0);
         count.setSingleLine(true);
