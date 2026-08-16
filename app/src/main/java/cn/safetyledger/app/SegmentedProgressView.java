@@ -27,11 +27,11 @@ public final class SegmentedProgressView extends View {
         super(context);
         track.setStyle(Paint.Style.STROKE);
         track.setStrokeCap(Paint.Cap.ROUND);
-        track.setStrokeWidth(Ui.dp(context, 3.2f));
+        track.setStrokeWidth(Ui.dp(context, 3));
         track.setColor(Color.rgb(226, 233, 244));
         segment.setStyle(Paint.Style.STROKE);
         segment.setStrokeCap(Paint.Cap.ROUND);
-        segment.setStrokeWidth(Ui.dp(context, 3.2f));
+        segment.setStrokeWidth(Ui.dp(context, 3));
         text.setTextAlign(Paint.Align.CENTER);
         text.setColor(Ui.BLUE_DARK);
         text.setTypeface(Typeface.create(Typeface.DEFAULT, Typeface.BOLD));
@@ -57,7 +57,7 @@ public final class SegmentedProgressView extends View {
         super.onDraw(canvas);
         float cx = getWidth() / 2f;
         float cy = getHeight() / 2f;
-        float pad = Ui.dp(getContext(), 4f);
+        float pad = Ui.dp(getContext(), 4);
         float radius = Math.max(0f, Math.min(getWidth(), getHeight()) / 2f - pad);
         arc.set(cx - radius, cy - radius, cx + radius, cy + radius);
 
@@ -81,11 +81,11 @@ public final class SegmentedProgressView extends View {
 
         String label = overallPercent + "%";
         float inner = Math.max(1f, radius * 2f - segment.getStrokeWidth() - Ui.dp(getContext(), 2));
-        float size = Ui.dp(getContext(), 9.2f);
+        float size = Ui.dp(getContext(), 9);
         text.setTextSize(size);
         float width = text.measureText(label);
         float maxWidth = inner * 0.82f;
-        if (width > maxWidth && width > 0f) text.setTextSize(Math.max(Ui.dp(getContext(), 6f), size * maxWidth / width));
+        if (width > maxWidth && width > 0f) text.setTextSize(Math.max(Ui.dp(getContext(), 6), size * maxWidth / width));
         Paint.FontMetrics fm = text.getFontMetrics();
         float baseline = cy - (fm.ascent + fm.descent) / 2f;
         canvas.drawText(label, cx, baseline, text);

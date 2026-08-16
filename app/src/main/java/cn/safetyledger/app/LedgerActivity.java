@@ -582,7 +582,7 @@ public final class LedgerActivity extends Activity {
 
         // Title is always centered immediately above its own ring.
         TextView name = Ui.text(this, compactProgressName(result.item.name, compact ? 4 : 7),
-                compact ? 6.8f : 8f, true);
+                compact ? 7 : 8, true);
         name.setPadding(0, 0, 0, 0);
         name.setSingleLine(true);
         name.setGravity(Gravity.CENTER);
@@ -616,14 +616,14 @@ public final class LedgerActivity extends Activity {
         LinearLayout metrics = Ui.row(this);
         // Sub-items intentionally use numbers only: red = target, green = checked.
         metrics.addView(progressNumber(String.valueOf(result.item.target), Ui.DANGER,
-                compact ? 6.8f : 8f), Ui.weight(1));
+                compact ? 7 : 8), Ui.weight(1));
         metrics.addView(progressNumber(String.valueOf(result.actual),
-                Color.rgb(38, 177, 91), compact ? 6.8f : 8f), Ui.weight(1));
+                Color.rgb(38, 177, 91), compact ? 7 : 8), Ui.weight(1));
         box.addView(metrics, new LinearLayout.LayoutParams(-1, Ui.dp(this, compact ? 11 : 13)));
         return box;
     }
 
-    private TextView progressNumber(String value, int color, float sizeSp) {
+    private TextView progressNumber(String value, int color, int sizeSp) {
         TextView metric = Ui.text(this, value, sizeSp, true);
         metric.setPadding(0, 0, 0, 0);
         metric.setGravity(Gravity.CENTER);
@@ -636,11 +636,11 @@ public final class LedgerActivity extends Activity {
     private LinearLayout progressMetricWithLabel(String label, String value, int color) {
         LinearLayout metric = Ui.row(this);
         metric.setGravity(Gravity.CENTER);
-        TextView labelView = Ui.text(this, label, 6.5f, false);
+        TextView labelView = Ui.text(this, label, 7, false);
         labelView.setPadding(0, 0, 0, 0);
         labelView.setIncludeFontPadding(false);
         labelView.setTextColor(Ui.MUTED);
-        TextView number = Ui.text(this, value, 7.5f, true);
+        TextView number = Ui.text(this, value, 8, true);
         number.setPadding(Ui.dp(this, 1), 0, 0, 0);
         number.setIncludeFontPadding(false);
         number.setTextColor(color);
@@ -669,7 +669,7 @@ public final class LedgerActivity extends Activity {
     }
 
     private TextView statusBadge(String value, int color) {
-        TextView badge = Ui.text(this, value, 6.8f, true);
+        TextView badge = Ui.text(this, value, 7, true);
         badge.setGravity(Gravity.CENTER);
         badge.setPadding(0, 0, 0, 0);
         badge.setIncludeFontPadding(false);

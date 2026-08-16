@@ -36,7 +36,7 @@ public final class DonutProgressView extends View {
 
     public void setCompact(boolean compact) {
         this.compact = compact;
-        float stroke = Ui.dp(getContext(), compact ? 2.5f : 4f);
+        float stroke = Ui.dp(getContext(), compact ? 3 : 4);
         track.setStrokeWidth(stroke);
         progressPaint.setStrokeWidth(stroke);
         insetDp = compact ? 3 : 5;
@@ -67,11 +67,11 @@ public final class DonutProgressView extends View {
         String label = centerText == null ? progress + "%" : centerText;
         float inner = Math.max(1f, radius * 2f - progressPaint.getStrokeWidth() - Ui.dp(getContext(), 2));
         float maxWidth = inner * 0.88f;
-        float size = Ui.dp(getContext(), compact ? 7.2f : 12f);
+        float size = Ui.dp(getContext(), compact ? 7 : 12);
         textPaint.setTextSize(size);
         float width = textPaint.measureText(label);
         if (width > maxWidth && width > 0f) {
-            textPaint.setTextSize(Math.max(Ui.dp(getContext(), 4.8f), size * maxWidth / width));
+            textPaint.setTextSize(Math.max(Ui.dp(getContext(), 5), size * maxWidth / width));
         }
         Paint.FontMetrics fm = textPaint.getFontMetrics();
         float baseline = cy - (fm.ascent + fm.descent) / 2f;
