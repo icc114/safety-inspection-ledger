@@ -477,34 +477,31 @@ public final class LedgerActivity extends Activity {
         info.setContentDescription("检查进度说明");
         info.setOnClickListener(this::showProgressHelp);
         titleRow.addView(title, new LinearLayout.LayoutParams(0, Ui.dp(this, 17), 1));
-        titleRow.addView(info, new LinearLayout.LayoutParams(Ui.dp(this, 16), Ui.dp(this, 16)));
+        titleRow.addView(info, new LinearLayout.LayoutParams(Ui.dp(this, 15), Ui.dp(this, 15)));
         panel.addView(titleRow);
 
-        DonutProgressView rate = new DonutProgressView(this);
-        rate.setCompact(true);
-        if (summary.plannedTotal > 0) {
-            rate.setProgress(summary.percent());
-        } else {
-            rate.setProgress(0);
-            rate.setCenterText(summary.totalInspections + "次");
-        }
-        LinearLayout.LayoutParams donutParams =
-                new LinearLayout.LayoutParams(Ui.dp(this, 39), Ui.dp(this, 39));
-        donutParams.gravity = Gravity.CENTER_HORIZONTAL;
-        panel.addView(rate, donutParams);
+        SegmentedProgressView totalRing = new SegmentedProgressView(this);
+        totalRing.setOverallPercent(summary.percent());
+        int segmentCount = Math.min(4, summary.results.size());
+        int[] segmentPercents = new int[segmentCount];
+        for (int i = 0; i < segmentCount; i++) segmentPercents[i] = summary.results.get(i).percent();
+        totalRing.setSegmentPercents(segmentPercents);
+        LinearLayout.LayoutParams totalRingParams =
+                new LinearLayout.LayoutParams(Ui.dp(this, 43), Ui.dp(this, 43));
+        totalRingParams.gravity = Gravity.CENTER_HORIZONTAL;
+        panel.addView(totalRing, totalRingParams);
 
         LinearLayout overall = Ui.row(this);
         overall.setGravity(Gravity.CENTER_VERTICAL);
-        overall.addView(progressNumber(String.valueOf(summary.plannedTotal), Ui.DANGER, 8), Ui.weight(1));
-        overall.addView(progressNumber(String.valueOf(summary.actualAgainstPlan),
-                Color.rgb(38, 177, 91), 8), Ui.weight(1));
+        overall.addView(progressMetricWithLabel("目标", String.valueOf(summary.plannedTotal), Ui.DANGER), Ui.weight(1));
+        overall.addView(progressMetricWithLabel("已检", String.valueOf(summary.actualAgainstPlan),
+                Color.rgb(38, 177, 91)), Ui.weight(1));
         TextView overallStatus = overallDashboardStatus(summary);
         if (overallStatus != null) {
             overall.addView(overallStatus,
-                    new LinearLayout.LayoutParams(Ui.dp(this, 19), Ui.dp(this, 19)));
+                    new LinearLayout.LayoutParams(Ui.dp(this, 14), Ui.dp(this, 14)));
         }
         panel.addView(overall, new LinearLayout.LayoutParams(-1, Ui.dp(this, 20)));
-
         panel.addView(Ui.divider(this));
 
         int count = Math.min(4, summary.results.size());
@@ -515,8 +512,8 @@ public final class LedgerActivity extends Activity {
             empty.setTextColor(Ui.MUTED);
             panel.addView(empty, new LinearLayout.LayoutParams(-1, 0, 1));
         } else {
-            LinearLayout adaptive = adaptivePlanGrid(summary.results.subList(0, count));
-            panel.addView(adaptive, new LinearLayout.LayoutParams(-1, 0, 1));
+            panel.addView(adaptivePlanGrid(summary.results.subList(0, count)),
+                    new LinearLayout.LayoutParams(-1, 0, 1));
         }
 
         panel.setClickable(true);
@@ -526,73 +523,79 @@ public final class LedgerActivity extends Activity {
     }
 
     /**
-     * Adaptive dashboard:
-     * 1 item = one large tile; 2 items = two larger stacked tiles;
-     * 3 items = one large tile + two compact tiles; 4 items = compact 2 x 2 grid.
-     * This avoids a large empty area when the user only configured one or two plans.
+     * Adaptive layout: one item is centered and enlarged; two items share the height equally;
+     * three items use an equal-size 2+1 layout with the last tile centered; four items use 2x2.
      */
     private LinearLayout adaptivePlanGrid(List<MonthlyPlanConfig.Result> results) {
         LinearLayout root = Ui.column(this);
-        root.setPadding(0, Ui.dp(this, 2), 0, 0);
+        root.setGravity(Gravity.CENTER_HORIZONTAL);
+        root.setPadding(0, Ui.dp(this, 1), 0, 0);
         int count = results.size();
         if (count == 1) {
-            root.addView(planItemProgress(results.get(0), false), new LinearLayout.LayoutParams(-1, 0, 1));
+            root.addView(planItemProgress(results.get(0), false),
+                    new LinearLayout.LayoutParams(-1, 0, 1));
             return root;
         }
         if (count == 2) {
-            root.addView(planItemProgress(results.get(0), false), new LinearLayout.LayoutParams(-1, 0, 1));
+            root.addView(planItemProgress(results.get(0), false),
+                    new LinearLayout.LayoutParams(-1, 0, 1));
             root.addView(Ui.gap(this, 1));
-            root.addView(planItemProgress(results.get(1), false), new LinearLayout.LayoutParams(-1, 0, 1));
-            return root;
-        }
-        if (count == 3) {
-            // First item receives the full width so the panel still feels balanced rather than leaving a blank cell.
-            root.addView(planItemProgress(results.get(0), true), new LinearLayout.LayoutParams(-1, 0, 1));
-            LinearLayout row = Ui.row(this);
-            row.addView(planItemProgress(results.get(1), true), new LinearLayout.LayoutParams(0, -1, 1));
-            row.addView(Ui.horizontalGap(this, 2));
-            row.addView(planItemProgress(results.get(2), true), new LinearLayout.LayoutParams(0, -1, 1));
-            root.addView(row, new LinearLayout.LayoutParams(-1, 0, 1));
+            root.addView(planItemProgress(results.get(1), false),
+                    new LinearLayout.LayoutParams(-1, 0, 1));
             return root;
         }
 
-        LinearLayout row1 = Ui.row(this);
-        row1.addView(planItemProgress(results.get(0), true), new LinearLayout.LayoutParams(0, -1, 1));
-        row1.addView(Ui.horizontalGap(this, 2));
-        row1.addView(planItemProgress(results.get(1), true), new LinearLayout.LayoutParams(0, -1, 1));
-        LinearLayout row2 = Ui.row(this);
-        row2.addView(planItemProgress(results.get(2), true), new LinearLayout.LayoutParams(0, -1, 1));
-        row2.addView(Ui.horizontalGap(this, 2));
-        row2.addView(planItemProgress(results.get(3), true), new LinearLayout.LayoutParams(0, -1, 1));
-        root.addView(row1, new LinearLayout.LayoutParams(-1, 0, 1));
+        LinearLayout firstRow = Ui.row(this);
+        firstRow.addView(planItemProgress(results.get(0), true),
+                new LinearLayout.LayoutParams(0, -1, 1));
+        firstRow.addView(Ui.horizontalGap(this, 2));
+        firstRow.addView(planItemProgress(results.get(1), true),
+                new LinearLayout.LayoutParams(0, -1, 1));
+        root.addView(firstRow, new LinearLayout.LayoutParams(-1, 0, 1));
         root.addView(Ui.gap(this, 1));
-        root.addView(row2, new LinearLayout.LayoutParams(-1, 0, 1));
+
+        LinearLayout secondRow = Ui.row(this);
+        if (count == 3) {
+            // Equal-size third tile, centered in the second row.
+            View leftSpacer = new View(this);
+            View rightSpacer = new View(this);
+            secondRow.addView(leftSpacer, new LinearLayout.LayoutParams(0, -1, 1));
+            secondRow.addView(planItemProgress(results.get(2), true),
+                    new LinearLayout.LayoutParams(0, -1, 2));
+            secondRow.addView(rightSpacer, new LinearLayout.LayoutParams(0, -1, 1));
+        } else {
+            secondRow.addView(planItemProgress(results.get(2), true),
+                    new LinearLayout.LayoutParams(0, -1, 1));
+            secondRow.addView(Ui.horizontalGap(this, 2));
+            secondRow.addView(planItemProgress(results.get(3), true),
+                    new LinearLayout.LayoutParams(0, -1, 1));
+        }
+        root.addView(secondRow, new LinearLayout.LayoutParams(-1, 0, 1));
         return root;
     }
 
     private LinearLayout planItemProgress(MonthlyPlanConfig.Result result, boolean compact) {
         LinearLayout box = Ui.column(this);
         box.setGravity(Gravity.CENTER_HORIZONTAL);
-        box.setPadding(Ui.dp(this, compact ? 1 : 2), Ui.dp(this, 1),
-                Ui.dp(this, compact ? 1 : 2), Ui.dp(this, 1));
-        box.setBackground(Ui.shape(this, Color.rgb(251, 253, 255), Color.TRANSPARENT, 8));
+        box.setPadding(Ui.dp(this, 1), Ui.dp(this, 1), Ui.dp(this, 1), Ui.dp(this, 1));
+        box.setBackground(Ui.shape(this, Color.rgb(251, 253, 255), Color.TRANSPARENT, 7));
 
-        LinearLayout nameRow = Ui.row(this);
-        nameRow.setGravity(Gravity.CENTER_VERTICAL);
+        // Title is always centered immediately above its own ring.
         TextView name = Ui.text(this, compactProgressName(result.item.name, compact ? 4 : 7),
-                compact ? 7 : 8, true);
+                compact ? 6.8f : 8f, true);
         name.setPadding(0, 0, 0, 0);
         name.setSingleLine(true);
-        name.setGravity(Gravity.CENTER_VERTICAL);
+        name.setGravity(Gravity.CENTER);
+        name.setIncludeFontPadding(false);
         name.setTextColor(Ui.TEXT);
-        nameRow.addView(name, new LinearLayout.LayoutParams(0, Ui.dp(this, compact ? 13 : 15), 1));
-        TextView status = itemDashboardStatus(result);
-        if (status != null) {
-            int badge = Ui.dp(this, compact ? 16 : 18);
-            nameRow.addView(status, new LinearLayout.LayoutParams(badge, badge));
-        }
-        box.addView(nameRow);
+        box.addView(name, new LinearLayout.LayoutParams(-1, Ui.dp(this, compact ? 12 : 14)));
 
+        int badgeSize = Ui.dp(this, compact ? 12 : 13);
+        int donutSize = Ui.dp(this, compact ? 27 : 34);
+        LinearLayout ringRow = Ui.row(this);
+        ringRow.setGravity(Gravity.CENTER);
+        View badgeSpacer = new View(this);
+        ringRow.addView(badgeSpacer, new LinearLayout.LayoutParams(badgeSize, badgeSize));
         DonutProgressView donut = new DonutProgressView(this);
         donut.setCompact(true);
         if (result.item.target > 0) {
@@ -601,22 +604,26 @@ public final class LedgerActivity extends Activity {
             donut.setProgress(0);
             donut.setCenterText(result.actual + "次");
         }
-        int donutSize = Ui.dp(this, compact ? 25 : 32);
-        LinearLayout.LayoutParams donutParams = new LinearLayout.LayoutParams(donutSize, donutSize);
-        donutParams.gravity = Gravity.CENTER_HORIZONTAL;
-        box.addView(donut, donutParams);
+        ringRow.addView(donut, new LinearLayout.LayoutParams(donutSize, donutSize));
+        TextView status = itemDashboardStatus(result);
+        if (status == null) {
+            ringRow.addView(new View(this), new LinearLayout.LayoutParams(badgeSize, badgeSize));
+        } else {
+            ringRow.addView(status, new LinearLayout.LayoutParams(badgeSize, badgeSize));
+        }
+        box.addView(ringRow, new LinearLayout.LayoutParams(-1, donutSize));
 
         LinearLayout metrics = Ui.row(this);
-        // No repeated labels here: red number = target; green number = checked count.
+        // Sub-items intentionally use numbers only: red = target, green = checked.
         metrics.addView(progressNumber(String.valueOf(result.item.target), Ui.DANGER,
-                compact ? 7 : 8), Ui.weight(1));
+                compact ? 6.8f : 8f), Ui.weight(1));
         metrics.addView(progressNumber(String.valueOf(result.actual),
-                Color.rgb(38, 177, 91), compact ? 7 : 8), Ui.weight(1));
-        box.addView(metrics, new LinearLayout.LayoutParams(-1, Ui.dp(this, compact ? 12 : 14)));
+                Color.rgb(38, 177, 91), compact ? 6.8f : 8f), Ui.weight(1));
+        box.addView(metrics, new LinearLayout.LayoutParams(-1, Ui.dp(this, compact ? 11 : 13)));
         return box;
     }
 
-    private TextView progressNumber(String value, int color, int sizeSp) {
+    private TextView progressNumber(String value, int color, float sizeSp) {
         TextView metric = Ui.text(this, value, sizeSp, true);
         metric.setPadding(0, 0, 0, 0);
         metric.setGravity(Gravity.CENTER);
@@ -626,7 +633,23 @@ public final class LedgerActivity extends Activity {
         return metric;
     }
 
-    /** Reaching the monthly target suppresses a stale weekly leak warning. */
+    private LinearLayout progressMetricWithLabel(String label, String value, int color) {
+        LinearLayout metric = Ui.row(this);
+        metric.setGravity(Gravity.CENTER);
+        TextView labelView = Ui.text(this, label, 6.5f, false);
+        labelView.setPadding(0, 0, 0, 0);
+        labelView.setIncludeFontPadding(false);
+        labelView.setTextColor(Ui.MUTED);
+        TextView number = Ui.text(this, value, 7.5f, true);
+        number.setPadding(Ui.dp(this, 1), 0, 0, 0);
+        number.setIncludeFontPadding(false);
+        number.setTextColor(color);
+        metric.addView(labelView);
+        metric.addView(number);
+        return metric;
+    }
+
+    /** Reaching the monthly target suppresses an old weekly leak warning. */
     private TextView itemDashboardStatus(MonthlyPlanConfig.Result result) {
         if (result.reached()) {
             return result.currentWeekHasInspection
@@ -646,7 +669,7 @@ public final class LedgerActivity extends Activity {
     }
 
     private TextView statusBadge(String value, int color) {
-        TextView badge = Ui.text(this, value, 8, true);
+        TextView badge = Ui.text(this, value, 6.8f, true);
         badge.setGravity(Gravity.CENTER);
         badge.setPadding(0, 0, 0, 0);
         badge.setIncludeFontPadding(false);
@@ -657,7 +680,7 @@ public final class LedgerActivity extends Activity {
 
     private void showProgressHelp(View anchor) {
         TextView help = Ui.text(this,
-                "红色数字：月度目标   绿色数字：本月已检\n✓：目标完成且本周已有检查\n漏：目标未完成且上周整周没有对应检查\n目标已完成后不再提示漏检；本周未结束不提前判漏。",
+                "总图：目标/已检保留文字；C形彩色段对应各计划项目。\n分项：红色数字=目标，绿色数字=本月已检。\n✓：目标完成且本周已有检查；漏：目标未完成且上周整周无对应检查。\n目标完成后不再提示漏检，本周未结束不提前判漏。",
                 11, false);
         help.setTextColor(Ui.TEXT);
         help.setPadding(Ui.dp(this, 10), Ui.dp(this, 9), Ui.dp(this, 10), Ui.dp(this, 9));

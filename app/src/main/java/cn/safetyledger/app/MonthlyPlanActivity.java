@@ -49,7 +49,7 @@ public final class MonthlyPlanActivity extends Activity {
         LinearLayout intro = Ui.card(this);
         intro.addView(Ui.sectionTitle(this, "", "计划项目由你自己维护", null));
         TextView note = Ui.text(this,
-                "最多设置 4 个计划项目，名称完全由你自己填写，例如“共享单车”“美团”“车棚”，可新增、删除、改名和调整顺序。统计关键词用于从当月检查记录中识别该项目；APP 会在模板名称、检查类型、被检查单位、地点和被检查人中查找关键词，多个关键词可用 | 分隔。\n\n计划次数填 0 表示只统计实际检查次数；填 1、4、10 等则同时显示目标、已检次数和完成率。每保存一条正式检查记录计 1 次，草稿不计入。首页会根据计划项目数量自动排版：1-2 项放大显示，3-4 项自动紧凑排列。",
+                "最多设置 4 个计划项目，名称完全由你自己填写，例如现有检查模板中的“车棚安全检查”“共享单车”，可新增、删除、改名和调整顺序。统计关键词用于从当月检查记录中识别该项目；APP 会在模板名称、检查类型、被检查单位、地点和被检查人中查找关键词，多个关键词可用 | 分隔。\n\n计划次数填 0 表示只统计实际检查次数；填 1、4、10 等则同时显示目标、已检次数和完成率。每保存一条正式检查记录计 1 次，草稿不计入。首页会根据计划项目数量自动排版：1-2 项放大显示，3-4 项自动紧凑排列。",
                 12, false);
         note.setTextColor(Ui.MUTED);
         intro.addView(note);
@@ -136,7 +136,7 @@ public final class MonthlyPlanActivity extends Activity {
             TextView nameLabel = Ui.text(this, "显示名称", 12, true);
             nameLabel.setTextColor(Ui.MUTED);
             card.addView(nameLabel);
-            EditText name = Ui.input(this, "例如：共享单车 / 美团 / 车棚");
+            EditText name = Ui.input(this, "例如：车棚安全检查 / 共享单车");
             name.setSingleLine(true);
             name.setText(item.name);
             name.addTextChangedListener(watcher(value -> item.name = value));
@@ -146,7 +146,7 @@ public final class MonthlyPlanActivity extends Activity {
             TextView keywordLabel = Ui.text(this, "统计关键词", 12, true);
             keywordLabel.setTextColor(Ui.MUTED);
             card.addView(keywordLabel);
-            EditText keyword = Ui.input(this, "留空则使用显示名称；多个关键词用 | 分隔");
+            EditText keyword = Ui.input(this, "例如：车棚安全检查；多个关键词用 | 分隔");
             keyword.setSingleLine(true);
             keyword.setText(item.keyword);
             keyword.addTextChangedListener(watcher(value -> item.keyword = value));

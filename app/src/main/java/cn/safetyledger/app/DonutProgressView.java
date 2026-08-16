@@ -8,7 +8,7 @@ import android.graphics.RectF;
 import android.graphics.Typeface;
 import android.view.View;
 
-/** Hollow progress ring used by the monthly dashboard and each plan item. */
+/** Hollow progress ring used by each monthly plan item. */
 public final class DonutProgressView extends View {
     private final Paint track = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final Paint progressPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
@@ -16,6 +16,7 @@ public final class DonutProgressView extends View {
     private final RectF arc = new RectF();
     private int progress;
     private int insetDp = 5;
+    private boolean compact;
     private String centerText;
 
     public DonutProgressView(Context context) {
@@ -34,11 +35,11 @@ public final class DonutProgressView extends View {
     }
 
     public void setCompact(boolean compact) {
-        float stroke = Ui.dp(getContext(), compact ? 3 : 4);
+        this.compact = compact;
+        float stroke = Ui.dp(getContext(), compact ? 2.5f : 4f);
         track.setStrokeWidth(stroke);
         progressPaint.setStrokeWidth(stroke);
-        textPaint.setTextSize(Ui.dp(getContext(), compact ? 8 : 12));
-        insetDp = compact ? 4 : 5;
+        insetDp = compact ? 3 : 5;
         invalidate();
     }
 
@@ -63,8 +64,17 @@ public final class DonutProgressView extends View {
         canvas.drawArc(arc, 0, 360, false, track);
         if (progress > 0) canvas.drawArc(arc, -90, progress * 3.6f, false, progressPaint);
 
+        String label = centerText == null ? progress + "%" : centerText;
+        float inner = Math.max(1f, radius * 2f - progressPaint.getStrokeWidth() - Ui.dp(getContext(), 2));
+        float maxWidth = inner * 0.88f;
+        float size = Ui.dp(getContext(), compact ? 7.2f : 12f);
+        textPaint.setTextSize(size);
+        float width = textPaint.measureText(label);
+        if (width > maxWidth && width > 0f) {
+            textPaint.setTextSize(Math.max(Ui.dp(getContext(), 4.8f), size * maxWidth / width));
+        }
         Paint.FontMetrics fm = textPaint.getFontMetrics();
         float baseline = cy - (fm.ascent + fm.descent) / 2f;
-        canvas.drawText(centerText == null ? progress + "%" : centerText, cx, baseline, textPaint);
+        canvas.drawText(label, cx, baseline, textPaint);
     }
 }
