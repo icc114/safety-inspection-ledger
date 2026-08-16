@@ -1,0 +1,36 @@
+name: Apply 1.2.31 Compact Progress Dashboard
+
+on:
+  push:
+    branches:
+      - 'agent/v1231-compact-progress-status'
+    paths:
+      - 'tools/apply-v1231-compact-progress.py'
+      - '.github/workflows/apply-v1231-compact-progress.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/v1231-compact-progress-status
+          fetch-depth: 0
+      - run: python3 tools/apply-v1231-compact-progress.py
+      - name: Commit source changes
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add app
+          if git diff --cached --quiet; then
+            echo "No source changes to commit."
+            exit 0
+          fi
+          git commit -m "Refine 1.2.31 compact monthly progress dashboard"
+          git push origin HEAD:agent/v1231-compact-progress-status
