@@ -1,0 +1,41 @@
+name: Apply 1.2.24 UI Source Migration
+
+on:
+  push:
+    branches:
+      - 'agent/v1224-pc021-calendar-holiday'
+    paths:
+      - 'tools/v1224-android-ui.patch'
+      - 'tools/v021-pc-preview.patch'
+      - '.github/workflows/apply-v1224-source-migration.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout branch
+        uses: actions/checkout@v4
+        with:
+          ref: agent/v1224-pc021-calendar-holiday
+          fetch-depth: 0
+      - name: Apply approved UI patches
+        shell: bash
+        run: |
+          set -euo pipefail
+          git apply --check tools/v1224-android-ui.patch
+          git apply tools/v1224-android-ui.patch
+          git apply --check tools/v021-pc-preview.patch
+          git apply tools/v021-pc-preview.patch
+      - name: Commit migrated source
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add app/src/main/java/cn/safetyledger/app/LedgerActivity.java desktop/src/main/java/cn/safetyledger/pc/RecordPreviewDialog.java
+          git commit -m "Apply compact calendar and PC preview redesign"
+          git push origin HEAD:agent/v1224-pc021-calendar-holiday
