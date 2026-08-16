@@ -1,0 +1,37 @@
+name: Fix 1.2.33 Dashboard Types
+
+on:
+  push:
+    branches:
+      - 'agent/v1233-final-progress-dashboard'
+    paths:
+      - 'tools/fix-v1233-types.py'
+      - '.github/workflows/fix-v1233-types.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  fix:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/v1233-final-progress-dashboard
+          fetch-depth: 0
+      - name: Apply type compatibility fix
+        run: python3 tools/fix-v1233-types.py
+      - name: Commit fixes
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add app/src/main/java/cn/safetyledger/app/LedgerActivity.java \
+                  app/src/main/java/cn/safetyledger/app/DonutProgressView.java \
+                  app/src/main/java/cn/safetyledger/app/SegmentedProgressView.java
+          if git diff --cached --quiet; then
+            echo "Nothing to commit"
+            exit 0
+          fi
+          git commit -m "Fix 1.2.33 compact dashboard type compatibility"
+          git push origin HEAD:agent/v1233-final-progress-dashboard
