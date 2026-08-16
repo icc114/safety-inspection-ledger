@@ -20,6 +20,7 @@ import android.widget.CheckBox;
 import android.widget.GridLayout;
 import android.widget.ImageButton;
 import android.widget.LinearLayout;
+import android.widget.ProgressBar;
 import android.widget.ScrollView;
 import android.widget.Spinner;
 import android.widget.TextView;
@@ -82,6 +83,15 @@ public final class LedgerActivity extends Activity {
         repo = new LedgerRepository(this);
         render();
         load();
+    }
+
+    @Override
+    protected void onResume() {
+        super.onResume();
+        if (repo != null && calendarBox != null) {
+            syncCalendar();
+            load();
+        }
     }
 
     private void render() {
@@ -377,7 +387,7 @@ public final class LedgerActivity extends Activity {
             heading.setIncludeFontPadding(false);
             heading.setPadding(0, 0, 0, 0);
             heading.setGravity(Gravity.CENTER);
-            grid.addView(heading, cellParams(22));
+            grid.addView(heading, cellParams(21));
         }
 
         Set<String> marked = repo.markedDates(month.toString());
@@ -439,18 +449,18 @@ public final class LedgerActivity extends Activity {
                 syncCalendar();
                 load();
             });
-            grid.addView(cell, cellParams(27));
+            grid.addView(cell, cellParams(25));
         }
         left.addView(grid);
         TextView legend = Ui.text(this, "★ 有检查记录   班 调休上班   休 休息日/法定节假日", 9, false);
         legend.setPadding(0, 0, 0, 0);
         legend.setTextColor(Ui.MUTED);
         legend.setGravity(Gravity.CENTER);
-        left.addView(legend, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, Ui.dp(this, 19)));
+        left.addView(legend, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, Ui.dp(this, 18)));
 
         calendarBox.addView(left, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1));
         calendarBox.addView(Ui.horizontalGap(this, 3));
-        calendarBox.addView(monthProgressPanel(), new LinearLayout.LayoutParams(Ui.dp(this, 116), ViewGroup.LayoutParams.MATCH_PARENT));
+        calendarBox.addView(monthProgressPanel(), new LinearLayout.LayoutParams(Ui.dp(this, 122), ViewGroup.LayoutParams.MATCH_PARENT));
     }
 
     private LinearLayout monthProgressPanel() {
@@ -459,69 +469,128 @@ public final class LedgerActivity extends Activity {
         panel.setPadding(Ui.dp(this, 5), Ui.dp(this, 5), Ui.dp(this, 5), Ui.dp(this, 5));
         panel.setBackground(Ui.shape(this, Color.WHITE, Ui.LINE, 11));
 
-        TextView title = Ui.text(this, "本月检查进度", 9, true);
+        MonthlyPlanConfig.Summary summary = MonthlyPlanConfig.summarize(repo, month);
+
+        TextView title = Ui.text(this, "本月检查概览", 9, true);
         title.setPadding(0, 0, 0, 0);
         title.setGravity(Gravity.CENTER);
         title.setSingleLine(true);
-        panel.addView(title, new LinearLayout.LayoutParams(-1, Ui.dp(this, 20)));
+        panel.addView(title, new LinearLayout.LayoutParams(-1, Ui.dp(this, 18)));
 
-        List<InspectionPlan.Entry> entries = InspectionPlan.entries(repo, month);
-        int planned = 0;
-        int completed = 0;
-        for (InspectionPlan.Entry entry : entries) {
-            planned += Math.max(0, entry.planned);
-            completed += Math.max(0, entry.completed);
+        TextView total = Ui.text(this, "共检查 " + summary.totalInspections + " 次", 10, true);
+        total.setPadding(0, 0, 0, 0);
+        total.setGravity(Gravity.CENTER);
+        total.setTextColor(Ui.BLUE_DARK);
+        panel.addView(total, new LinearLayout.LayoutParams(-1, Ui.dp(this, 19)));
+
+        if (summary.plannedTotal > 0) {
+            DonutProgressView rate = new DonutProgressView(this);
+            rate.setProgress(summary.percent());
+            LinearLayout.LayoutParams donutParams =
+                    new LinearLayout.LayoutParams(Ui.dp(this, 44), Ui.dp(this, 44));
+            donutParams.gravity = Gravity.CENTER_HORIZONTAL;
+            panel.addView(rate, donutParams);
+        } else {
+            TextView noTarget = Ui.text(this, "仅统计", 10, true);
+            noTarget.setGravity(Gravity.CENTER);
+            noTarget.setTextColor(Ui.MUTED);
+            noTarget.setPadding(0, 0, 0, 0);
+            panel.addView(noTarget, new LinearLayout.LayoutParams(-1, Ui.dp(this, 44)));
         }
-        int percent = planned <= 0 ? 0 : Math.round(completed * 100f / planned);
 
-        TextView summary = Ui.text(this, completed + "/" + planned + " 次", 12, true);
-        summary.setPadding(0, 0, 0, 0);
-        summary.setGravity(Gravity.CENTER);
-        summary.setTextColor(Ui.BLUE_DARK);
-        panel.addView(summary, new LinearLayout.LayoutParams(-1, Ui.dp(this, 22)));
-
-        DonutProgressView rate = new DonutProgressView(this);
-        rate.setProgress(percent);
-        LinearLayout.LayoutParams donutParams =
-                new LinearLayout.LayoutParams(Ui.dp(this, 50), Ui.dp(this, 50));
-        donutParams.gravity = Gravity.CENTER_HORIZONTAL;
-        panel.addView(rate, donutParams);
-        panel.addView(Ui.gap(this, 4));
+        panel.addView(Ui.gap(this, 3));
         panel.addView(Ui.divider(this));
         panel.addView(Ui.gap(this, 3));
 
         int shown = 0;
-        for (InspectionPlan.Entry entry : entries) {
-            if (shown >= 3) break;
-            LinearLayout row = Ui.row(this);
-            TextView name = Ui.text(this, compactProgressName(entry.name), 8, false);
-            name.setPadding(0, 0, Ui.dp(this, 2), 0);
+        for (MonthlyPlanConfig.Result result : summary.results) {
+            if (shown >= 2) break;
+            LinearLayout itemBox = Ui.column(this);
+            TextView name = Ui.text(this, compactProgressName(result.item.name), 8.5f, true);
+            name.setPadding(0, 0, 0, 0);
             name.setSingleLine(true);
-            name.setTextColor(Ui.MUTED);
-            TextView count = Ui.text(this, entry.completed + "/" + entry.planned, 9, true);
+            name.setTextColor(Ui.TEXT);
+            itemBox.addView(name, new LinearLayout.LayoutParams(-1, Ui.dp(this, 17)));
+
+            String countText = result.item.target > 0
+                    ? "已检 " + result.actual + " / " + result.item.target
+                    : "已检 " + result.actual + " 次";
+            TextView count = Ui.text(this, countText, 8.5f, false);
             count.setPadding(0, 0, 0, 0);
-            count.setGravity(Gravity.CENTER);
-            count.setTextColor(entry.completed >= entry.planned && entry.planned > 0
-                    ? Color.rgb(38, 177, 91) : Ui.BLUE_DARK);
-            row.addView(name, new LinearLayout.LayoutParams(0, Ui.dp(this, 24), 1));
-            row.addView(count, new LinearLayout.LayoutParams(Ui.dp(this, 34), Ui.dp(this, 24)));
-            panel.addView(row);
+            count.setSingleLine(true);
+            count.setTextColor(result.reached() ? Color.rgb(38, 177, 91) : Ui.BLUE_DARK);
+            itemBox.addView(count, new LinearLayout.LayoutParams(-1, Ui.dp(this, 16)));
+
+            if (result.item.target > 0) {
+                ProgressBar bar = new ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal);
+                bar.setMax(result.item.target);
+                bar.setProgress(Math.min(result.actual, result.item.target));
+                itemBox.addView(bar, new LinearLayout.LayoutParams(-1, Ui.dp(this, 4)));
+            }
+            panel.addView(itemBox);
+            panel.addView(Ui.gap(this, 3));
             shown++;
         }
-        if (entries.size() > shown) {
-            TextView more = Ui.text(this, "另有 " + (entries.size() - shown) + " 项", 8, false);
-            more.setTextColor(Ui.MUTED);
-            more.setGravity(Gravity.CENTER);
+
+        if (summary.results.isEmpty()) {
+            TextView empty = Ui.text(this, "未设置计划
+点击这里新增", 8.5f, false);
+            empty.setPadding(0, 0, 0, 0);
+            empty.setGravity(Gravity.CENTER);
+            empty.setTextColor(Ui.MUTED);
+            panel.addView(empty, new LinearLayout.LayoutParams(-1, Ui.dp(this, 42)));
+        } else if (summary.results.size() > shown) {
+            TextView more = Ui.text(this, "＋" + (summary.results.size() - shown) + " 项，点击查看", 8, false);
             more.setPadding(0, 0, 0, 0);
-            panel.addView(more, new LinearLayout.LayoutParams(-1, Ui.dp(this, 18)));
+            more.setGravity(Gravity.CENTER);
+            more.setTextColor(Ui.MUTED);
+            panel.addView(more, new LinearLayout.LayoutParams(-1, Ui.dp(this, 17)));
         }
+
+        panel.setClickable(true);
+        panel.setFocusable(true);
+        panel.setOnClickListener(view -> showMonthProgressDetail(summary));
         return panel;
+    }
+
+    private void showMonthProgressDetail(MonthlyPlanConfig.Summary summary) {
+        if (summary.results.isEmpty()) {
+            new AlertDialog.Builder(this)
+                    .setTitle("本月检查计划")
+                    .setMessage("还没有设置自定义计划项目。你可以自己新增名称、统计关键词和每月计划次数。")
+                    .setPositiveButton("去设置", (dialog, which) -> Ui.start(this, MonthlyPlanActivity.class))
+                    .setNegativeButton("取消", null)
+                    .show();
+            return;
+        }
+        StringBuilder message = new StringBuilder();
+        message.append("本月共保存 ").append(summary.totalInspections).append(" 条正式检查记录。
+
+");
+        for (MonthlyPlanConfig.Result result : summary.results) {
+            message.append("• ").append(result.item.name).append("：已检查 ")
+                    .append(result.actual).append(" 次");
+            if (result.item.target > 0) {
+                message.append(" / 计划 ").append(result.item.target).append(" 次")
+                        .append("（").append(result.percent()).append("%）");
+            } else {
+                message.append("（只统计，不设目标）");
+            }
+            message.append('
+');
+        }
+        new AlertDialog.Builder(this)
+                .setTitle("本月检查明细")
+                .setMessage(message.toString().trim())
+                .setPositiveButton("管理计划", (dialog, which) -> Ui.start(this, MonthlyPlanActivity.class))
+                .setNegativeButton("关闭", null)
+                .show();
     }
 
     private String compactProgressName(String name) {
         if (name == null || name.isBlank()) return "未命名";
-        String value = name.replace("检查", "").replace("记录表", "").trim();
-        return value.length() > 6 ? value.substring(0, 6) + "…" : value;
+        String value = name.trim();
+        return value.length() > 7 ? value.substring(0, 7) + "…" : value;
     }
 
     private void addProgressSpacer(LinearLayout panel) {

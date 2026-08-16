@@ -122,70 +122,27 @@ public final class SettingsActivity extends Activity {
     private LinearLayout monthlyPlanCard() {
         LinearLayout card = Ui.card(this);
         card.addView(Ui.sectionTitle(this, "2", "每月检查计划",
-                "按检查项目设置月度目标，具体检查日期不限"));
+                "计划名称、统计关键词和次数全部由你自己维护"));
         TextView note = Ui.text(this,
-                "按“自然周”统计：同一检查项目在同一周完成多次，只计 1 次；具体哪一天检查不限制。通常每周检查一次可设置为 4 次/月，如当月工作安排需要 5 次可直接改为 5。草稿不计入完成进度。",
+                "不再固定使用检查模板名称。你可以自己新增“共享单车”“美团”“车棚”等项目，也可以删除、改名、调整顺序和计划次数。每个项目通过你填写的统计关键词自动计算本月实际检查次数。计划次数设为 0 时只统计，不参与完成率。",
                 12, false);
         note.setTextColor(Ui.MUTED);
         card.addView(note);
-        card.addView(Ui.gap(this, 5));
+        card.addView(Ui.gap(this, 7));
 
-        List<cn.safetyledger.app.data.Entities.Template> templates = repo.templates(true);
-        List<EditText> inputs = new ArrayList<>();
-        if (templates.isEmpty()) {
-            TextView empty = Ui.text(this,
-                    "当前没有启用的检查模板，请先在“检查模板管理”中启用模板。",
-                    13, false);
-            empty.setTextColor(Ui.MUTED);
-            card.addView(empty);
-            return card;
-        }
+        List<MonthlyPlanConfig.Item> items = MonthlyPlanConfig.load(repo);
+        TextView current = Ui.text(this,
+                items.isEmpty() ? "当前：尚未设置计划项目"
+                        : "当前：已设置 " + items.size() + " 个自定义计划项目",
+                13, true);
+        current.setTextColor(items.isEmpty() ? Ui.MUTED : Ui.BLUE_DARK);
+        card.addView(current);
+        card.addView(Ui.gap(this, 6));
 
-        for (cn.safetyledger.app.data.Entities.Template template : templates) {
-            LinearLayout row = Ui.row(this);
-            TextView name = Ui.text(this,
-                    template.name == null || template.name.isBlank()
-                            ? template.category : template.name,
-                    14, true);
-            name.setPadding(0, 0, Ui.dp(this, 6), 0);
-            EditText target = Ui.input(this, "4");
-            target.setSingleLine(true);
-            target.setGravity(Gravity.CENTER);
-            target.setIncludeFontPadding(false);
-            target.setInputType(InputType.TYPE_CLASS_NUMBER);
-            target.setText(String.valueOf(InspectionPlan.target(repo, template.id)));
-            target.setSelectAllOnFocus(true);
-            TextView unit = Ui.text(this, "次/月", 12, false);
-            unit.setPadding(Ui.dp(this, 4), 0, 0, 0);
-            unit.setTextColor(Ui.MUTED);
-            row.addView(name, Ui.weight(1));
-            row.addView(target,
-                    new LinearLayout.LayoutParams(Ui.dp(this, 58), Ui.dp(this, 40)));
-            row.addView(unit,
-                    new LinearLayout.LayoutParams(Ui.dp(this, 45), Ui.dp(this, 40)));
-            card.addView(row);
-            card.addView(Ui.gap(this, 4));
-            inputs.add(target);
-        }
-
-        Button save = Ui.button(this, "保存检查计划");
-        save.setTextSize(14f);
-        save.setOnClickListener(view -> {
-            for (int i = 0; i < templates.size(); i++) {
-                int value;
-                try {
-                    value = Integer.parseInt(inputs.get(i).getText().toString().trim());
-                } catch (Exception ignored) {
-                    value = InspectionPlan.DEFAULT_MONTHLY_TARGET;
-                }
-                value = Math.max(0, Math.min(31, value));
-                InspectionPlan.saveTarget(repo, templates.get(i).id, value);
-                inputs.get(i).setText(String.valueOf(value));
-            }
-            Ui.toast(this, "每月检查计划已保存；首页进度会按检查项目和自然周分别统计");
-        });
-        card.addView(Ui.gap(this, 3));
-        card.addView(save, new LinearLayout.LayoutParams(-1, Ui.dp(this, 44)));
+        Button manage = Ui.button(this, items.isEmpty() ? "＋ 新增每月检查计划" : "管理每月检查计划");
+        manage.setTextSize(14f);
+        manage.setOnClickListener(view -> Ui.start(this, MonthlyPlanActivity.class));
+        card.addView(manage, new LinearLayout.LayoutParams(-1, Ui.dp(this, 44)));
         return card;
     }
 

@@ -247,9 +247,8 @@ public static void applyFunctionalDepth(Context context, View view) {
         back.setIncludeFontPadding(false);
         android.graphics.drawable.Drawable icon = activity.getDrawable(R.drawable.ic_back_compact);
         if (icon != null) {
-            int size = dp(activity, 20);
-            icon.setBounds(0, 0, size, size);
-            back.setCompoundDrawables(icon, null, null, null);
+            back.setForeground(icon);
+            back.setForegroundGravity(Gravity.CENTER);
         }
         back.setBackground(gradientShape(activity, Color.WHITE, Color.rgb(246, 249, 253),
                 Color.rgb(181, 199, 224), 10));
