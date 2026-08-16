@@ -29,8 +29,8 @@ jobs:
           git add app/src/main/java/cn/safetyledger/app/LedgerActivity.java \
                   app/src/main/java/cn/safetyledger/app/MonthlyPlanActivity.java \
                   app/build.gradle \
-                  .github/workflows/android-build.yml \
                   app/VERSION_1.2.32.txt
+          git restore .github/workflows/android-build.yml || true
           if git diff --cached --quiet; then
             echo "Nothing to commit"
             exit 0
