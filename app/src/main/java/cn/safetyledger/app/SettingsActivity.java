@@ -756,6 +756,11 @@ public final class SettingsActivity extends Activity {
     }
 
     private void runSync(boolean openDevicesAfter) {
+        if (CloudSyncService.isContentSyncRunning()) {
+            SyncLog.info(this, "手动同步", "已有后台内容同步正在运行；复用当前任务，不重复启动整包同步");
+            waitForRunningContentSync();
+            return;
+        }
         SyncLog.info(this, "手动同步", "用户发起检查内容同步");
         new Thread(() -> {
             try {
@@ -811,6 +816,40 @@ public final class SettingsActivity extends Activity {
                 });
             }
         }, openDevicesAfter ? "refresh-paired-devices" : "manual-cloud-sync").start();
+    }
+
+    private void waitForRunningContentSync() {
+        syncStatus.setText("同步状态：后台同步正在进行，正在等待完成…");
+        final long started = System.currentTimeMillis();
+        new Thread(() -> {
+            while (CloudSyncService.isContentSyncRunning()
+                    && System.currentTimeMillis() - started < 120_000L) {
+                try { Thread.sleep(500L); }
+                catch (InterruptedException interrupted) { Thread.currentThread().interrupt(); break; }
+            }
+            String error = repo.setting("last_sync_error", "");
+            String last = repo.setting("last_sync_at", "");
+            runOnUiThread(() -> {
+                if (CloudSyncService.isContentSyncRunning()) {
+                    syncStatus.setText("同步状态：后台同步仍在进行，请稍后查看结果");
+                    return;
+                }
+                if (!error.isBlank()) {
+                    syncStatus.setText("同步状态：上次失败 · " + error);
+                    return;
+                }
+                if (!last.isBlank()) {
+                    try {
+                        String time = DateFormat.getTimeInstance(DateFormat.SHORT)
+                                .format(new Date(Long.parseLong(last)));
+                        syncStatus.setText("同步状态：成功 · " + time + " · 已复用后台同步任务");
+                        Ui.toast(this, "后台同步已完成，无需重复同步");
+                        return;
+                    } catch (Exception ignored) {}
+                }
+                syncStatus.setText("同步状态：后台同步已结束");
+            });
+        }, "wait-running-cloud-sync").start();
     }
 
     private void confirmResetCloudSpace() {

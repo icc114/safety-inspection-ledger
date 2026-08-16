@@ -194,13 +194,14 @@ public final class LedgerActivity extends Activity {
         card.setPadding(Ui.dp(this, 9), Ui.dp(this, 7), Ui.dp(this, 9), Ui.dp(this, 7));
         LinearLayout filters = Ui.row(this);
         TextView rangeLabel = Ui.text(this, "显示范围", 12, true);
-        rangeLabel.setPadding(0, 0, Ui.dp(this, 3), 0);
+        rangeLabel.setPadding(0, 0, Ui.dp(this, 2), 0);
+        rangeLabel.setSingleLine(true);
         range = spinner(new String[]{"当日", "本月", "本季度", "本年度", "全部"});
         range.setSelection(1);
         type = spinner(types());
         statusFilter = spinner(new String[]{"全部状态", "草稿", "待整改", "整改中", "已整改完成", "检查完成"});
-        filters.addView(rangeLabel, new LinearLayout.LayoutParams(Ui.dp(this, 54), Ui.dp(this, 40)));
-        filters.addView(range, new LinearLayout.LayoutParams(Ui.dp(this, 66), Ui.dp(this, 40)));
+        filters.addView(rangeLabel, new LinearLayout.LayoutParams(Ui.dp(this, 64), Ui.dp(this, 40)));
+        filters.addView(range, new LinearLayout.LayoutParams(Ui.dp(this, 58), Ui.dp(this, 40)));
         filters.addView(Ui.horizontalGap(this, 3));
         filters.addView(type, new LinearLayout.LayoutParams(0, Ui.dp(this, 40), 1));
         filters.addView(Ui.horizontalGap(this, 3));
@@ -418,19 +419,20 @@ public final class LedgerActivity extends Activity {
         left.addView(legend, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, Ui.dp(this, 21)));
 
         calendarBox.addView(left, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1));
-        calendarBox.addView(Ui.horizontalGap(this, 5));
-        calendarBox.addView(monthProgressPanel(marked), new LinearLayout.LayoutParams(Ui.dp(this, 88), ViewGroup.LayoutParams.MATCH_PARENT));
+        calendarBox.addView(Ui.horizontalGap(this, 3));
+        calendarBox.addView(monthProgressPanel(marked), new LinearLayout.LayoutParams(Ui.dp(this, 76), ViewGroup.LayoutParams.MATCH_PARENT));
     }
 
     private LinearLayout monthProgressPanel(Set<String> marked) {
         LinearLayout panel = Ui.column(this);
-        panel.setPadding(Ui.dp(this, 4), Ui.dp(this, 5), Ui.dp(this, 4), Ui.dp(this, 5));
+        panel.setGravity(Gravity.CENTER_HORIZONTAL);
+        panel.setPadding(Ui.dp(this, 3), Ui.dp(this, 6), Ui.dp(this, 3), Ui.dp(this, 6));
         panel.setBackground(Ui.shape(this, Color.WHITE, Ui.LINE, 12));
         TextView title = Ui.text(this, "本月检查\n进度", 10, true);
         title.setPadding(0, 0, 0, 0);
         title.setGravity(Gravity.CENTER);
         panel.addView(title);
-        panel.addView(Ui.gap(this, 4));
+        addProgressSpacer(panel);
 
         int planned = 4;
         Set<Integer> completedWeeks = new HashSet<>();
@@ -443,21 +445,26 @@ public final class LedgerActivity extends Activity {
         int completed = Math.min(planned, completedWeeks.size());
         int percent = planned == 0 ? 0 : Math.round(completed * 100f / planned);
         panel.addView(progressMetric("计划次数", planned + "次", Ui.BLUE));
-        panel.addView(Ui.gap(this, 5));
+        addProgressSpacer(panel);
         panel.addView(progressMetric("已完成", completed + "次", Color.rgb(38, 177, 91)));
-        panel.addView(Ui.gap(this, 5));
+        addProgressSpacer(panel);
         TextView rateLabel = Ui.text(this, "完成率", 9, true);
         rateLabel.setPadding(0, 0, 0, 0);
         rateLabel.setGravity(Gravity.CENTER);
         panel.addView(rateLabel);
         panel.addView(Ui.gap(this, 2));
-        TextView rate = Ui.text(this, percent + "%", 17, true);
-        rate.setTextColor(Ui.BLUE);
-        rate.setGravity(Gravity.CENTER);
-        rate.setPadding(0, 0, 0, 0);
-        rate.setBackground(Ui.shape(this, Color.rgb(246, 250, 255), Ui.BLUE, 40));
-        panel.addView(rate, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, Ui.dp(this, 44)));
+        DonutProgressView rate = new DonutProgressView(this);
+        rate.setProgress(percent);
+        LinearLayout.LayoutParams donutParams = new LinearLayout.LayoutParams(Ui.dp(this, 62), Ui.dp(this, 62));
+        donutParams.gravity = Gravity.CENTER_HORIZONTAL;
+        panel.addView(rate, donutParams);
+        addProgressSpacer(panel);
         return panel;
+    }
+
+    private void addProgressSpacer(LinearLayout panel) {
+        View spacer = new View(this);
+        panel.addView(spacer, new LinearLayout.LayoutParams(1, 0, 1));
     }
 
     private LinearLayout progressMetric(String label, String value, int color) {

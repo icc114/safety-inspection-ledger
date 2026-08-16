@@ -33,11 +33,35 @@ public final class WebDavClient {
             + "<d:resourcetype/></d:prop></d:propfind>").getBytes(StandardCharsets.UTF_8);
 
     private final OkHttpClient http = new OkHttpClient.Builder()
+            .dns(WebDavClient::lookupWithRetry)
+            .retryOnConnectionFailure(true)
             .connectTimeout(12, java.util.concurrent.TimeUnit.SECONDS)
             .readTimeout(45, java.util.concurrent.TimeUnit.SECONDS)
             .writeTimeout(90, java.util.concurrent.TimeUnit.SECONDS)
             .followRedirects(true)
             .build();
+    private static List<java.net.InetAddress> lookupWithRetry(String hostname) throws java.net.UnknownHostException {
+        java.net.UnknownHostException last = null;
+        long[] waits = {0L, 1500L, 3000L, 6000L};
+        for (int attempt = 0; attempt < waits.length; attempt++) {
+            if (waits[attempt] > 0) {
+                try { Thread.sleep(waits[attempt]); }
+                catch (InterruptedException interrupted) {
+                    Thread.currentThread().interrupt();
+                    if (last != null) throw last;
+                    throw new java.net.UnknownHostException(hostname + " DNS 查询被中断");
+                }
+            }
+            try {
+                java.net.InetAddress[] addresses = java.net.InetAddress.getAllByName(hostname);
+                if (addresses.length > 0) return java.util.Arrays.asList(addresses);
+            } catch (java.net.UnknownHostException error) {
+                last = error;
+            }
+        }
+        throw last == null ? new java.net.UnknownHostException(hostname) : last;
+    }
+
     private final String endpoint;
     private final String authorization;
     private final String pairingSpace;

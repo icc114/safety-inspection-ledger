@@ -54,7 +54,6 @@ public final class CloudSyncService {
         }
         Config config = null;
         long syncStartedAt = System.currentTimeMillis();
-        boolean publishedLocalFirst = false;
         SyncLog.info(context, "内容同步", "开始");
         try {
             config = requireConfig();
@@ -84,14 +83,8 @@ public final class CloudSyncService {
             BackupService backup = new BackupService(context);
             boolean pendingAtStart = hasPendingLocalChanges(syncStartedAt);
             if (pendingAtStart) {
-                progress(listener, "正在发布本机修改，供其他设备并行接收…");
-                SyncLog.info(context, "本机修改", "检测到待同步变更，先上传本机快照");
-                uploadSnapshot(backup, client, config, deviceId);
-                publishedLocalFirst = true;
-                SyncLog.info(context, "本机修改", "首次快照上传完成");
-                try { Thread.sleep(350L); } catch (InterruptedException interrupted) { Thread.currentThread().interrupt(); }
-                snapshots = client.listSnapshots(config.space);
-                emptyCloud = snapshots.isEmpty();
+                progress(listener, "本机有修改，正在与云端合并…");
+                SyncLog.info(context, "本机修改", "检测到待同步变更；改为合并后单次上传，减少重复大文件传输");
             }
 
             int peers = 0;
@@ -155,7 +148,6 @@ public final class CloudSyncService {
             String warning = warnings.isEmpty() ? "" : String.join("；", warnings);
             repo.putSetting("last_sync_warning", warning);
             if (hasPendingLocalChanges()) CloudSyncScheduler.scheduleImmediate(context);
-            else if (publishedLocalFirst) CloudSyncScheduler.schedulePeerRefresh(context);
             progress(listener, skipped == 0 ? "同步完成" : "同步完成，但有旧设备快照被跳过");
             SyncLog.info(context, "内容同步", "成功；peerDevices=" + peers
                     + "；changedRows=" + changed + "；skippedSnapshots=" + skipped);
