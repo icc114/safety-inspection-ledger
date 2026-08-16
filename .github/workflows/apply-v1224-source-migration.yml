@@ -7,6 +7,7 @@ on:
     paths:
       - 'tools/v1224-android-ui.patch'
       - 'tools/v021-pc-preview.patch'
+      - 'tools/v1224-progress-target.patch'
       - '.github/workflows/apply-v1224-source-migration.yml'
   workflow_dispatch:
 
@@ -22,20 +23,34 @@ jobs:
         with:
           ref: agent/v1224-pc021-calendar-holiday
           fetch-depth: 0
-      - name: Apply approved UI patches
+      - name: Apply approved source patches once
         shell: bash
         run: |
           set -euo pipefail
-          git apply --check tools/v1224-android-ui.patch
-          git apply tools/v1224-android-ui.patch
-          git apply --check tools/v021-pc-preview.patch
-          git apply tools/v021-pc-preview.patch
+          apply_once() {
+            local patch="$1"
+            if git apply --check "$patch"; then
+              git apply "$patch"
+            elif git apply --reverse --check "$patch"; then
+              echo "$patch already applied"
+            else
+              echo "Cannot apply or recognize $patch" >&2
+              exit 1
+            fi
+          }
+          apply_once tools/v1224-android-ui.patch
+          apply_once tools/v021-pc-preview.patch
+          apply_once tools/v1224-progress-target.patch
       - name: Commit migrated source
         shell: bash
         run: |
           set -euo pipefail
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add app/src/main/java/cn/safetyledger/app/LedgerActivity.java desktop/src/main/java/cn/safetyledger/pc/RecordPreviewDialog.java
-          git commit -m "Apply compact calendar and PC preview redesign"
+          git add app/src/main/java/cn/safetyledger/app/LedgerActivity.java desktop/src/main/java/cn/safetyledger/pc/RecordPreviewDialog.java desktop/src/main/java/cn/safetyledger/pc/DesktopUiPatch.java
+          if git diff --cached --quiet; then
+            echo "Source is already migrated."
+            exit 0
+          fi
+          git commit -m "Apply final compact calendar progress target"
           git push origin HEAD:agent/v1224-pc021-calendar-holiday
