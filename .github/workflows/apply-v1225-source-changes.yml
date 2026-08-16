@@ -5,7 +5,7 @@ on:
     branches:
       - 'agent/v1225-ui-sync-diagnostics'
     paths:
-      - 'tools/v1225-ui-sync-diagnostics.patch'
+      - 'tools/apply_v1225.py'
       - '.github/workflows/apply-v1225-source-changes.yml'
   workflow_dispatch:
 
@@ -21,19 +21,11 @@ jobs:
         with:
           ref: agent/v1225-ui-sync-diagnostics
           fetch-depth: 0
-      - name: Apply UI and diagnostics patch
+      - name: Apply deterministic source migration
         shell: bash
         run: |
           set -euo pipefail
-          if git apply --check tools/v1225-ui-sync-diagnostics.patch; then
-            git apply tools/v1225-ui-sync-diagnostics.patch
-          elif git apply --reverse --check tools/v1225-ui-sync-diagnostics.patch; then
-            echo 'Patch already applied.'
-          else
-            echo 'Patch cannot be applied cleanly.' >&2
-            git apply --check --verbose tools/v1225-ui-sync-diagnostics.patch
-            exit 1
-          fi
+          python3 tools/apply_v1225.py
       - name: Commit source changes
         shell: bash
         run: |
