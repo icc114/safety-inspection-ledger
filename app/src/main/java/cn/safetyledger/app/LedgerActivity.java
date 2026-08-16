@@ -533,8 +533,7 @@ public final class LedgerActivity extends Activity {
         }
 
         if (summary.results.isEmpty()) {
-            TextView empty = Ui.text(this, "未设置计划
-点击这里新增", 8, false);
+            TextView empty = Ui.text(this, "未设置计划\n点击这里新增", 8, false);
             empty.setPadding(0, 0, 0, 0);
             empty.setGravity(Gravity.CENTER);
             empty.setTextColor(Ui.MUTED);
@@ -564,9 +563,7 @@ public final class LedgerActivity extends Activity {
             return;
         }
         StringBuilder message = new StringBuilder();
-        message.append("本月共保存 ").append(summary.totalInspections).append(" 条正式检查记录。
-
-");
+        message.append("本月共保存 ").append(summary.totalInspections).append(" 条正式检查记录。\n\n");
         for (MonthlyPlanConfig.Result result : summary.results) {
             message.append("• ").append(result.item.name).append("：已检查 ")
                     .append(result.actual).append(" 次");
@@ -576,8 +573,7 @@ public final class LedgerActivity extends Activity {
             } else {
                 message.append("（只统计，不设目标）");
             }
-            message.append('
-');
+            message.append('\n');
         }
         new AlertDialog.Builder(this)
                 .setTitle("本月检查明细")
