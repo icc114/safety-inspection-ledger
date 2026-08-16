@@ -28,10 +28,17 @@ jobs:
         run: sdkmanager 'platform-tools' 'platforms;android-35' 'build-tools;35.0.0'
       - name: Grant Gradle permission
         run: chmod +x gradlew
-      - name: Test, lint and build debug APK
-        run: ./gradlew --no-daemon testDebugUnitTest lintDebug assembleDebug
-      - name: Name debug APK
-        run: cp app/build/outputs/apk/debug/app-debug.apk '安全检查台账-1.2.24-debug-不可作为长期升级包.apk'
+      - name: Test, lint and build APKs
+        run: ./gradlew --no-daemon testDebugUnitTest lintDebug assembleDebug assembleRelease
+      - name: Name APKs and package signing tools
+        run: |
+          cp app/build/outputs/apk/debug/app-debug.apk '安全检查台账-1.2.24-debug-不可作为长期升级包.apk'
+          cp app/build/outputs/apk/release/app-release-unsigned.apk '安全检查台账-1.2.24-release-unsigned.apk'
+          mkdir -p signing-tools/lib
+          cp "$ANDROID_HOME/build-tools/35.0.0/apksigner" signing-tools/
+          cp "$ANDROID_HOME/build-tools/35.0.0/zipalign" signing-tools/
+          cp "$ANDROID_HOME/build-tools/35.0.0/lib/apksigner.jar" signing-tools/lib/
+          chmod +x signing-tools/apksigner signing-tools/zipalign
       - name: Upload debug APK artifact
         uses: actions/upload-artifact@v4
         with:
@@ -39,3 +46,17 @@ jobs:
           path: 安全检查台账-1.2.24-debug-不可作为长期升级包.apk
           if-no-files-found: error
           retention-days: 30
+      - name: Upload unsigned release APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: 安全检查台账-1.2.24-release-unsigned
+          path: 安全检查台账-1.2.24-release-unsigned.apk
+          if-no-files-found: error
+          retention-days: 30
+      - name: Upload Linux Android signing tools
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-build-tools-35-linux-signing
+          path: signing-tools/
+          if-no-files-found: error
+          retention-days: 7
