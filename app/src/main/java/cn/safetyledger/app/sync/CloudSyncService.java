@@ -90,6 +90,8 @@ public final class CloudSyncService {
             int peers = 0;
             int changed = 0;
             int skipped = 0;
+            int unchangedPeers = 0;
+            boolean peerSnapshotChanged = false;
             List<String> warnings = new ArrayList<>();
             int peerTotal = 0;
             for (String name : snapshots) if (!name.equals(deviceId + ".safetydata")) peerTotal++;
@@ -98,6 +100,21 @@ public final class CloudSyncService {
             for (String name : snapshots) {
                 if (name.equals(deviceId + ".safetydata")) continue;
                 peerIndex++;
+                progress(listener, "正在检查设备 " + peerIndex + "/" + peerTotal + "…");
+                String stamp = "";
+                String stampKey = peerSnapshotStampKey(config.space, name);
+                try {
+                    stamp = client.snapshotStamp(config.space, name);
+                    String previousStamp = repo.setting(stampKey, "");
+                    if (!stamp.isBlank() && stamp.equals(previousStamp)) {
+                        unchangedPeers++;
+                        peers++;
+                        SyncLog.info(context, "接收设备", shortDevice(name) + "；云端快照未变化，跳过大文件下载");
+                        continue;
+                    }
+                } catch (Exception stampError) {
+                    SyncLog.warn(context, "快照版本检查", shortDevice(name) + "；版本检查失败，回退为正常下载：" + readable(stampError));
+                }
                 progress(listener, "正在接收设备 " + peerIndex + "/" + peerTotal + "…");
                 File remote = File.createTempFile("safety-cloud-in-", ".safetydata", context.getCacheDir());
                 try {
@@ -110,6 +127,8 @@ public final class CloudSyncService {
                         changed += backup.mergeRestore(restore);
                     }
                     peers++;
+                    peerSnapshotChanged = true;
+                    if (!stamp.isBlank()) repo.putSetting(stampKey, stamp);
                     SyncLog.info(context, "接收设备", shortDevice(name) + "；合并完成");
                 } catch (Throwable peerError) {
                     skipped++;
@@ -133,10 +152,17 @@ public final class CloudSyncService {
             syncTrashSignalsInternal(client,config,false);
             applyTombstones();
 
-            progress(listener, "正在上传本机最新数据…");
-            SyncLog.info(context, "最终上传", "开始生成并上传聚合快照");
-            uploadSnapshot(backup, client, config, deviceId);
-            SyncLog.info(context, "最终上传", "完成");
+            boolean ownSnapshotMissing = !snapshots.contains(deviceId + ".safetydata");
+            boolean needLargeUpload = pendingAtStart || peerSnapshotChanged || ownSnapshotMissing;
+            if (needLargeUpload) {
+                progress(listener, "正在上传本机最新数据…");
+                SyncLog.info(context, "最终上传", "开始生成并上传聚合快照");
+                uploadSnapshot(backup, client, config, deviceId);
+                SyncLog.info(context, "最终上传", "完成");
+            } else {
+                progress(listener, "云端无新变化，无需重复上传大文件…");
+                SyncLog.info(context, "最终上传", "跳过；本机和其他设备快照均无变化");
+            }
             runAutoArchiveAfterSuccessfulSync();
 
             long now = System.currentTimeMillis();
@@ -150,6 +176,7 @@ public final class CloudSyncService {
             if (hasPendingLocalChanges()) CloudSyncScheduler.scheduleImmediate(context);
             progress(listener, skipped == 0 ? "同步完成" : "同步完成，但有旧设备快照被跳过");
             SyncLog.info(context, "内容同步", "成功；peerDevices=" + peers
+                    + "；unchangedPeers=" + unchangedPeers
                     + "；changedRows=" + changed + "；skippedSnapshots=" + skipped);
             return new Result(peers, changed, skipped, deviceRole(deviceId), now, warning);
         } catch (Exception error) {
@@ -159,6 +186,13 @@ public final class CloudSyncService {
             if (config != null) Arrays.fill(config.spacePassword, '\0');
             CONTENT_RUNNING.set(false);
         }
+    }
+
+    private String peerSnapshotStampKey(String space, String name) {
+        String raw = (space == null ? "" : space) + "|" + (name == null ? "" : name);
+        String token = java.util.Base64.getUrlEncoder().withoutPadding()
+                .encodeToString(raw.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        return "cloud_peer_stamp_" + token;
     }
 
     private boolean hasPendingLocalChanges(long through) {

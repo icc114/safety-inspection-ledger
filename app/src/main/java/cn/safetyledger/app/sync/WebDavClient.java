@@ -274,6 +274,20 @@ public final class WebDavClient {
         List<String> names=new ArrayList<>();for(int i=0;i<hrefs.getLength();i++){String href=hrefs.item(i).getTextContent();int slash=href.lastIndexOf('/');String name=URLDecoder.decode(slash>=0?href.substring(slash+1):href,StandardCharsets.UTF_8.name());if(name.endsWith(suffix)&&!names.contains(name))names.add(name);}return names;
     }
 
+    /** Returns a lightweight server version stamp for a snapshot without downloading it. */
+    public String snapshotStamp(String space, String name) throws Exception {
+        Request request = request(fileUrl(space, name)).head().build();
+        try (Response response = http.newCall(request).execute()) {
+            if (response.code() == 404) return "";
+            if (!response.isSuccessful()) throw failure("读取云端快照版本失败", response);
+            String etag = response.header("ETag", "");
+            String length = response.header("Content-Length", "");
+            String modified = response.header("Last-Modified", "");
+            if (etag.isBlank() && length.isBlank() && modified.isBlank()) return "";
+            return etag + "|" + length + "|" + modified;
+        }
+    }
+
     public void download(String space, String name, File target) throws Exception {
         Request request = request(fileUrl(space, name)).get().build();
         try (Response response = http.newCall(request).execute()) {
