@@ -3,6 +3,7 @@ package cn.safetyledger.app.sync;
 import android.content.Context;
 
 import java.io.BufferedReader;
+import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.FileOutputStream;
@@ -105,8 +106,12 @@ public final class SyncLog {
     private static void trimIfNeeded(File file) throws Exception {
         if (!file.isFile() || file.length() <= MAX_BYTES) return;
         byte[] all;
-        try (FileInputStream input = new FileInputStream(file)) {
-            all = input.readAllBytes();
+        try (FileInputStream input = new FileInputStream(file);
+             ByteArrayOutputStream buffer = new ByteArrayOutputStream((int)Math.min(file.length(), Integer.MAX_VALUE))) {
+            byte[] chunk = new byte[8192];
+            int count;
+            while ((count = input.read(chunk)) != -1) buffer.write(chunk, 0, count);
+            all = buffer.toByteArray();
         }
         int keep = (int) Math.min(KEEP_BYTES, all.length);
         int start = all.length - keep;
