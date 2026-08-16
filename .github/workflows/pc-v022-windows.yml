@@ -37,9 +37,11 @@ jobs:
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force -Path dist | Out-Null
+          # Windows jpackage rejects non-ASCII application names on this runner,
+          # so the launcher remains ASCII while the application window and ZIP use the Chinese product name.
           jpackage `
             --type app-image `
-            --name "安全检查台账 PC" `
+            --name "SafetyLedgerPC" `
             --app-version "0.2.2" `
             --vendor "Safety Ledger" `
             --input "desktop/target" `
@@ -53,7 +55,7 @@ jobs:
 
           使用方法：
           1. 解压整个压缩包，不要只单独复制 exe。
-          2. 双击“安全检查台账 PC.exe”运行。
+          2. 双击 SafetyLedgerPC.exe 运行，打开后的软件标题仍为“安全检查台账 PC 0.2.2”。
           3. 原 0.2.1 的配置和本地资料库不会因升级被删除。
 
           0.2.2 主要更新：
@@ -62,9 +64,9 @@ jobs:
           - 新增同步日志查看和导出；同步失败时可直接打开/导出日志。
           - 云同步增加临时网络错误自动重试、分快照容错和更详细的诊断信息。
           - 优化窗口顶部应用图标的清晰度。
-          '@ | Set-Content -Path "dist/安全检查台账 PC/使用说明.txt" -Encoding UTF8
+          '@ | Set-Content -Path "dist/SafetyLedgerPC/使用说明.txt" -Encoding UTF8
 
-          Compress-Archive -Path "dist/安全检查台账 PC" -DestinationPath "安全检查台账-PC-0.2.2-Windows.zip" -Force
+          Compress-Archive -Path "dist/SafetyLedgerPC" -DestinationPath "安全检查台账-PC-0.2.2-Windows.zip" -Force
 
       - name: Upload Windows package
         uses: actions/upload-artifact@v4
