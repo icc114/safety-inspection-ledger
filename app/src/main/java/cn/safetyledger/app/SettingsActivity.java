@@ -35,6 +35,7 @@ import cn.safetyledger.app.sync.CloudSyncService;
 import cn.safetyledger.app.sync.SyncProvider;
 import cn.safetyledger.app.sync.WebDavClient;
 import cn.safetyledger.app.sync.SyncErrorFormatter;
+import cn.safetyledger.app.sync.SyncLog;
 
 import java.io.InputStream;
 import java.io.OutputStream;
@@ -261,6 +262,10 @@ public final class SettingsActivity extends Activity {
         actions.addView(Ui.horizontalGap(this, 5));
         actions.addView(now, Ui.weight(1));
         card.addView(actions);
+        card.addView(Ui.gap(this, 7));
+        Button logs = Ui.secondaryButton(this, "查看 / 导出同步日志");
+        logs.setOnClickListener(view -> Ui.start(this, SyncLogActivity.class));
+        card.addView(logs);
         card.addView(Ui.gap(this, 7));
         Button resetCloud = Ui.dangerButton(this, "清空云端旧测试设备 / 重新建立同步空间");
         resetCloud.setOnClickListener(view -> confirmResetCloudSpace());
@@ -631,6 +636,7 @@ public final class SettingsActivity extends Activity {
         }
         final String resolvedType = type;
         syncStatus.setText("检查内容：正在测试连接…");
+        SyncLog.info(this, "测试连接", "开始；类型=" + resolvedType + "；同步空间=" + spaceName);
         new Thread(() -> {
             SyncProvider.ConnectionResult result;
             if (resolvedType.contains("WebDAV") || "Cloudflare".equals(resolvedType)
@@ -659,6 +665,7 @@ public final class SettingsActivity extends Activity {
             SyncProvider.ConnectionResult checked = result;
             runOnUiThread(() -> {
                 if (checked.success()) {
+                    SyncLog.info(this, "测试连接", "成功；" + checked.message());
                     boolean saved = true;
                     if (saveOnSuccess) {
                         saved = saveProvider(resolvedType, url, username, password, tokenValue,
@@ -671,6 +678,7 @@ public final class SettingsActivity extends Activity {
                             .setPositiveButton("确定", null).show();
                     if (saveOnSuccess && saved) syncNow();
                 } else {
+                    SyncLog.warn(this, "测试连接", "失败；" + checked.message());
                     syncStatus.setText("同步状态：失败 · " + checked.message());
                     syncNotification(checked.message());
                     new AlertDialog.Builder(this)
@@ -748,6 +756,7 @@ public final class SettingsActivity extends Activity {
     }
 
     private void runSync(boolean openDevicesAfter) {
+        SyncLog.info(this, "手动同步", "用户发起检查内容同步");
         new Thread(() -> {
             try {
                 CloudSyncService.Result result = new CloudSyncService(this).syncNow(message ->
@@ -789,6 +798,7 @@ public final class SettingsActivity extends Activity {
                     if (openDevicesAfter) manageDevices();
                 });
             } catch (Exception error) {
+                SyncLog.error(this, "手动同步失败", error);
                 String message = readableError(error);
                 repo.putSetting("last_sync_error", message);
                 runOnUiThread(() -> {
@@ -796,7 +806,10 @@ public final class SettingsActivity extends Activity {
                     if (!message.contains("已有同步任务正在运行")) syncNotification(message);
                     new AlertDialog.Builder(this)
                             .setTitle(message.startsWith("网络连接问题：") ? "网络连接问题" : "同步失败")
-                            .setMessage(message).setPositiveButton("确定", null).show();
+                            .setMessage(message + "
+
+已自动写入同步诊断日志。请在本页点击“查看 / 导出同步日志”，导出 TXT 后即可直接发给开发者排查。")
+                            .setPositiveButton("确定", null).show();
                 });
             }
         }, openDevicesAfter ? "refresh-paired-devices" : "manual-cloud-sync").start();

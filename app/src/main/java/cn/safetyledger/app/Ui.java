@@ -244,10 +244,13 @@ public final class Ui {
         bar.setPadding(dp(activity, 8), dp(activity, 5), dp(activity, 10), dp(activity, 5));
         bar.setBackgroundColor(BLUE);
         Button back = iconButton(activity, "‹");
+        back.setTextSize(30);
+        back.setPadding(0, 0, 0, dp(activity, 2));
+        back.setGravity(Gravity.CENTER);
         back.setOnClickListener(view -> activity.finish());
         TextView text = text(activity, title, 20, true);
         text.setTextColor(Color.WHITE);
-        bar.addView(back, new LinearLayout.LayoutParams(dp(activity, 38), dp(activity, 38)));
+        bar.addView(back, new LinearLayout.LayoutParams(dp(activity, 44), dp(activity, 42)));
         bar.addView(text, weight(1));
         return bar;
     }

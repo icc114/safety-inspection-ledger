@@ -55,19 +55,26 @@ public final class CloudSyncService {
         Config config = null;
         long syncStartedAt = System.currentTimeMillis();
         boolean publishedLocalFirst = false;
+        SyncLog.info(context, "内容同步", "开始");
         try {
             config = requireConfig();
+            SyncLog.info(context, "同步配置", "provider=" + config.type
+                    + "；endpoint=" + safeEndpoint(config.endpoint) + "；space=" + config.space);
             progress(listener, "正在连接云端…");
             WebDavClient client = client(config);
             prepare(client, config);
+            SyncLog.info(context, "连接云端", "目录准备完成");
             syncTrashSignalsInternal(client,config,false);
+            SyncLog.info(context, "云端回收站", "同步完成");
 
             String deviceId = ensureDeviceId();
+            SyncLog.info(context, "设备", "device=" + shortDevice(deviceId));
             if (client.isDeviceLoggedOut(config.space, deviceId)) {
                 return finishForcedLogout(client, config, deviceId, listener);
             }
             progress(listener, "正在读取其他设备的检查内容…");
             List<String> snapshots = client.listSnapshots(config.space);
+            SyncLog.info(context, "云端快照", "发现 " + snapshots.size() + " 个快照");
             boolean emptyCloud = snapshots.isEmpty();
 
             // Register locally before touching peer snapshots. A new device joining a non-empty
@@ -78,8 +85,10 @@ public final class CloudSyncService {
             boolean pendingAtStart = hasPendingLocalChanges(syncStartedAt);
             if (pendingAtStart) {
                 progress(listener, "正在发布本机修改，供其他设备并行接收…");
+                SyncLog.info(context, "本机修改", "检测到待同步变更，先上传本机快照");
                 uploadSnapshot(backup, client, config, deviceId);
                 publishedLocalFirst = true;
+                SyncLog.info(context, "本机修改", "首次快照上传完成");
                 try { Thread.sleep(350L); } catch (InterruptedException interrupted) { Thread.currentThread().interrupt(); }
                 snapshots = client.listSnapshots(config.space);
                 emptyCloud = snapshots.isEmpty();
@@ -99,15 +108,19 @@ public final class CloudSyncService {
                 progress(listener, "正在接收设备 " + peerIndex + "/" + peerTotal + "…");
                 File remote = File.createTempFile("safety-cloud-in-", ".safetydata", context.getCacheDir());
                 try {
+                    SyncLog.info(context, "接收设备", shortDevice(name) + "；开始下载");
                     client.download(config.space, name, remote);
+                    SyncLog.info(context, "接收设备", shortDevice(name) + "；下载完成；bytes=" + remote.length());
                     try (FileInputStream input = new FileInputStream(remote)) {
                         BackupService.RestorePackage restore = backup.decryptAndValidate(input,
                                 config.spacePassword.clone());
                         changed += backup.mergeRestore(restore);
                     }
                     peers++;
+                    SyncLog.info(context, "接收设备", shortDevice(name) + "；合并完成");
                 } catch (Throwable peerError) {
                     skipped++;
+                    SyncLog.error(context, "接收设备失败 " + shortDevice(name), peerError);
                     String detail = peerError instanceof OutOfMemoryError
                             ? "旧版云端快照过大，已跳过；请将该设备升级到 1.2.15 后重新同步"
                             : readable(peerError);
@@ -128,7 +141,9 @@ public final class CloudSyncService {
             applyTombstones();
 
             progress(listener, "正在上传本机最新数据…");
+            SyncLog.info(context, "最终上传", "开始生成并上传聚合快照");
             uploadSnapshot(backup, client, config, deviceId);
+            SyncLog.info(context, "最终上传", "完成");
             runAutoArchiveAfterSuccessfulSync();
 
             long now = System.currentTimeMillis();
@@ -142,7 +157,12 @@ public final class CloudSyncService {
             if (hasPendingLocalChanges()) CloudSyncScheduler.scheduleImmediate(context);
             else if (publishedLocalFirst) CloudSyncScheduler.schedulePeerRefresh(context);
             progress(listener, skipped == 0 ? "同步完成" : "同步完成，但有旧设备快照被跳过");
+            SyncLog.info(context, "内容同步", "成功；peerDevices=" + peers
+                    + "；changedRows=" + changed + "；skippedSnapshots=" + skipped);
             return new Result(peers, changed, skipped, deviceRole(deviceId), now, warning);
+        } catch (Exception error) {
+            SyncLog.error(context, "内容同步失败", error);
+            throw error;
         } finally {
             if (config != null) Arrays.fill(config.spacePassword, '\0');
             CONTENT_RUNNING.set(false);
@@ -544,6 +564,7 @@ public final class CloudSyncService {
         try {
             client.prepare(config.space);
         } catch (Exception error) {
+            SyncLog.error(context, "准备云端目录失败", error);
             String message = readable(error);
             if ("Cloudflare".equals(config.type)) {
                 if (message.contains("需要设备授权") || message.contains("HTTP 401")) {
@@ -571,10 +592,13 @@ public final class CloudSyncService {
                                 Config config, String deviceId) throws Exception {
         File outgoing = File.createTempFile("safety-cloud-out-", ".safetydata", context.getCacheDir());
         try {
+            SyncLog.info(context, "生成快照", "开始");
             try (FileOutputStream output = new FileOutputStream(outgoing)) {
                 backup.exportCloudSnapshot(output, config.spacePassword.clone());
             }
+            SyncLog.info(context, "生成快照", "完成；bytes=" + outgoing.length());
             client.upload(config.space, deviceId + ".safetydata", outgoing);
+            SyncLog.info(context, "上传快照", "完成；bytes=" + outgoing.length());
         } finally {
             outgoing.delete();
         }
@@ -702,6 +726,14 @@ public final class CloudSyncService {
     private static String readable(Throwable error) {
         String message = error.getMessage();
         return message == null || message.isBlank() ? error.getClass().getSimpleName() : message;
+    }
+
+    private static String safeEndpoint(String endpoint) {
+        if (endpoint == null) return "";
+        String value = endpoint.trim();
+        int query = value.indexOf('?');
+        if (query >= 0) value = value.substring(0, query);
+        return value;
     }
 
     public record Result(int peerDevices, int changedRows, int skippedSnapshots,
