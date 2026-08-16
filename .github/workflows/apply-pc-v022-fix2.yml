@@ -1,0 +1,59 @@
+name: Finalize PC 0.2.2 Source
+
+on:
+  push:
+    branches:
+      - agent/pc-v022-mobile-ui-sync-log-final
+    paths:
+      - .github/workflows/apply-pc-v022-fix2.yml
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  finalize:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/pc-v022-mobile-ui-sync-log-final
+          fetch-depth: 0
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: maven
+      - name: Apply PC 0.2.2 migration and compiler fixes
+        run: |
+          python tools/apply-pc-v022-ui-sync.py
+          python - <<'PY'
+          from pathlib import Path
+
+          desktop = Path('desktop/src/main/java/cn/safetyledger/pc/SafetyLedgerDesktop.java')
+          s = desktop.read_text(encoding='utf-8')
+          s = s.replace('    private void clearFilters()    private void clearFilters(){', '    private void clearFilters(){')
+          s = s.replace('    private void importPackage()    private void importPackage(){', '    private void importPackage(){')
+          s = s.replace('throw new IOException("检测到 " + failed + " 个设备快照，但全部处理失败。请查看同步日志定位具体步骤。"',
+                        'throw new IllegalStateException("检测到 " + failed + " 个设备快照，但全部处理失败。请查看同步日志定位具体步骤。"')
+          desktop.write_text(s, encoding='utf-8')
+
+          cloud = Path('desktop/src/main/java/cn/safetyledger/pc/CloudClient.java')
+          c = cloud.read_text(encoding='utf-8')
+          c = c.replace('catch (HttpTimeoutException | IOException error)', 'catch (IOException error)')
+          c = c.replace('import java.net.http.HttpTimeoutException;\n', '')
+          cloud.write_text(c, encoding='utf-8')
+          PY
+      - name: Test and build PC 0.2.2
+        run: mvn -f desktop/pom.xml --batch-mode test package
+      - name: Commit verified PC 0.2.2 source
+        run: |
+          git config user.name "icc114"
+          git config user.email "75865808+icc114@users.noreply.github.com"
+          git add desktop
+          if git diff --cached --quiet; then
+            echo "No generated changes"
+          else
+            git commit -m "PC 0.2.2 optimized UI, resilient cloud sync and diagnostics"
+            git push origin HEAD:agent/pc-v022-mobile-ui-sync-log-final
+          fi
