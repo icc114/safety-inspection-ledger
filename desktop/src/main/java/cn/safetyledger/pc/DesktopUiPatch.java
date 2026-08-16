@@ -190,7 +190,7 @@ public final class DesktopUiPatch {
         try {
             YearMonth month = field(frame, "calendarMonth", YearMonth.class);
             Set<LocalDate> dates = markedDates(frame, month);
-            int planned = (month.lengthOfMonth() + 6) / 7;
+            int planned = 4;
             Set<Integer> doneWeeks = new HashSet<>();
             for (LocalDate date : dates) doneWeeks.add((date.getDayOfMonth() - 1) / 7);
             int done = Math.min(planned, doneWeeks.size());

@@ -407,7 +407,7 @@ public final class LedgerActivity extends Activity {
         panel.addView(title);
         panel.addView(Ui.gap(this, 7));
 
-        int planned = (month.lengthOfMonth() + 6) / 7;
+        int planned = 4;
         Set<Integer> completedWeeks = new HashSet<>();
         for (String date : marked) {
             try {
