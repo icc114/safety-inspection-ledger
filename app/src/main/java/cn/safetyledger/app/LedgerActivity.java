@@ -131,15 +131,15 @@ public final class LedgerActivity extends Activity {
         LinearLayout dateNavigation = Ui.row(this);
         Button previous = Ui.secondaryButton(this, "‹");
         Button next = Ui.secondaryButton(this, "›");
-        previous.setTextSize(28);
-        next.setTextSize(28);
+        previous.setTextSize(30);
+        next.setTextSize(30);
         previous.setPadding(0, 0, 0, Ui.dp(this, 2));
         next.setPadding(0, 0, 0, Ui.dp(this, 2));
         todayTitle = Ui.text(this, "", 17, true);
         todayTitle.setGravity(Gravity.CENTER);
         Button reset = Ui.secondaryButton(this, "回到今天");
         reset.setMinHeight(Ui.dp(this, 38));
-        reset.setTextSize(12);
+        reset.setTextSize(11.5f);
         reset.setSingleLine(true);
         reset.setPadding(Ui.dp(this, 5), 0, Ui.dp(this, 5), 0);
 
@@ -159,7 +159,7 @@ public final class LedgerActivity extends Activity {
         dateNavigation.addView(todayTitle, Ui.weight(1));
         dateNavigation.addView(next, new LinearLayout.LayoutParams(Ui.dp(this, 40), Ui.dp(this, 40)));
         dateNavigation.addView(Ui.horizontalGap(this, 5));
-        dateNavigation.addView(reset, new LinearLayout.LayoutParams(Ui.dp(this, 94), Ui.dp(this, 40)));
+        dateNavigation.addView(reset, new LinearLayout.LayoutParams(Ui.dp(this, 90), Ui.dp(this, 40)));
         card.addView(dateNavigation);
         card.addView(Ui.gap(this, 4));
 
@@ -199,11 +199,11 @@ public final class LedgerActivity extends Activity {
         range.setSelection(1);
         type = spinner(types());
         statusFilter = spinner(new String[]{"全部状态", "草稿", "待整改", "整改中", "已整改完成", "检查完成"});
-        filters.addView(rangeLabel, new LinearLayout.LayoutParams(Ui.dp(this, 58), Ui.dp(this, 40)));
-        filters.addView(range, new LinearLayout.LayoutParams(Ui.dp(this, 72), Ui.dp(this, 40)));
-        filters.addView(Ui.horizontalGap(this, 4));
+        filters.addView(rangeLabel, new LinearLayout.LayoutParams(Ui.dp(this, 54), Ui.dp(this, 40)));
+        filters.addView(range, new LinearLayout.LayoutParams(Ui.dp(this, 66), Ui.dp(this, 40)));
+        filters.addView(Ui.horizontalGap(this, 3));
         filters.addView(type, new LinearLayout.LayoutParams(0, Ui.dp(this, 40), 1));
-        filters.addView(Ui.horizontalGap(this, 4));
+        filters.addView(Ui.horizontalGap(this, 3));
         filters.addView(statusFilter, new LinearLayout.LayoutParams(0, Ui.dp(this, 40), 1));
         card.addView(filters);
         AdapterView.OnItemSelectedListener listener = new SimpleSelect() {
@@ -237,9 +237,9 @@ public final class LedgerActivity extends Activity {
             showRecords();
         });
         header.addView(title, Ui.weight(1));
-        header.addView(multiToggle, new LinearLayout.LayoutParams(Ui.dp(this, 88), Ui.dp(this, 38)));
+        header.addView(multiToggle, new LinearLayout.LayoutParams(Ui.dp(this, 84), Ui.dp(this, 38)));
         header.addView(Ui.horizontalGap(this, 5));
-        header.addView(pageSize, new LinearLayout.LayoutParams(Ui.dp(this, 122), Ui.dp(this, 40)));
+        header.addView(pageSize, new LinearLayout.LayoutParams(Ui.dp(this, 134), Ui.dp(this, 40)));
         card.addView(header);
         selectionActions = Ui.column(this);
         LinearLayout actions = Ui.row(this);
@@ -292,7 +292,7 @@ public final class LedgerActivity extends Activity {
             @Override public View getView(int position, View convertView, ViewGroup parent) {
                 View view = super.getView(position, convertView, parent);
                 if (view instanceof TextView text) {
-                    text.setTextSize(13);
+                    text.setTextSize(12.5f);
                     text.setSingleLine(true);
                     text.setPadding(Ui.dp(LedgerActivity.this, 4), 0,
                             Ui.dp(LedgerActivity.this, 2), 0);
@@ -342,10 +342,11 @@ public final class LedgerActivity extends Activity {
         grid.setColumnCount(7);
         String[] weekdays = {"一", "二", "三", "四", "五", "六", "日"};
         for (String weekday : weekdays) {
-            TextView heading = Ui.text(this, weekday, 11, true);
+            TextView heading = Ui.text(this, weekday, 12, true);
+            heading.setIncludeFontPadding(false);
             heading.setPadding(0, 0, 0, 0);
             heading.setGravity(Gravity.CENTER);
-            grid.addView(heading, cellParams(24));
+            grid.addView(heading, cellParams(26));
         }
 
         Set<String> marked = repo.markedDates(month.toString());
@@ -418,7 +419,7 @@ public final class LedgerActivity extends Activity {
 
         calendarBox.addView(left, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1));
         calendarBox.addView(Ui.horizontalGap(this, 5));
-        calendarBox.addView(monthProgressPanel(marked), new LinearLayout.LayoutParams(Ui.dp(this, 84), ViewGroup.LayoutParams.MATCH_PARENT));
+        calendarBox.addView(monthProgressPanel(marked), new LinearLayout.LayoutParams(Ui.dp(this, 88), ViewGroup.LayoutParams.MATCH_PARENT));
     }
 
     private LinearLayout monthProgressPanel(Set<String> marked) {
@@ -450,7 +451,7 @@ public final class LedgerActivity extends Activity {
         rateLabel.setGravity(Gravity.CENTER);
         panel.addView(rateLabel);
         panel.addView(Ui.gap(this, 2));
-        TextView rate = Ui.text(this, percent + "%", 18, true);
+        TextView rate = Ui.text(this, percent + "%", 17, true);
         rate.setTextColor(Ui.BLUE);
         rate.setGravity(Gravity.CENTER);
         rate.setPadding(0, 0, 0, 0);
@@ -465,7 +466,7 @@ public final class LedgerActivity extends Activity {
         name.setPadding(0, 0, 0, 0);
         name.setTextColor(Ui.MUTED);
         name.setGravity(Gravity.CENTER);
-        TextView number = Ui.text(this, value, 16, true);
+        TextView number = Ui.text(this, value, 15, true);
         number.setPadding(0, 0, 0, 0);
         number.setTextColor(color);
         number.setGravity(Gravity.CENTER);
