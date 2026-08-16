@@ -1,0 +1,329 @@
+diff --git a/app/src/main/java/cn/safetyledger/app/LedgerActivity.java b/app/src/main/java/cn/safetyledger/app/LedgerActivity.java
+index b777557..deb9d06 100644
+--- a/app/src/main/java/cn/safetyledger/app/LedgerActivity.java
++++ b/app/src/main/java/cn/safetyledger/app/LedgerActivity.java
+@@ -30,6 +30,7 @@ import cn.safetyledger.app.data.Entities.Template;
+ import cn.safetyledger.app.data.LedgerRepository;
+ import cn.safetyledger.app.pdf.PdfExporter;
+ import cn.safetyledger.app.sync.CloudSyncScheduler;
++import cn.safetyledger.app.holiday.HolidaySyncService;
+ 
+ import java.io.OutputStream;
+ import java.time.DayOfWeek;
+@@ -58,7 +59,6 @@ public final class LedgerActivity extends Activity {
+     private TextView monthTitle;
+     private TextView pageTitle;
+     private TextView todayTitle;
+-    private TextView todaySubtitle;
+     private Spinner range;
+     private Spinner type;
+     private Spinner statusFilter;
+@@ -103,9 +103,9 @@ public final class LedgerActivity extends Activity {
+ 
+     private LinearLayout topBar() {
+         LinearLayout bar = Ui.row(this);
+-        bar.setPadding(Ui.dp(this, 14), Ui.dp(this, 10), Ui.dp(this, 10), Ui.dp(this, 10));
++        bar.setPadding(Ui.dp(this, 8), Ui.dp(this, 9), Ui.dp(this, 9), Ui.dp(this, 9));
+         bar.setBackgroundColor(Ui.BLUE);
+-        TextView title = Ui.text(this, "安全检查台账", 21, true);
++        TextView title = Ui.text(this, "安全检查台账", 20, true);
+         title.setTextColor(Color.WHITE);
+         ImageButton settings = new ImageButton(this);
+         settings.setImageResource(R.drawable.ic_settings);
+@@ -114,70 +114,76 @@ public final class LedgerActivity extends Activity {
+         settings.setBackground(Ui.shape(this, Color.TRANSPARENT, 0x55ffffff, 20));
+         settings.setContentDescription("基础设置");
+         settings.setOnClickListener(view -> Ui.start(this, SettingsActivity.class));
+-        Button form = Ui.secondaryButton(this, "+ 检查填报");
++        Button form = Ui.secondaryButton(this, "检查填报");
+         form.setOnClickListener(view -> startActivity(new Intent(this, MainActivity.class)));
+         bar.addView(title);
+-        bar.addView(Ui.horizontalGap(this, 4));
+-        bar.addView(settings, new LinearLayout.LayoutParams(Ui.dp(this, 34), Ui.dp(this, 34)));
++        bar.addView(Ui.horizontalGap(this, 2));
++        bar.addView(settings, new LinearLayout.LayoutParams(Ui.dp(this, 32), Ui.dp(this, 32)));
+         bar.addView(Ui.horizontalGap(this, 0), Ui.weight(1));
+-        bar.addView(form, new LinearLayout.LayoutParams(Ui.dp(this, 112), Ui.dp(this, 48)));
++        bar.addView(form, new LinearLayout.LayoutParams(Ui.dp(this, 102), Ui.dp(this, 44)));
+         return bar;
+     }
+ 
+     private LinearLayout calendarCard() {
+         LinearLayout card = Ui.card(this);
+-        card.setPadding(Ui.dp(this, 10), Ui.dp(this, 9), Ui.dp(this, 10), Ui.dp(this, 8));
+-        LinearLayout today = Ui.row(this);
+-        todayTitle = Ui.text(this, "", 18, true);
+-        todaySubtitle = Ui.text(this, "", 12, false);
+-        todaySubtitle.setTextColor(Ui.MUTED);
+-        LinearLayout todayText = Ui.column(this);
+-        todayText.addView(todayTitle);
+-        todayText.addView(todaySubtitle);
++        card.setPadding(Ui.dp(this, 8), Ui.dp(this, 7), Ui.dp(this, 8), Ui.dp(this, 7));
++
++        LinearLayout dateNavigation = Ui.row(this);
++        Button previous = Ui.secondaryButton(this, "‹");
++        Button next = Ui.secondaryButton(this, "›");
++        previous.setTextSize(24);
++        next.setTextSize(24);
++        todayTitle = Ui.text(this, "", 17, true);
++        todayTitle.setGravity(Gravity.CENTER);
+         Button reset = Ui.secondaryButton(this, "回到今天");
+-        reset.setMinHeight(Ui.dp(this, 40));
++        reset.setMinHeight(Ui.dp(this, 38));
++
++        previous.setOnClickListener(view -> changeCalendarMonth(-1));
++        next.setOnClickListener(view -> changeCalendarMonth(1));
+         reset.setOnClickListener(view -> {
+             month = YearMonth.now();
+             selectedDate = LocalDate.now().toString();
+             selected.clear();
+             if (range != null) range.setSelection(0);
++            requestHolidayRefresh();
+             syncCalendar();
+             load();
+         });
+-        today.addView(todayText, Ui.weight(1));
+-        today.addView(reset, new LinearLayout.LayoutParams(Ui.dp(this, 90), Ui.dp(this, 40)));
+-        card.addView(today);
+-        card.addView(Ui.divider(this));
+-
+-        LinearLayout monthNavigation = Ui.row(this);
+-        monthTitle = Ui.text(this, "", 18, true);
+-        Button previous = Ui.secondaryButton(this, "上月");
+-        Button next = Ui.secondaryButton(this, "下月");
+-        previous.setOnClickListener(view -> {
+-            month = month.minusMonths(1);
+-            selectedDate = null;
+-            selected.clear();
+-            syncCalendar();
+-            load();
+-        });
+-        next.setOnClickListener(view -> {
+-            month = month.plusMonths(1);
+-            selectedDate = null;
+-            selected.clear();
+-            syncCalendar();
+-            load();
+-        });
+-        monthNavigation.addView(monthTitle, Ui.weight(1));
+-        monthNavigation.addView(previous, new LinearLayout.LayoutParams(Ui.dp(this, 72), Ui.dp(this, 38)));
+-        monthNavigation.addView(Ui.horizontalGap(this, 6));
+-        monthNavigation.addView(next, new LinearLayout.LayoutParams(Ui.dp(this, 72), Ui.dp(this, 38)));
+-        card.addView(monthNavigation);
+-        calendarBox = Ui.column(this);
++
++        dateNavigation.addView(previous, new LinearLayout.LayoutParams(Ui.dp(this, 42), Ui.dp(this, 40)));
++        dateNavigation.addView(todayTitle, Ui.weight(1));
++        dateNavigation.addView(next, new LinearLayout.LayoutParams(Ui.dp(this, 42), Ui.dp(this, 40)));
++        dateNavigation.addView(Ui.horizontalGap(this, 6));
++        dateNavigation.addView(reset, new LinearLayout.LayoutParams(Ui.dp(this, 86), Ui.dp(this, 40)));
++        card.addView(dateNavigation);
++        card.addView(Ui.gap(this, 4));
++
++        calendarBox = Ui.row(this);
+         card.addView(calendarBox);
+         syncCalendar();
++        requestHolidayRefresh();
+         return card;
+     }
+ 
++    private void changeCalendarMonth(int delta) {
++        LocalDate focus = selectedDate == null ? LocalDate.now() : LocalDate.parse(selectedDate);
++        month = month.plusMonths(delta);
++        int day = Math.min(focus.getDayOfMonth(), month.lengthOfMonth());
++        selectedDate = month.atDay(day).toString();
++        selected.clear();
++        page = 1;
++        requestHolidayRefresh();
++        syncCalendar();
++        load();
++    }
++
++    private void requestHolidayRefresh() {
++        int year = month.getYear();
++        HolidaySyncService.syncYearAsync(this, year, () -> runOnUiThread(() -> {
++            if (!isFinishing()) syncCalendar();
++        }));
++    }
++
+     private LinearLayout filterCard() {
+         LinearLayout card = Ui.card(this);
+         card.setPadding(Ui.dp(this, 10), Ui.dp(this, 8), Ui.dp(this, 10), Ui.dp(this, 8));
+@@ -301,22 +307,25 @@ public final class LedgerActivity extends Activity {
+ 
+     private void syncCalendar() {
+         if (calendarBox == null) return;
+-        LocalDate focus = selectedDate == null ? LocalDate.now() : LocalDate.parse(selectedDate);
+-        todayTitle.setText(focus.format(DateTimeFormatter.ofPattern("yyyy年M月d日 EEEE", Locale.CHINA)));
+-        Map<String, String[]> focusedHolidays = repo.holidays(focus.toString().substring(0, 7));
+-        String[] day = focusedHolidays.get(focus.toString());
+-        todaySubtitle.setText(day == null ? "点击日期查看当天检查记录" : day[0]
+-                + ("WORKDAY".equals(day[1]) ? " · 调休上班" : " · 法定放假"));
++        LocalDate focus;
++        try { focus = selectedDate == null ? LocalDate.now() : LocalDate.parse(selectedDate); }
++        catch (Exception ignored) { focus = LocalDate.now(); }
++        if (!YearMonth.from(focus).equals(month)) {
++            focus = month.atDay(Math.min(focus.getDayOfMonth(), month.lengthOfMonth()));
++        }
++        todayTitle.setText(focus.format(DateTimeFormatter.ofPattern("yyyy年M月d日", Locale.CHINA)));
+         calendarBox.removeAllViews();
+-        monthTitle.setText(month.getYear() + "年" + month.getMonthValue() + "月");
++
++        LinearLayout left = Ui.column(this);
+         GridLayout grid = new GridLayout(this);
+         grid.setColumnCount(7);
+         String[] weekdays = {"一", "二", "三", "四", "五", "六", "日"};
+         for (String weekday : weekdays) {
+-            TextView heading = Ui.text(this, weekday, 13, true);
++            TextView heading = Ui.text(this, weekday, 12, true);
+             heading.setGravity(Gravity.CENTER);
+-            grid.addView(heading, cellParams(22));
++            grid.addView(heading, cellParams(18));
+         }
++
+         Set<String> marked = repo.markedDates(month.toString());
+         Map<String, String[]> holidays = repo.holidays(month.toString());
+         int leading = month.atDay(1).getDayOfWeek().getValue() - 1;
+@@ -327,41 +336,114 @@ public final class LedgerActivity extends Activity {
+             LocalDate date = firstVisible.plusDays(i);
+             String key = date.toString();
+             boolean inMonth = YearMonth.from(date).equals(month);
+-            boolean isMarked = marked.contains(key);
+-            boolean isSelected = key.equals(selectedDate);
+-            String[] holiday = holidays.get(key);
++            boolean isMarked = inMonth && marked.contains(key);
++            boolean isSelected = inMonth && key.equals(selectedDate);
++            String[] holiday = inMonth ? holidays.get(key) : null;
++            boolean makeupWorkday = holiday != null && "WORKDAY".equals(holiday[1]);
++            boolean statutoryHoliday = holiday != null && "HOLIDAY".equals(holiday[1]);
++            boolean weekend = date.getDayOfWeek() == DayOfWeek.SATURDAY || date.getDayOfWeek() == DayOfWeek.SUNDAY;
++            boolean restDay = !makeupWorkday && (statutoryHoliday || weekend);
++
+             SpannableStringBuilder label = new SpannableStringBuilder(String.valueOf(date.getDayOfMonth()));
+-            if (isMarked) {
+-                int starStart = label.length();
+-                label.append("\n★");
+-                label.setSpan(new ForegroundColorSpan(Color.rgb(245, 166, 35)),
+-                        starStart, label.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
++            if (inMonth && (isMarked || makeupWorkday || restDay)) {
++                label.append("\n");
++                boolean hasMarker = false;
++                if (isMarked) {
++                    int start = label.length();
++                    label.append("★");
++                    label.setSpan(new ForegroundColorSpan(Color.rgb(245, 166, 35)), start, label.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
++                    hasMarker = true;
++                }
++                if (makeupWorkday || restDay) {
++                    if (hasMarker) label.append(" ");
++                    int start = label.length();
++                    label.append(makeupWorkday ? "班" : "休");
++                    label.setSpan(new ForegroundColorSpan(makeupWorkday ? Ui.BLUE : Ui.DANGER), start, label.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
++                }
+             }
+-            TextView cell = Ui.text(this, label.toString(), 13, true);
++
++            TextView cell = Ui.text(this, label.toString(), 12, true);
+             cell.setText(label);
+-            cell.setLineSpacing(0, .88f);
++            cell.setLineSpacing(0, .80f);
+             cell.setPadding(0, 0, 0, 0);
+             cell.setGravity(Gravity.CENTER);
+-            if (!inMonth) cell.setTextColor(Color.rgb(190, 197, 207));
+-            else if (holiday != null && "HOLIDAY".equals(holiday[1])) cell.setTextColor(Ui.DANGER);
++            if (!inMonth) {
++                cell.setTextColor(Color.rgb(188, 195, 205));
++            } else if (restDay) {
++                cell.setTextColor(Ui.DANGER);
++            } else {
++                cell.setTextColor(Color.rgb(20, 24, 31));
++            }
+             if (isSelected) {
+-                cell.setBackground(Ui.shape(this, Color.rgb(91, 105, 120), Color.TRANSPARENT, 10));
++                cell.setBackground(Ui.shape(this, Ui.BLUE, Color.TRANSPARENT, 18));
+                 cell.setTextColor(Color.WHITE);
+             }
+             if (inMonth) cell.setOnClickListener(view -> {
+                 selectedDate = key;
+-                range.setSelection(0);
++                if (range != null) range.setSelection(0);
+                 page = 1;
+                 syncCalendar();
+                 load();
+             });
+-            grid.addView(cell, cellParams(38));
++            grid.addView(cell, cellParams(31));
+         }
+-        calendarBox.addView(grid);
+-        TextView legend = Ui.text(this,
+-                "★ 黄色五角星：有检查记录    ● 红字：法定放假    ● 灰底：当前选择", 11, false);
++        left.addView(grid);
++        TextView legend = Ui.text(this, "★ 有检查记录    班 调休上班    休 休息日/法定节假日", 10, false);
+         legend.setTextColor(Ui.MUTED);
+-        calendarBox.addView(legend);
++        legend.setGravity(Gravity.CENTER);
++        left.addView(legend, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, Ui.dp(this, 24)));
++
++        calendarBox.addView(left, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1));
++        calendarBox.addView(Ui.horizontalGap(this, 6));
++        calendarBox.addView(monthProgressPanel(marked), new LinearLayout.LayoutParams(Ui.dp(this, 94), ViewGroup.LayoutParams.MATCH_PARENT));
++    }
++
++    private LinearLayout monthProgressPanel(Set<String> marked) {
++        LinearLayout panel = Ui.column(this);
++        panel.setPadding(Ui.dp(this, 7), Ui.dp(this, 8), Ui.dp(this, 7), Ui.dp(this, 8));
++        panel.setBackground(Ui.shape(this, Color.WHITE, Ui.LINE, 12));
++        TextView title = Ui.text(this, "本月检查进度", 12, true);
++        title.setGravity(Gravity.CENTER);
++        panel.addView(title);
++        panel.addView(Ui.gap(this, 7));
++
++        int planned = (month.lengthOfMonth() + 6) / 7;
++        Set<Integer> completedWeeks = new HashSet<>();
++        for (String date : marked) {
++            try {
++                LocalDate parsed = LocalDate.parse(date);
++                if (YearMonth.from(parsed).equals(month)) completedWeeks.add((parsed.getDayOfMonth() - 1) / 7);
++            } catch (Exception ignored) {}
++        }
++        int completed = Math.min(planned, completedWeeks.size());
++        int percent = planned == 0 ? 0 : Math.round(completed * 100f / planned);
++        panel.addView(progressMetric("计划次数", planned + "次", Ui.BLUE));
++        panel.addView(Ui.gap(this, 8));
++        panel.addView(progressMetric("已完成", completed + "次", Color.rgb(38, 177, 91)));
++        panel.addView(Ui.gap(this, 10));
++        TextView rateLabel = Ui.text(this, "完成率", 11, true);
++        rateLabel.setGravity(Gravity.CENTER);
++        panel.addView(rateLabel);
++        TextView rate = Ui.text(this, percent + "%", 22, true);
++        rate.setTextColor(Ui.BLUE);
++        rate.setGravity(Gravity.CENTER);
++        rate.setPadding(0, Ui.dp(this, 7), 0, Ui.dp(this, 7));
++        rate.setBackground(Ui.shape(this, Color.rgb(246, 250, 255), Ui.BLUE, 40));
++        panel.addView(rate, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, Ui.dp(this, 62)));
++        return panel;
++    }
++
++    private LinearLayout progressMetric(String label, String value, int color) {
++        LinearLayout box = Ui.column(this);
++        TextView name = Ui.text(this, label, 10, false);
++        name.setTextColor(Ui.MUTED);
++        name.setGravity(Gravity.CENTER);
++        TextView number = Ui.text(this, value, 18, true);
++        number.setTextColor(color);
++        number.setGravity(Gravity.CENTER);
++        box.addView(name);
++        box.addView(number);
++        return box;
+     }
+ 
+     private GridLayout.LayoutParams cellParams(int height) {
+@@ -370,7 +452,7 @@ public final class LedgerActivity extends Activity {
+                 GridLayout.spec(GridLayout.UNDEFINED, 1, 1f));
+         params.width = 0;
+         params.height = Ui.dp(this, height);
+-        params.setMargins(Ui.dp(this, 1), 0, Ui.dp(this, 1), 0);
++        params.setMargins(0, 0, 0, 0);
+         return params;
+     }
+ 
