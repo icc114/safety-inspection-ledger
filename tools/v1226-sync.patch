@@ -1,0 +1,291 @@
+diff --git a/app/src/main/java/cn/safetyledger/app/sync/WebDavClient.java b/app/src/main/java/cn/safetyledger/app/sync/WebDavClient.java
+--- a/app/src/main/java/cn/safetyledger/app/sync/WebDavClient.java
++++ b/app/src/main/java/cn/safetyledger/app/sync/WebDavClient.java
+@@ -28,6 +28,7 @@ public final class WebDavClient {
+     private static final MediaType BINARY = MediaType.parse("application/octet-stream");
+     private static final MediaType XML = MediaType.parse("application/xml; charset=utf-8");
++    private static final int NETWORK_ATTEMPTS = 4;
+     private static final byte[] PROPFIND = ("<?xml version=\"1.0\" encoding=\"utf-8\"?>"
+             + "<d:propfind xmlns:d=\"DAV:\"><d:prop><d:displayname/>"
+             + "<d:resourcetype/></d:prop></d:propfind>").getBytes(StandardCharsets.UTF_8);
+@@ -198,14 +199,15 @@ public final class WebDavClient {
+ 
+     public void uploadAdminRecovery(String space,String name,File source)throws Exception{
+         RequestBody body=RequestBody.create(BINARY,source);
+-        try(Response response=http.newCall(request(recoveryFileUrl(space,name)).put(body).build()).execute()){
++        Request request=request(recoveryFileUrl(space,name)).put(body).build();
++        try(Response response=executeWithRetry(request,"上传管理员恢复副本")){
+             if(!response.isSuccessful())throw failure("上传管理员恢复副本失败",response);
+         }
+     }
+ 
+     public void downloadAdminRecovery(String space,String name,File target)throws Exception{
+         Request request=request(recoveryFileUrl(space,name)).get().build();
+-        try(Response response=http.newCall(request).execute()){
++        try(Response response=executeWithRetry(request,"下载管理员恢复副本")){
+             if(!response.isSuccessful())throw failure("下载管理员恢复副本失败",response);
+             ResponseBody body=response.body();if(body==null)throw new java.io.IOException("云端返回空恢复文件");
+             try(InputStream input=body.byteStream();FileOutputStream output=new FileOutputStream(target)){copy(input,output);}
+@@ -221,13 +223,15 @@ public final class WebDavClient {
+     }
+     public void uploadTrashRecovery(String space,String inspectionId,File source)throws Exception{
+         RequestBody body=RequestBody.create(BINARY,source);
+-        try(Response response=http.newCall(request(trashFileUrl(space,inspectionId+".safetydata")).put(body).build()).execute()){
++        Request request=request(trashFileUrl(space,inspectionId+".safetydata")).put(body).build();
++        try(Response response=executeWithRetry(request,"上传云端回收站恢复包")){
+             if(!response.isSuccessful())throw failure("上传云端回收站恢复包失败",response);
+         }
+     }
+     public void downloadTrashRecovery(String space,String inspectionId,File target)throws Exception{
+-        try(Response response=http.newCall(request(trashFileUrl(space,inspectionId+".safetydata")).get().build()).execute()){
++        Request request=request(trashFileUrl(space,inspectionId+".safetydata")).get().build();
++        try(Response response=executeWithRetry(request,"下载云端回收站恢复包")){
+             if(!response.isSuccessful())throw failure("下载云端回收站恢复包失败",response);
+             ResponseBody body=response.body();if(body==null)throw new java.io.IOException("云端回收站恢复包为空");
+             try(InputStream input=body.byteStream();FileOutputStream output=new FileOutputStream(target)){copy(input,output);}
+@@ -249,7 +253,7 @@ public final class WebDavClient {
+ 
+     public void download(String space, String name, File target) throws Exception {
+         Request request = request(fileUrl(space, name)).get().build();
+-        try (Response response = http.newCall(request).execute()) {
++        try (Response response = executeWithRetry(request, "下载云端快照")) {
+             if (!response.isSuccessful()) throw failure("下载云端快照失败", response);
+             ResponseBody body = response.body();
+             if (body == null) throw new java.io.IOException("云端返回空文件");
+@@ -261,7 +265,8 @@ public final class WebDavClient {
+ 
+     public void upload(String space, String name, File source) throws Exception {
+         RequestBody body = RequestBody.create(BINARY, source);
+-        try (Response response = http.newCall(request(fileUrl(space, name)).put(body).build()).execute()) {
++        Request request = request(fileUrl(space, name)).put(body).build();
++        try (Response response = executeWithRetry(request, "上传本机快照")) {
+             if (!response.isSuccessful()) throw failure("上传本机快照失败", response);
+         }
+     }
+@@ -284,13 +289,13 @@ public final class WebDavClient {
+ 
+     public boolean isDeviceLoggedOut(String space, String deviceId) throws Exception {
+         Request request = request(controlFileUrl(space, deviceId + ".logout")).head().build();
+-        try (Response response = http.newCall(request).execute()) {
++        try (Response response = executeWithRetry(request, "读取设备登出状态")) {
+             if (response.isSuccessful()) return true;
+             if (response.code() != 404) throw failure("读取设备登出状态失败", response);
+         }
+         // Backward compatibility with old markers stored beside snapshots.
+         Request legacy = request(fileUrl(space, deviceId + ".logout")).head().build();
+-        try (Response response = http.newCall(legacy).execute()) {
++        try (Response response = executeWithRetry(legacy, "读取旧版设备登出状态")) {
+             if (response.code() == 404) return false;
+             if (!response.isSuccessful()) throw failure("读取设备登出状态失败", response);
+             return true;
+@@ -309,21 +314,23 @@ public final class WebDavClient {
+ 
+     private void putBytes(String url, byte[] bytes) throws Exception {
+         RequestBody body = RequestBody.create(BINARY, bytes);
+-        try (Response response = http.newCall(request(url).put(body).build()).execute()) {
++        Request request = request(url).put(body).build();
++        try (Response response = executeWithRetry(request, "上传小文件")) {
+             if (!response.isSuccessful()) throw failure("探针文件上传失败", response);
+         }
+     }
+ 
+     private byte[] getBytes(String url) throws Exception {
+-        try (Response response = http.newCall(request(url).get().build()).execute()) {
++        Request request = request(url).get().build();
++        try (Response response = executeWithRetry(request, "下载小文件")) {
+             if (!response.isSuccessful()) throw failure("探针文件下载失败", response);
+             return response.body() == null ? new byte[0] : response.body().bytes();
+         }
+     }
+ 
+     private void delete(String url) throws Exception {
+-        try (Response response = http.newCall(request(url).delete().build()).execute()) {
++        Request request = request(url).delete().build();
++        try (Response response = executeWithRetry(request, "删除云端文件")) {
+             if (!(response.isSuccessful() || response.code() == 404)) {
+                 throw failure("探针文件删除失败", response);
+             }
+@@ -335,13 +342,54 @@ public final class WebDavClient {
+         RequestBody requestBody = RequestBody.create(XML, body == null ? new byte[0] : body);
+         Request.Builder builder = request(url).method(method, requestBody);
+         if (depth != null) builder.header("Depth", depth);
+-        try (Response response = http.newCall(builder.build()).execute()) {
++        try (Response response = executeWithRetry(builder.build(), method + " WebDAV")) {
+             byte[] value = response.body() == null ? new byte[0] : response.body().bytes();
+             return new ResponseInfo(response.code(), response.message(), value);
+         }
+     }
++
++    /**
++     * Mobile DNS/VPN hand-offs can briefly fail even after a successful probe. Retry only
++     * transient transport failures and temporary server statuses; authentication and other
++     * permanent 4xx errors still fail immediately.
++     */
++    private Response executeWithRetry(Request request, String operation) throws Exception {
++        java.io.IOException last = null;
++        for (int attempt = 1; attempt <= NETWORK_ATTEMPTS; attempt++) {
++            try {
++                Response response = http.newCall(request).execute();
++                if (attempt < NETWORK_ATTEMPTS && retryableHttp(response.code())) {
++                    response.close();
++                    sleepBackoff(attempt);
++                    continue;
++                }
++                return response;
++            } catch (java.io.IOException error) {
++                last = error;
++                if (attempt >= NETWORK_ATTEMPTS || !retryableNetwork(error)) throw error;
++                sleepBackoff(attempt);
++            }
++        }
++        throw last == null ? new java.io.IOException(operation + "失败") : last;
++    }
++
++    private boolean retryableNetwork(java.io.IOException error) {
++        if (error instanceof javax.net.ssl.SSLException) return false;
++        return error instanceof java.net.UnknownHostException
++                || error instanceof java.net.SocketTimeoutException
++                || error instanceof java.net.ConnectException
++                || error instanceof java.net.SocketException
++                || error.getMessage() != null && (error.getMessage().contains("unexpected end of stream")
++                || error.getMessage().contains("Connection reset")
++                || error.getMessage().contains("Broken pipe"));
++    }
++
++    private boolean retryableHttp(int code) {
++        return code == 408 || code == 425 || code == 429 || code == 500
++                || code == 502 || code == 503 || code == 504;
++    }
++
++    private void sleepBackoff(int attempt) throws InterruptedException {
++        long delay = new long[]{0L, 1200L, 2500L, 5000L}[Math.min(attempt, 3)];
++        Thread.sleep(delay);
++    }
+ 
+     private Request.Builder request(String url) {
+         Request.Builder builder = new Request.Builder().url(url)
+diff --git a/app/src/main/java/cn/safetyledger/app/sync/CloudSyncService.java b/app/src/main/java/cn/safetyledger/app/sync/CloudSyncService.java
+--- a/app/src/main/java/cn/safetyledger/app/sync/CloudSyncService.java
++++ b/app/src/main/java/cn/safetyledger/app/sync/CloudSyncService.java
+@@ -55,7 +55,6 @@ public final class CloudSyncService {
+         }
+         Config config = null;
+         long syncStartedAt = System.currentTimeMillis();
+-        boolean publishedLocalFirst = false;
+         SyncLog.info(context, "内容同步", "开始");
+         try {
+             config = requireConfig();
+@@ -89,17 +88,10 @@ public final class CloudSyncService {
+             BackupService backup = new BackupService(context);
+             boolean pendingAtStart = hasPendingLocalChanges(syncStartedAt);
+             if (pendingAtStart) {
+-                progress(listener, "正在发布本机修改，供其他设备并行接收…");
+-                SyncLog.info(context, "本机修改", "检测到待同步变更，先上传本机快照");
+-                uploadSnapshot(backup, client, config, deviceId);
+-                publishedLocalFirst = true;
+-                SyncLog.info(context, "本机修改", "首次快照上传完成");
+-                try { Thread.sleep(350L); } catch (InterruptedException interrupted) { Thread.currentThread().interrupt(); }
+-                snapshots = client.listSnapshots(config.space);
+-                emptyCloud = snapshots.isEmpty();
++                progress(listener, "本机有修改，正在与云端合并…");
++                SyncLog.info(context, "本机修改", "检测到待同步变更；改为合并后单次上传，减少重复大文件传输");
+             }
+@@ -154,7 +146,6 @@ public final class CloudSyncService {
+             repo.putSetting("last_sync_warning", warning);
+             if (hasPendingLocalChanges()) CloudSyncScheduler.scheduleImmediate(context);
+-            else if (publishedLocalFirst) CloudSyncScheduler.schedulePeerRefresh(context);
+             progress(listener, skipped == 0 ? "同步完成" : "同步完成，但有旧设备快照被跳过");
+             SyncLog.info(context, "内容同步", "成功；peerDevices=" + peers
+diff --git a/app/src/main/java/cn/safetyledger/app/SettingsActivity.java b/app/src/main/java/cn/safetyledger/app/SettingsActivity.java
+--- a/app/src/main/java/cn/safetyledger/app/SettingsActivity.java
++++ b/app/src/main/java/cn/safetyledger/app/SettingsActivity.java
+@@ -53,6 +53,7 @@ public final class SettingsActivity extends Activity {
+     private LinearLayout advancedAuthBox;
+     private Button advancedAuthButton;
+     private Button syncSaveButton;
++    private Button syncNowButton;
+     private TextView syncEnabledStatus;
+@@ -257,12 +258,12 @@ public final class SettingsActivity extends Activity {
+         LinearLayout actions = Ui.row(this);
+         Button test = Ui.compactButton(this, "测试连接", false);
+         syncSaveButton = Ui.compactButton(this, "保存并启用", true);
+-        Button now = Ui.compactButton(this, "同步检查内容", false);
++        syncNowButton = Ui.compactButton(this, "同步检查内容", false);
+         test.setOnClickListener(view -> testConnection(false));
+         syncSaveButton.setOnClickListener(view -> saveAndEnable());
+-        now.setOnClickListener(view -> syncNow());
++        syncNowButton.setOnClickListener(view -> syncNow());
+         actions.addView(test, Ui.weight(1));
+         actions.addView(Ui.horizontalGap(this, 5));
+         actions.addView(syncSaveButton, Ui.weight(1));
+         actions.addView(Ui.horizontalGap(this, 5));
+-        actions.addView(now, Ui.weight(1));
++        actions.addView(syncNowButton, Ui.weight(1));
+@@ -746,6 +747,11 @@ public final class SettingsActivity extends Activity {
+     }
+ 
+     private void runSync(boolean openDevicesAfter) {
++        if (CloudSyncService.isContentSyncRunning()) {
++            SyncLog.info(this, "手动同步", "已有后台内容同步正在运行；复用当前任务，不重复启动整包同步");
++            waitForRunningContentSync();
++            return;
++        }
+         SyncLog.info(this, "手动同步", "用户发起检查内容同步");
++        setManualSyncBusy(true);
+         new Thread(() -> {
+             try {
+@@ -792,6 +798,7 @@ public final class SettingsActivity extends Activity {
+                     if (openDevicesAfter) manageDevices();
++                    setManualSyncBusy(false);
+                 });
+             } catch (Exception error) {
+@@ -801,6 +808,7 @@ public final class SettingsActivity extends Activity {
+                 runOnUiThread(() -> {
++                    setManualSyncBusy(false);
+                     syncStatus.setText("同步状态：失败 · " + message);
+@@ -813,6 +821,51 @@ public final class SettingsActivity extends Activity {
+         }, openDevicesAfter ? "refresh-paired-devices" : "manual-cloud-sync").start();
+     }
++
++    private void setManualSyncBusy(boolean busy) {
++        if (syncNowButton == null) return;
++        syncNowButton.setEnabled(!busy);
++        syncNowButton.setAlpha(busy ? 0.62f : 1f);
++        syncNowButton.setText(busy ? "同步中…" : "同步检查内容");
++    }
++
++    private void waitForRunningContentSync() {
++        setManualSyncBusy(true);
++        syncStatus.setText("同步状态：后台同步正在进行，正在等待完成…");
++        final long started = System.currentTimeMillis();
++        new Thread(() -> {
++            while (CloudSyncService.isContentSyncRunning()
++                    && System.currentTimeMillis() - started < 120_000L) {
++                try { Thread.sleep(500L); }
++                catch (InterruptedException interrupted) { Thread.currentThread().interrupt(); break; }
++            }
++            String error = repo.setting("last_sync_error", "");
++            String last = repo.setting("last_sync_at", "");
++            runOnUiThread(() -> {
++                setManualSyncBusy(false);
++                if (CloudSyncService.isContentSyncRunning()) {
++                    syncStatus.setText("同步状态：后台同步仍在进行，请稍后查看结果");
++                    return;
++                }
++                if (!error.isBlank()) {
++                    syncStatus.setText("同步状态：上次失败 · " + error);
++                    return;
++                }
++                if (!last.isBlank()) {
++                    try {
++                        String time = DateFormat.getTimeInstance(DateFormat.SHORT)
++                                .format(new Date(Long.parseLong(last)));
++                        syncStatus.setText("同步状态：成功 · " + time + " · 已复用后台同步任务");
++                        Ui.toast(this, "后台同步已完成，无需重复同步");
++                        return;
++                    } catch (Exception ignored) {}
++                }
++                syncStatus.setText("同步状态：后台同步已结束");
++            });
++        }, "wait-running-cloud-sync").start();
++    }
