@@ -6,6 +6,7 @@ on:
       - agent/pc-v022-mobile-ui-sync-log-final
     paths:
       - tools/apply-pc-v023-clarity-sync-signal.py
+      - tools/fix-pc-v023-patcher.py
       - .github/workflows/apply-pc-v023.yml
   workflow_dispatch:
 
@@ -30,8 +31,10 @@ jobs:
           java-version: '17'
           cache: maven
 
-      - name: Apply PC 0.2.3 patch
-        run: python tools/apply-pc-v023-clarity-sync-signal.py
+      - name: Fix and apply PC 0.2.3 patch
+        run: |
+          python tools/fix-pc-v023-patcher.py
+          python tools/apply-pc-v023-clarity-sync-signal.py
 
       - name: Validate Cloudflare Worker syntax
         run: node --check cloudflare-worker/worker.js
