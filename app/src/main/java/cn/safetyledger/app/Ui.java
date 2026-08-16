@@ -32,12 +32,10 @@ public final class Ui {
     public static final int LINE = Color.rgb(218, 226, 239);
     public static final int BG = Color.rgb(244, 247, 252);
     public static final int DANGER = Color.rgb(208, 56, 61);
-    // Compatibility aliases used by settings/template screens.
     public static final int TEAL = BLUE, DARK = BLUE_DARK;
 
     private Ui() {}
 
-    /** Force ordinary system-window layout so content never sits underneath the status bar. */
     public static void setupWindow(Activity activity) {
         Window window = activity.getWindow();
         window.clearFlags(WindowManager.LayoutParams.FLAG_TRANSLUCENT_STATUS
@@ -46,9 +44,7 @@ public final class Ui {
         window.addFlags(WindowManager.LayoutParams.FLAG_DRAWS_SYSTEM_BAR_BACKGROUNDS);
         window.setStatusBarColor(BLUE_DARK);
         window.setNavigationBarColor(Color.WHITE);
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-            window.setDecorFitsSystemWindows(true);
-        }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) window.setDecorFitsSystemWindows(true);
         window.getDecorView().setSystemUiVisibility(View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR);
     }
 
@@ -138,17 +134,10 @@ public final class Ui {
         return editText;
     }
 
-    /**
-     * Some vendor Android builds clear a password transformation when setSingleLine(true)
-     * is called after the field has already been marked as a password. SettingsActivity
-     * intentionally applies single-line mode after creating all cloud fields, so preserve
-     * the transformation and never expose a saved/typed password as plain text.
-     */
     private static final class PersistentEditText extends EditText {
         PersistentEditText(Context context) { super(context); }
 
-        @Override
-        public void setSingleLine(boolean singleLine) {
+        @Override public void setSingleLine(boolean singleLine) {
             boolean password = getTransformationMethod() instanceof PasswordTransformationMethod;
             super.setSingleLine(singleLine);
             if (password) setTransformationMethod(PasswordTransformationMethod.getInstance());
@@ -223,17 +212,32 @@ public final class Ui {
         return drawable;
     }
 
+    /** One common back control for Settings, Templates, Trash, details and other sub-pages. */
+    public static TextView backButton(Activity activity) {
+        TextView back = new TextView(activity);
+        back.setText("‹");
+        back.setTextSize(36);
+        back.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
+        back.setTextColor(BLUE_DARK);
+        back.setGravity(Gravity.CENTER);
+        back.setIncludeFontPadding(false);
+        back.setPadding(0, 0, 0, dp(activity, 2));
+        back.setBackground(shape(activity, Color.WHITE, Color.rgb(188, 207, 235), 11));
+        if (Build.VERSION.SDK_INT >= 21) back.setElevation(dp(activity, 3));
+        back.setContentDescription("返回");
+        back.setOnClickListener(view -> activity.finish());
+        return back;
+    }
+
     public static TextView titleBar(Activity activity, String title) {
         LinearLayout bar = row(activity);
-        bar.setPadding(dp(activity, 8), dp(activity, 5), dp(activity, 8), dp(activity, 5));
+        bar.setPadding(dp(activity, 10), dp(activity, 7), dp(activity, 10), dp(activity, 7));
         bar.setBackgroundColor(BLUE);
-        TextView back = text(activity, "‹", 34, true);
-        back.setTextColor(Color.WHITE);
-        back.setGravity(Gravity.CENTER);
-        back.setOnClickListener(view -> activity.finish());
+        TextView back = backButton(activity);
         TextView text = text(activity, title, 21, true);
         text.setTextColor(Color.WHITE);
-        bar.addView(back, new LinearLayout.LayoutParams(dp(activity, 48), dp(activity, 52)));
+        bar.addView(back, new LinearLayout.LayoutParams(dp(activity, 40), dp(activity, 40)));
+        bar.addView(horizontalGap(activity, 8));
         bar.addView(text, weight(1));
         activity.setContentView(bar);
         return text;
@@ -241,16 +245,13 @@ public final class Ui {
 
     public static LinearLayout appBar(Activity activity, String title) {
         LinearLayout bar = row(activity);
-        bar.setPadding(dp(activity, 8), dp(activity, 5), dp(activity, 10), dp(activity, 5));
+        bar.setPadding(dp(activity, 10), dp(activity, 7), dp(activity, 10), dp(activity, 7));
         bar.setBackgroundColor(BLUE);
-        Button back = iconButton(activity, "‹");
-        back.setTextSize(32);
-        back.setPadding(0, 0, 0, dp(activity, 2));
-        back.setGravity(Gravity.CENTER);
-        back.setOnClickListener(view -> activity.finish());
+        TextView back = backButton(activity);
         TextView text = text(activity, title, 20, true);
         text.setTextColor(Color.WHITE);
-        bar.addView(back, new LinearLayout.LayoutParams(dp(activity, 46), dp(activity, 44)));
+        bar.addView(back, new LinearLayout.LayoutParams(dp(activity, 40), dp(activity, 40)));
+        bar.addView(horizontalGap(activity, 8));
         bar.addView(text, weight(1));
         return bar;
     }
@@ -259,7 +260,6 @@ public final class Ui {
         context.startActivity(new Intent(context, destination));
     }
 
-    /** Opens Android's photo grid instead of the generic document/security browser. */
     public static Intent photoPickerIntent() {
         if (Build.VERSION.SDK_INT >= 33) {
             return new Intent(MediaStore.ACTION_PICK_IMAGES)
