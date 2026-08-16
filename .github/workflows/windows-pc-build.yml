@@ -28,6 +28,14 @@ jobs:
           distribution: temurin
           java-version: '17'
           cache: maven
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Build Windows icon from shared app icon
+        shell: pwsh
+        run: |
+          python -m pip install --disable-pip-version-check pillow
+          python -c "from PIL import Image; im=Image.open(r'desktop/src/main/resources/app-icon.png').convert('RGBA'); im.save(r'desktop/app-icon.ico', sizes=[(16,16),(24,24),(32,32),(48,48),(64,64),(128,128),(256,256)])"
       - name: Compile standalone Android-PC data tool
         run: javac -encoding UTF-8 tools/SafetyDataTool.java
       - name: Test and build PC client
@@ -36,13 +44,13 @@ jobs:
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force -Path desktop/target/jpackage-input | Out-Null
-          Copy-Item desktop/target/safety-ledger-pc-0.2.0-all.jar desktop/target/jpackage-input/
-          jpackage --type app-image --name SafetyLedgerPC --app-version 0.2.0 --vendor "Safety Ledger" --input desktop/target/jpackage-input --main-jar safety-ledger-pc-0.2.0-all.jar --main-class cn.safetyledger.pc.SafetyLedgerDesktop --dest desktop/target/windows
-          Compress-Archive -Path desktop/target/windows/SafetyLedgerPC -DestinationPath "desktop/target/安全检查台账-PC-0.2.0-Windows.zip" -Force
+          Copy-Item desktop/target/safety-ledger-pc-0.2.1-all.jar desktop/target/jpackage-input/
+          jpackage --type app-image --name SafetyLedgerPC --app-version 0.2.1 --vendor "Safety Ledger" --icon desktop/app-icon.ico --input desktop/target/jpackage-input --main-jar safety-ledger-pc-0.2.1-all.jar --main-class cn.safetyledger.pc.SafetyLedgerLauncher --dest desktop/target/windows
+          Compress-Archive -Path desktop/target/windows/SafetyLedgerPC -DestinationPath "desktop/target/安全检查台账-PC-0.2.1-Windows.zip" -Force
       - name: Upload Windows client
         uses: actions/upload-artifact@v4
         with:
-          name: 安全检查台账-PC-0.2.0-Windows
-          path: desktop/target/安全检查台账-PC-0.2.0-Windows.zip
+          name: 安全检查台账-PC-0.2.1-Windows
+          path: desktop/target/安全检查台账-PC-0.2.1-Windows.zip
           if-no-files-found: error
           retention-days: 30
