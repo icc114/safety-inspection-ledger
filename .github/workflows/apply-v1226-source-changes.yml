@@ -5,8 +5,6 @@ on:
     branches:
       - 'agent/v1226-ui-sync-smoothing'
     paths:
-      - 'tools/v1226-ui.patch'
-      - 'tools/v1226-sync.patch'
       - '.github/workflows/apply-v1226-source-changes.yml'
   workflow_dispatch:
 
@@ -22,23 +20,94 @@ jobs:
         with:
           ref: agent/v1226-ui-sync-smoothing
           fetch-depth: 0
-      - name: Apply approved patches once
+      - name: Apply UI and sync source changes
         shell: bash
         run: |
           set -euo pipefail
-          apply_once() {
-            local patch="$1"
-            if git apply --check "$patch"; then
-              git apply "$patch"
-            elif git apply --reverse --check "$patch"; then
-              echo "$patch already applied"
-            else
-              echo "Cannot apply or recognize $patch" >&2
-              exit 1
-            fi
-          }
-          apply_once tools/v1226-ui.patch
-          apply_once tools/v1226-sync.patch
+          python3 - <<'PY'
+          from pathlib import Path
+
+          def replace_once(path, old, new, marker=None):
+              p = Path(path)
+              text = p.read_text(encoding='utf-8')
+              if old in text:
+                  p.write_text(text.replace(old, new, 1), encoding='utf-8')
+                  print('updated', path)
+                  return
+              if marker and marker in text:
+                  print('already updated', path, marker)
+                  return
+              raise SystemExit(f'Expected source block not found in {path}')
+
+          ledger = 'app/src/main/java/cn/safetyledger/app/LedgerActivity.java'
+          replace_once(ledger,
+          '''        TextView rangeLabel = Ui.text(this, "显示范围", 12, true);\n        rangeLabel.setPadding(0, 0, Ui.dp(this, 3), 0);\n        range = spinner(new String[]{"当日", "本月", "本季度", "本年度", "全部"});\n        range.setSelection(1);\n        type = spinner(types());\n        statusFilter = spinner(new String[]{"全部状态", "草稿", "待整改", "整改中", "已整改完成", "检查完成"});\n        filters.addView(rangeLabel, new LinearLayout.LayoutParams(Ui.dp(this, 54), Ui.dp(this, 40)));\n        filters.addView(range, new LinearLayout.LayoutParams(Ui.dp(this, 66), Ui.dp(this, 40)));''',
+          '''        TextView rangeLabel = Ui.text(this, "显示范围", 12, true);\n        rangeLabel.setPadding(0, 0, Ui.dp(this, 2), 0);\n        rangeLabel.setSingleLine(true);\n        range = spinner(new String[]{"当日", "本月", "本季度", "本年度", "全部"});\n        range.setSelection(1);\n        type = spinner(types());\n        statusFilter = spinner(new String[]{"全部状态", "草稿", "待整改", "整改中", "已整改完成", "检查完成"});\n        filters.addView(rangeLabel, new LinearLayout.LayoutParams(Ui.dp(this, 64), Ui.dp(this, 40)));\n        filters.addView(range, new LinearLayout.LayoutParams(Ui.dp(this, 58), Ui.dp(this, 40)));''',
+          'rangeLabel.setSingleLine(true)')
+
+          replace_once(ledger,
+          '''        calendarBox.addView(left, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1));\n        calendarBox.addView(Ui.horizontalGap(this, 5));\n        calendarBox.addView(monthProgressPanel(marked), new LinearLayout.LayoutParams(Ui.dp(this, 88), ViewGroup.LayoutParams.MATCH_PARENT));''',
+          '''        calendarBox.addView(left, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1));\n        calendarBox.addView(Ui.horizontalGap(this, 3));\n        calendarBox.addView(monthProgressPanel(marked), new LinearLayout.LayoutParams(Ui.dp(this, 76), ViewGroup.LayoutParams.MATCH_PARENT));''',
+          'Ui.dp(this, 76), ViewGroup.LayoutParams.MATCH_PARENT')
+
+          replace_once(ledger,
+          '''        LinearLayout panel = Ui.column(this);\n        panel.setPadding(Ui.dp(this, 4), Ui.dp(this, 5), Ui.dp(this, 4), Ui.dp(this, 5));\n        panel.setBackground(Ui.shape(this, Color.WHITE, Ui.LINE, 12));''',
+          '''        LinearLayout panel = Ui.column(this);\n        panel.setGravity(Gravity.CENTER_HORIZONTAL);\n        panel.setPadding(Ui.dp(this, 3), Ui.dp(this, 6), Ui.dp(this, 3), Ui.dp(this, 6));\n        panel.setBackground(Ui.shape(this, Color.WHITE, Ui.LINE, 12));''',
+          'panel.setGravity(Gravity.CENTER_HORIZONTAL)')
+
+          replace_once(ledger,
+          '''        panel.addView(title);\n        panel.addView(Ui.gap(this, 4));''',
+          '''        panel.addView(title);\n        addProgressSpacer(panel);''',
+          'addProgressSpacer(panel)')
+
+          replace_once(ledger,
+          '''        panel.addView(progressMetric("计划次数", planned + "次", Ui.BLUE));\n        panel.addView(Ui.gap(this, 5));\n        panel.addView(progressMetric("已完成", completed + "次", Color.rgb(38, 177, 91)));\n        panel.addView(Ui.gap(this, 5));''',
+          '''        panel.addView(progressMetric("计划次数", planned + "次", Ui.BLUE));\n        addProgressSpacer(panel);\n        panel.addView(progressMetric("已完成", completed + "次", Color.rgb(38, 177, 91)));\n        addProgressSpacer(panel);''',
+          'addProgressSpacer(panel);\n        panel.addView(progressMetric("已完成"')
+
+          replace_once(ledger,
+          '''        panel.addView(rateLabel);\n        panel.addView(Ui.gap(this, 2));\n        TextView rate = Ui.text(this, percent + "%", 17, true);\n        rate.setTextColor(Ui.BLUE);\n        rate.setGravity(Gravity.CENTER);\n        rate.setPadding(0, 0, 0, 0);\n        rate.setBackground(Ui.shape(this, Color.rgb(246, 250, 255), Ui.BLUE, 40));\n        panel.addView(rate, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, Ui.dp(this, 44)));\n        return panel;\n    }''',
+          '''        panel.addView(rateLabel);\n        panel.addView(Ui.gap(this, 2));\n        DonutProgressView rate = new DonutProgressView(this);\n        rate.setProgress(percent);\n        LinearLayout.LayoutParams donutParams = new LinearLayout.LayoutParams(Ui.dp(this, 62), Ui.dp(this, 62));\n        donutParams.gravity = Gravity.CENTER_HORIZONTAL;\n        panel.addView(rate, donutParams);\n        addProgressSpacer(panel);\n        return panel;\n    }\n\n    private void addProgressSpacer(LinearLayout panel) {\n        View spacer = new View(this);\n        panel.addView(spacer, new LinearLayout.LayoutParams(1, 0, 1));\n    }''',
+          'DonutProgressView rate = new DonutProgressView(this)')
+
+          webdav = 'app/src/main/java/cn/safetyledger/app/sync/WebDavClient.java'
+          replace_once(webdav,
+          '''    private final OkHttpClient http = new OkHttpClient.Builder()\n            .connectTimeout(12, java.util.concurrent.TimeUnit.SECONDS)\n            .readTimeout(45, java.util.concurrent.TimeUnit.SECONDS)\n            .writeTimeout(90, java.util.concurrent.TimeUnit.SECONDS)\n            .followRedirects(true)\n            .build();''',
+          '''    private final OkHttpClient http = new OkHttpClient.Builder()\n            .dns(WebDavClient::lookupWithRetry)\n            .retryOnConnectionFailure(true)\n            .connectTimeout(12, java.util.concurrent.TimeUnit.SECONDS)\n            .readTimeout(45, java.util.concurrent.TimeUnit.SECONDS)\n            .writeTimeout(90, java.util.concurrent.TimeUnit.SECONDS)\n            .followRedirects(true)\n            .build();''',
+          '.dns(WebDavClient::lookupWithRetry)')
+
+          replace_once(webdav,
+          '''    private final String endpoint;\n    private final String authorization;''',
+          '''    private static List<java.net.InetAddress> lookupWithRetry(String hostname) throws java.net.UnknownHostException {\n        java.net.UnknownHostException last = null;\n        long[] waits = {0L, 1500L, 3000L, 6000L};\n        for (int attempt = 0; attempt < waits.length; attempt++) {\n            if (waits[attempt] > 0) {\n                try { Thread.sleep(waits[attempt]); }\n                catch (InterruptedException interrupted) {\n                    Thread.currentThread().interrupt();\n                    if (last != null) throw last;\n                    throw new java.net.UnknownHostException(hostname + " DNS 查询被中断");\n                }\n            }\n            try {\n                java.net.InetAddress[] addresses = java.net.InetAddress.getAllByName(hostname);\n                if (addresses.length > 0) return java.util.Arrays.asList(addresses);\n            } catch (java.net.UnknownHostException error) {\n                last = error;\n            }\n        }\n        throw last == null ? new java.net.UnknownHostException(hostname) : last;\n    }\n\n    private final String endpoint;\n    private final String authorization;''',
+          'lookupWithRetry(String hostname)')
+
+          cloud = 'app/src/main/java/cn/safetyledger/app/sync/CloudSyncService.java'
+          replace_once(cloud,
+          '''        boolean publishedLocalFirst = false;\n        SyncLog.info(context, "内容同步", "开始");''',
+          '''        SyncLog.info(context, "内容同步", "开始");''',
+          '减少重复大文件传输')
+
+          replace_once(cloud,
+          '''            if (pendingAtStart) {\n                progress(listener, "正在发布本机修改，供其他设备并行接收…");\n                SyncLog.info(context, "本机修改", "检测到待同步变更，先上传本机快照");\n                uploadSnapshot(backup, client, config, deviceId);\n                publishedLocalFirst = true;\n                SyncLog.info(context, "本机修改", "首次快照上传完成");\n                try { Thread.sleep(350L); } catch (InterruptedException interrupted) { Thread.currentThread().interrupt(); }\n                snapshots = client.listSnapshots(config.space);\n                emptyCloud = snapshots.isEmpty();\n            }''',
+          '''            if (pendingAtStart) {\n                progress(listener, "本机有修改，正在与云端合并…");\n                SyncLog.info(context, "本机修改", "检测到待同步变更；改为合并后单次上传，减少重复大文件传输");\n            }''',
+          '改为合并后单次上传')
+
+          replace_once(cloud,
+          '''            if (hasPendingLocalChanges()) CloudSyncScheduler.scheduleImmediate(context);\n            else if (publishedLocalFirst) CloudSyncScheduler.schedulePeerRefresh(context);''',
+          '''            if (hasPendingLocalChanges()) CloudSyncScheduler.scheduleImmediate(context);''',
+          'if (hasPendingLocalChanges()) CloudSyncScheduler.scheduleImmediate(context);\n            progress')
+
+          settings = 'app/src/main/java/cn/safetyledger/app/SettingsActivity.java'
+          replace_once(settings,
+          '''    private void runSync(boolean openDevicesAfter) {\n        SyncLog.info(this, "手动同步", "用户发起检查内容同步");''',
+          '''    private void runSync(boolean openDevicesAfter) {\n        if (CloudSyncService.isContentSyncRunning()) {\n            SyncLog.info(this, "手动同步", "已有后台内容同步正在运行；复用当前任务，不重复启动整包同步");\n            waitForRunningContentSync();\n            return;\n        }\n        SyncLog.info(this, "手动同步", "用户发起检查内容同步");''',
+          'waitForRunningContentSync();')
+
+          replace_once(settings,
+          '''    private void confirmResetCloudSpace() {''',
+          '''    private void waitForRunningContentSync() {\n        syncStatus.setText("同步状态：后台同步正在进行，正在等待完成…");\n        final long started = System.currentTimeMillis();\n        new Thread(() -> {\n            while (CloudSyncService.isContentSyncRunning()\n                    && System.currentTimeMillis() - started < 120_000L) {\n                try { Thread.sleep(500L); }\n                catch (InterruptedException interrupted) { Thread.currentThread().interrupt(); break; }\n            }\n            String error = repo.setting("last_sync_error", "");\n            String last = repo.setting("last_sync_at", "");\n            runOnUiThread(() -> {\n                if (CloudSyncService.isContentSyncRunning()) {\n                    syncStatus.setText("同步状态：后台同步仍在进行，请稍后查看结果");\n                    return;\n                }\n                if (!error.isBlank()) {\n                    syncStatus.setText("同步状态：上次失败 · " + error);\n                    return;\n                }\n                if (!last.isBlank()) {\n                    try {\n                        String time = DateFormat.getTimeInstance(DateFormat.SHORT)\n                                .format(new Date(Long.parseLong(last)));\n                        syncStatus.setText("同步状态：成功 · " + time + " · 已复用后台同步任务");\n                        Ui.toast(this, "后台同步已完成，无需重复同步");\n                        return;\n                    } catch (Exception ignored) {}\n                }\n                syncStatus.setText("同步状态：后台同步已结束");\n            });\n        }, "wait-running-cloud-sync").start();\n    }\n\n    private void confirmResetCloudSpace() {''',
+          'private void waitForRunningContentSync()')
+          PY
       - name: Commit source changes
         shell: bash
         run: |
@@ -50,7 +119,7 @@ jobs:
                   app/src/main/java/cn/safetyledger/app/sync/CloudSyncService.java \
                   app/src/main/java/cn/safetyledger/app/sync/WebDavClient.java
           if git diff --cached --quiet; then
-            echo "Source patches already applied."
+            echo "Source changes already applied."
             exit 0
           fi
           git commit -m "Apply 1.2.26 UI and sync smoothing changes"
