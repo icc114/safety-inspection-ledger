@@ -124,7 +124,7 @@ public final class SettingsActivity extends Activity {
         card.addView(Ui.sectionTitle(this, "2", "每月检查计划",
                 "计划名称、统计关键词和次数全部由你自己维护"));
         TextView note = Ui.text(this,
-                "不再固定使用检查模板名称。你可以自己新增“共享单车”“美团”“车棚”等项目，也可以删除、改名、调整顺序和计划次数。每个项目通过你填写的统计关键词自动计算本月实际检查次数。计划次数设为 0 时只统计，不参与完成率。",
+                "不再固定使用任何检查项目名称。你可以自己新增、删除、改名和调整顺序，并设置统计关键词与月度目标。计划次数设为 0 时只统计实际次数，不参与完成率。首页另按自然周（周一至周日）提示漏检：跨月周归属于周一所在月份，尚未结束的本周不会提前判定漏检。",
                 12, false);
         note.setTextColor(Ui.MUTED);
         card.addView(note);

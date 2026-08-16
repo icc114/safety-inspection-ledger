@@ -100,7 +100,8 @@ public class MainActivity extends Activity {
         bar.setPadding(Ui.dp(this, 10), Ui.dp(this, 6), Ui.dp(this, 10), Ui.dp(this, 6));
         bar.setBackgroundColor(Ui.BLUE);
         TextView back = Ui.backButton(this);
-        TextView topTitle = Ui.text(this, "本地检查表\n检查填报", 20, true);
+        TextView topTitle = Ui.text(this, "检查填表", 21, true);
+        topTitle.setGravity(Gravity.CENTER_VERTICAL);
         topTitle.setTextColor(Color.WHITE);
         Button topSave = Ui.secondaryButton(this, "保存");
         topSave.setOnClickListener(view -> save());
