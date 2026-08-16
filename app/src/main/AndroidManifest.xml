@@ -14,8 +14,8 @@
         android:allowBackup="false"
         android:fullBackupContent="false"
         android:dataExtractionRules="@xml/data_extraction_rules"
-        android:icon="@drawable/ic_app_bitmap"
-        android:roundIcon="@drawable/ic_app_bitmap"
+        android:icon="@drawable/ic_app"
+        android:roundIcon="@drawable/ic_app"
         android:label="安全检查台账"
         android:theme="@style/AppTheme"
         android:usesCleartextTraffic="false">
@@ -30,6 +30,7 @@
         <activity android:name=".PhotoPreviewActivity" />
         <activity android:name=".SignatureActivity" android:configChanges="orientation|screenSize" android:screenOrientation="sensorLandscape" />
         <activity android:name=".TrashActivity" />
+        <activity android:name=".SyncLogActivity" />
         <activity android:name=".SettingsActivity" />
         <activity android:name=".TemplateActivity" />
         <activity android:name=".RecordDetailActivity" />
