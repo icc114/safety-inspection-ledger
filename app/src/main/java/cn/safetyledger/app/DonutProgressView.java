@@ -8,7 +8,7 @@ import android.graphics.RectF;
 import android.graphics.Typeface;
 import android.view.View;
 
-/** Compact hollow progress ring used by the monthly calendar side panel. */
+/** Hollow monthly progress ring with a centered percentage label. */
 public final class DonutProgressView extends View {
     private final Paint track = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final Paint progressPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
@@ -18,11 +18,11 @@ public final class DonutProgressView extends View {
 
     public DonutProgressView(Context context) {
         super(context);
-        float stroke = Ui.dp(context, 5);
+        float stroke = Ui.dp(context, 4);
         track.setStyle(Paint.Style.STROKE);
         track.setStrokeWidth(stroke);
         track.setStrokeCap(Paint.Cap.ROUND);
-        track.setColor(Color.rgb(224, 232, 244));
+        track.setColor(Color.rgb(226, 233, 244));
 
         progressPaint.setStyle(Paint.Style.STROKE);
         progressPaint.setStrokeWidth(stroke);
@@ -32,7 +32,7 @@ public final class DonutProgressView extends View {
         textPaint.setColor(Ui.BLUE_DARK);
         textPaint.setTextAlign(Paint.Align.CENTER);
         textPaint.setTypeface(Typeface.create(Typeface.DEFAULT, Typeface.BOLD));
-        textPaint.setTextSize(Ui.dp(context, 16));
+        textPaint.setTextSize(Ui.dp(context, 13));
         setLayerType(View.LAYER_TYPE_SOFTWARE, null);
     }
 
@@ -44,7 +44,7 @@ public final class DonutProgressView extends View {
 
     @Override protected void onDraw(Canvas canvas) {
         super.onDraw(canvas);
-        float pad = Ui.dp(getContext(), 7);
+        float pad = Ui.dp(getContext(), 6);
         float cx = getWidth() / 2f;
         float cy = getHeight() / 2f;
         float radius = Math.max(0f, Math.min(getWidth(), getHeight()) / 2f - pad);
