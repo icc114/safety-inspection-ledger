@@ -1,0 +1,86 @@
+name: Apply 1.2.26 Snapshot Cache Optimization
+
+on:
+  push:
+    branches:
+      - 'agent/v1226-ui-sync-smoothing'
+    paths:
+      - '.github/workflows/apply-v1226-sync-cache.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/v1226-ui-sync-smoothing
+          fetch-depth: 0
+      - name: Apply snapshot stamp optimization
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+
+          def replace_once(path, old, new, marker):
+              p = Path(path)
+              text = p.read_text(encoding='utf-8')
+              if old in text:
+                  p.write_text(text.replace(old, new, 1), encoding='utf-8')
+                  print('updated', path)
+              elif marker in text:
+                  print('already updated', path)
+              else:
+                  raise SystemExit(f'Expected block missing in {path}')
+
+          web = 'app/src/main/java/cn/safetyledger/app/sync/WebDavClient.java'
+          replace_once(web,
+          '''    public void download(String space, String name, File target) throws Exception {\n        Request request = request(fileUrl(space, name)).get().build();''',
+          '''    /** Returns a lightweight server version stamp for a snapshot without downloading it. */\n    public String snapshotStamp(String space, String name) throws Exception {\n        Request request = request(fileUrl(space, name)).head().build();\n        try (Response response = http.newCall(request).execute()) {\n            if (response.code() == 404) return "";\n            if (!response.isSuccessful()) throw failure("读取云端快照版本失败", response);\n            String etag = response.header("ETag", "");\n            String length = response.header("Content-Length", "");\n            String modified = response.header("Last-Modified", "");\n            if (etag.isBlank() && length.isBlank() && modified.isBlank()) return "";\n            return etag + "|" + length + "|" + modified;\n        }\n    }\n\n    public void download(String space, String name, File target) throws Exception {\n        Request request = request(fileUrl(space, name)).get().build();''',
+          'public String snapshotStamp(String space, String name)')
+
+          cloud = 'app/src/main/java/cn/safetyledger/app/sync/CloudSyncService.java'
+          replace_once(cloud,
+          '''            int peers = 0;\n            int changed = 0;\n            int skipped = 0;''',
+          '''            int peers = 0;\n            int changed = 0;\n            int skipped = 0;\n            int unchangedPeers = 0;\n            boolean peerSnapshotChanged = false;''',
+          'int unchangedPeers = 0;')
+
+          replace_once(cloud,
+          '''            for (String name : snapshots) {\n                if (name.equals(deviceId + ".safetydata")) continue;\n                peerIndex++;\n                progress(listener, "正在接收设备 " + peerIndex + "/" + peerTotal + "…");\n                File remote = File.createTempFile("safety-cloud-in-", ".safetydata", context.getCacheDir());\n                try {\n                    SyncLog.info(context, "接收设备", shortDevice(name) + "；开始下载");\n                    client.download(config.space, name, remote);''',
+          '''            for (String name : snapshots) {\n                if (name.equals(deviceId + ".safetydata")) continue;\n                peerIndex++;\n                progress(listener, "正在检查设备 " + peerIndex + "/" + peerTotal + "…");\n                String stamp = "";\n                String stampKey = peerSnapshotStampKey(config.space, name);\n                try {\n                    stamp = client.snapshotStamp(config.space, name);\n                    String previousStamp = repo.setting(stampKey, "");\n                    if (!stamp.isBlank() && stamp.equals(previousStamp)) {\n                        unchangedPeers++;\n                        peers++;\n                        SyncLog.info(context, "接收设备", shortDevice(name) + "；云端快照未变化，跳过大文件下载");\n                        continue;\n                    }\n                } catch (Exception stampError) {\n                    SyncLog.warn(context, "快照版本检查", shortDevice(name) + "；版本检查失败，回退为正常下载：" + readable(stampError));\n                }\n                progress(listener, "正在接收设备 " + peerIndex + "/" + peerTotal + "…");\n                File remote = File.createTempFile("safety-cloud-in-", ".safetydata", context.getCacheDir());\n                try {\n                    SyncLog.info(context, "接收设备", shortDevice(name) + "；开始下载");\n                    client.download(config.space, name, remote);''',
+          '云端快照未变化，跳过大文件下载')
+
+          replace_once(cloud,
+          '''                    peers++;\n                    SyncLog.info(context, "接收设备", shortDevice(name) + "；合并完成");''',
+          '''                    peers++;\n                    peerSnapshotChanged = true;\n                    if (!stamp.isBlank()) repo.putSetting(stampKey, stamp);\n                    SyncLog.info(context, "接收设备", shortDevice(name) + "；合并完成");''',
+          'peerSnapshotChanged = true;')
+
+          replace_once(cloud,
+          '''            progress(listener, "正在上传本机最新数据…");\n            SyncLog.info(context, "最终上传", "开始生成并上传聚合快照");\n            uploadSnapshot(backup, client, config, deviceId);\n            SyncLog.info(context, "最终上传", "完成");\n            runAutoArchiveAfterSuccessfulSync();''',
+          '''            boolean ownSnapshotMissing = !snapshots.contains(deviceId + ".safetydata");\n            boolean needLargeUpload = pendingAtStart || peerSnapshotChanged || ownSnapshotMissing;\n            if (needLargeUpload) {\n                progress(listener, "正在上传本机最新数据…");\n                SyncLog.info(context, "最终上传", "开始生成并上传聚合快照");\n                uploadSnapshot(backup, client, config, deviceId);\n                SyncLog.info(context, "最终上传", "完成");\n            } else {\n                progress(listener, "云端无新变化，无需重复上传大文件…");\n                SyncLog.info(context, "最终上传", "跳过；本机和其他设备快照均无变化");\n            }\n            runAutoArchiveAfterSuccessfulSync();''',
+          'boolean needLargeUpload = pendingAtStart || peerSnapshotChanged || ownSnapshotMissing;')
+
+          replace_once(cloud,
+          '''            SyncLog.info(context, "内容同步", "成功；peerDevices=" + peers\n                    + "；changedRows=" + changed + "；skippedSnapshots=" + skipped);''',
+          '''            SyncLog.info(context, "内容同步", "成功；peerDevices=" + peers\n                    + "；unchangedPeers=" + unchangedPeers\n                    + "；changedRows=" + changed + "；skippedSnapshots=" + skipped);''',
+          '；unchangedPeers=')
+
+          replace_once(cloud,
+          '''    private boolean hasPendingLocalChanges(long through) {''',
+          '''    private String peerSnapshotStampKey(String space, String name) {\n        String raw = (space == null ? "" : space) + "|" + (name == null ? "" : name);\n        String token = java.util.Base64.getUrlEncoder().withoutPadding()\n                .encodeToString(raw.getBytes(java.nio.charset.StandardCharsets.UTF_8));\n        return "cloud_peer_stamp_" + token;\n    }\n\n    private boolean hasPendingLocalChanges(long through) {''',
+          'private String peerSnapshotStampKey(String space, String name)')
+          PY
+      - name: Commit optimization
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add app/src/main/java/cn/safetyledger/app/sync/WebDavClient.java app/src/main/java/cn/safetyledger/app/sync/CloudSyncService.java
+          if git diff --cached --quiet; then exit 0; fi
+          git commit -m "Skip unchanged peer snapshots and redundant large uploads"
+          git push origin HEAD:agent/v1226-ui-sync-smoothing
