@@ -32,8 +32,8 @@ jobs:
         run: ./gradlew --no-daemon testDebugUnitTest lintDebug assembleDebug assembleRelease
       - name: Name APKs and package signing tools
         run: |
-          cp app/build/outputs/apk/debug/app-debug.apk '安全检查台账-1.2.33-debug-不可作为长期升级包.apk'
-          cp app/build/outputs/apk/release/app-release-unsigned.apk '安全检查台账-1.2.33-release-unsigned.apk'
+          cp app/build/outputs/apk/debug/app-debug.apk '安全检查台账-1.2.34-debug-不可作为长期升级包.apk'
+          cp app/build/outputs/apk/release/app-release-unsigned.apk '安全检查台账-1.2.34-release-unsigned.apk'
           mkdir -p signing-tools/lib
           cp "$ANDROID_HOME/build-tools/35.0.0/apksigner" signing-tools/
           cp "$ANDROID_HOME/build-tools/35.0.0/zipalign" signing-tools/
@@ -42,15 +42,15 @@ jobs:
       - name: Upload debug APK artifact
         uses: actions/upload-artifact@v4
         with:
-          name: 安全检查台账-1.2.33-debug
-          path: 安全检查台账-1.2.33-debug-不可作为长期升级包.apk
+          name: 安全检查台账-1.2.34-debug
+          path: 安全检查台账-1.2.34-debug-不可作为长期升级包.apk
           if-no-files-found: error
           retention-days: 30
       - name: Upload unsigned release APK
         uses: actions/upload-artifact@v4
         with:
-          name: 安全检查台账-1.2.33-release-unsigned
-          path: 安全检查台账-1.2.33-release-unsigned.apk
+          name: 安全检查台账-1.2.34-release-unsigned
+          path: 安全检查台账-1.2.34-release-unsigned.apk
           if-no-files-found: error
           retention-days: 30
       - name: Upload Linux Android signing tools
