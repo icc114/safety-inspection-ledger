@@ -494,7 +494,7 @@ public final class CloudSyncService {
             }
             if("DELETED".equals(state)){
                 long deletedAt=json.optLong("deletedAt",now);
-                if(repo.inspection(id)!=null){new MediaService(context).deleteInspectionMedia(id);repo.permanentDeleteAt(id,deletedAt);deleted++;}
+                if(repo.inspection(id)!=null){repo.permanentDeleteAt(id,deletedAt);new MediaService(context).deleteInspectionMedia(id);deleted++;}
             }else if("RESTORED".equals(state)){
                 repo.clearInspectionTombstone(id);restores++;
             }
@@ -514,7 +514,7 @@ public final class CloudSyncService {
                 long now=System.currentTimeMillis();long expires=now+TRASH_RETENTION_MS;
                 JSONObject meta=new JSONObject();meta.put("version",2);meta.put("inspectionId",inspectionId);meta.put("templateName",inspection.templateName);meta.put("inspectionDate",inspection.date);meta.put("inspectionTime",inspection.time);meta.put("inspectionType",inspection.type);meta.put("location",inspection.location);meta.put("deletedAt",now);meta.put("expiresAt",expires);meta.put("deletedBy",deviceId);meta.put("state","DELETED");
                 progress(listener,"正在写入云端回收站…");client.uploadTrashRecovery(config.space,inspectionId,recovery);client.uploadTrashMetadata(config.space,inspectionId,meta.toString());
-                new MediaService(context).deleteInspectionMedia(inspectionId);repo.permanentDeleteAt(inspectionId,now);CloudSyncScheduler.scheduleTrashSoon(context);
+                repo.permanentDeleteAt(inspectionId,now);new MediaService(context).deleteInspectionMedia(inspectionId);SyncLog.info(context,"云端回收站删除","本地删除完成 · inspection="+inspectionId);CloudSyncScheduler.scheduleTrashSoon(context);
                 return new DeleteResult(inspectionId+".trash.json",now);
             }finally{recovery.delete();}
         }finally{if(entered!=null)Arrays.fill(entered,'\0');if(config!=null)Arrays.fill(config.spacePassword,'\0');}
