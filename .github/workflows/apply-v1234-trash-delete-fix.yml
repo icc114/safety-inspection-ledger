@@ -1,0 +1,65 @@
+name: Apply Android 1.2.34 recycle-bin delete fix
+
+on:
+  push:
+    branches:
+      - agent/v1233-final-progress-dashboard
+    paths:
+      - tools/apply-v1234-trash-delete-fix.py
+      - .github/workflows/apply-v1234-trash-delete-fix.yml
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout current Android branch
+        uses: actions/checkout@v4
+        with:
+          ref: agent/v1233-final-progress-dashboard
+          fetch-depth: 0
+
+      - name: Set up Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: gradle
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android SDK 35
+        run: sdkmanager 'platform-tools' 'platforms;android-35' 'build-tools;35.0.0'
+
+      - name: Apply recycle-bin fix
+        run: python tools/apply-v1234-trash-delete-fix.py
+
+      - name: Validate source contract
+        run: |
+          grep -F '"revision",1' app/src/main/java/cn/safetyledger/app/data/LedgerRepository.java
+          ! grep -F "tombstones(entity_type,entity_id,deleted_at,synced_at)" app/src/main/java/cn/safetyledger/app/data/LedgerRepository.java
+          ! grep -F 'deleteInspectionMedia(inspectionId);repo.permanentDeleteAt' app/src/main/java/cn/safetyledger/app/sync/CloudSyncService.java
+          grep -F "versionName '1.2.34'" app/build.gradle
+
+      - name: Test lint and build debug APK
+        run: |
+          chmod +x gradlew
+          ./gradlew --no-daemon testDebugUnitTest lintDebug assembleDebug
+
+      - name: Commit verified Android source
+        shell: bash
+        run: |
+          git config user.name "icc114"
+          git config user.email "75865808+icc114@users.noreply.github.com"
+          git add app
+          if git diff --cached --quiet; then
+            echo "No source changes to commit"
+          else
+            git commit -m "Android 1.2.34 fix recycle-bin permanent deletion"
+            git push origin HEAD:agent/v1233-final-progress-dashboard
+          fi
