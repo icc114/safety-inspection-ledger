@@ -17,10 +17,10 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     env:
-      SAFETY_KEYSTORE_BASE64: ${{ secrets.SAFETY_KEYSTORE_BASE64 }}
-      SAFETY_KEYSTORE_PASSWORD: ${{ secrets.SAFETY_KEYSTORE_PASSWORD }}
-      SAFETY_KEY_ALIAS: ${{ secrets.SAFETY_KEY_ALIAS }}
-      SAFETY_KEY_PASSWORD: ${{ secrets.SAFETY_KEY_PASSWORD }}
+      SAFETY_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+      SAFETY_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+      SAFETY_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+      SAFETY_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
