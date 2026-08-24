@@ -122,7 +122,6 @@ public final class SignatureActivity extends Activity {
             Bitmap cropped = pad.getTransparentSignatureBitmap(true);
             if (cropped == null) throw new IllegalStateException("未读取到有效签名");
             Bitmap bitmap = addTransparentPadding(cropped);
-            cropped.recycle();
             try (OutputStream output = new FileOutputStream(file)) {
                 if (!bitmap.compress(Bitmap.CompressFormat.PNG, 100, output)) {
                     throw new IllegalStateException("签名图片压缩失败");
