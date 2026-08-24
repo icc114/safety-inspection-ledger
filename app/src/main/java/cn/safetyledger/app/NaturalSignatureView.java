@@ -28,7 +28,7 @@ final class NaturalSignatureView extends View {
     private float controlY;
     private float previousVectorX;
     private float previousVectorY;
-    private float currentWidthDp = SignatureStrokeStyle.BASE_WIDTH_DP;
+    private float currentWidthDp = SignatureStrokeStyle.START_TIP_WIDTH_DP;
     private long lastEventTime;
     private boolean moved;
 
@@ -112,7 +112,7 @@ final class NaturalSignatureView extends View {
         segmentStartX = controlX = x;
         segmentStartY = controlY = y;
         previousVectorX = previousVectorY = 0f;
-        currentWidthDp = SignatureStrokeStyle.BASE_WIDTH_DP;
+        currentWidthDp = SignatureStrokeStyle.START_TIP_WIDTH_DP;
         lastEventTime = eventTime;
         moved = false;
         empty = false;
@@ -134,8 +134,9 @@ final class NaturalSignatureView extends View {
         float turn = turnFactor(previousVectorX, previousVectorY, vectorX, vectorY);
         boolean stylus = toolType == MotionEvent.TOOL_TYPE_STYLUS
                 || toolType == MotionEvent.TOOL_TYPE_ERASER;
+        float downStrokeFactor = Math.max(0f, vectorY) / Math.max(0.001f, distance);
         float targetWidth = SignatureStrokeStyle.widthDp(
-                speedDpPerMs, turn, stylus, pressure);
+                speedDpPerMs, turn, downStrokeFactor, stylus, pressure);
         float newWidth = SignatureStrokeStyle.smoothWidthDp(currentWidthDp, targetWidth);
 
         float endX = (controlX + x) / 2f;
