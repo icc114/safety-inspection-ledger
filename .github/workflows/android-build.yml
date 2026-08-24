@@ -44,18 +44,18 @@ jobs:
       - name: Test, lint and build APKs
         run: ./gradlew --no-daemon testDebugUnitTest lintDebug assembleDebug assembleRelease
       - name: Name debug APK
-        run: cp app/build/outputs/apk/debug/app-debug.apk '安全检查台账-1.2.35-debug-仅供测试.apk'
+        run: cp app/build/outputs/apk/debug/app-debug.apk '安全检查台账-1.2.36-debug-仅供测试.apk'
       - name: Upload test APK artifact
         uses: actions/upload-artifact@v4
         with:
-          name: 安全检查台账-1.2.35-debug
-          path: 安全检查台账-1.2.35-debug-仅供测试.apk
+          name: 安全检查台账-1.2.36-debug
+          path: 安全检查台账-1.2.36-debug-仅供测试.apk
           if-no-files-found: error
           retention-days: 30
       - name: Package unsigned Release APK and signing tools
         if: github.event_name == 'pull_request'
         run: |
-          cp app/build/outputs/apk/release/app-release-unsigned.apk '安全检查台账-1.2.35-release-unsigned.apk'
+          cp app/build/outputs/apk/release/app-release-unsigned.apk '安全检查台账-1.2.36-release-unsigned.apk'
           mkdir -p signing-tools/lib
           cp "$ANDROID_HOME/build-tools/35.0.0/apksigner" signing-tools/
           cp "$ANDROID_HOME/build-tools/35.0.0/zipalign" signing-tools/
@@ -65,8 +65,8 @@ jobs:
         if: github.event_name == 'pull_request'
         uses: actions/upload-artifact@v4
         with:
-          name: 安全检查台账-1.2.35-release-unsigned
-          path: 安全检查台账-1.2.35-release-unsigned.apk
+          name: 安全检查台账-1.2.36-release-unsigned
+          path: 安全检查台账-1.2.36-release-unsigned.apk
           if-no-files-found: error
           retention-days: 7
       - name: Upload signing tools
@@ -78,7 +78,7 @@ jobs:
           if-no-files-found: error
           retention-days: 7
       - name: Require permanent signing for official release
-        if: github.event_name == 'push' && github.ref == 'refs/heads/agent/v1233-final-progress-dashboard' && contains(github.event.head_commit.message, '[release v1.2.35]')
+        if: github.event_name == 'push' && github.ref == 'refs/heads/agent/v1233-final-progress-dashboard' && contains(github.event.head_commit.message, '[release v1.2.36]')
         run: |
           test -n "$SAFETY_KEYSTORE_BASE64" || { echo "::error::缺少 SAFETY_KEYSTORE_BASE64，禁止发布临时签名 APK"; exit 1; }
           test -n "$SAFETY_KEYSTORE_PASSWORD" || { echo "::error::缺少 SAFETY_KEYSTORE_PASSWORD"; exit 1; }
@@ -86,28 +86,28 @@ jobs:
           test -n "$SAFETY_KEY_PASSWORD" || { echo "::error::缺少 SAFETY_KEY_PASSWORD"; exit 1; }
           test -f app/build/outputs/apk/release/app-release.apk || { echo "::error::未生成永久签名 Release APK"; exit 1; }
       - name: Verify and name official APK
-        if: github.event_name == 'push' && github.ref == 'refs/heads/agent/v1233-final-progress-dashboard' && contains(github.event.head_commit.message, '[release v1.2.35]')
+        if: github.event_name == 'push' && github.ref == 'refs/heads/agent/v1233-final-progress-dashboard' && contains(github.event.head_commit.message, '[release v1.2.36]')
         run: |
           "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --verbose --print-certs app/build/outputs/apk/release/app-release.apk
-          cp app/build/outputs/apk/release/app-release.apk '安全检查台账-v1.2.35.apk'
-          sha256sum '安全检查台账-v1.2.35.apk' > '安全检查台账-v1.2.35.apk.sha256'
+          cp app/build/outputs/apk/release/app-release.apk '安全检查台账-v1.2.36.apk'
+          sha256sum '安全检查台账-v1.2.36.apk' > '安全检查台账-v1.2.36.apk.sha256'
       - name: Create GitHub Release
-        if: github.event_name == 'push' && github.ref == 'refs/heads/agent/v1233-final-progress-dashboard' && contains(github.event.head_commit.message, '[release v1.2.35]')
+        if: github.event_name == 'push' && github.ref == 'refs/heads/agent/v1233-final-progress-dashboard' && contains(github.event.head_commit.message, '[release v1.2.36]')
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v1.2.35
-          name: 安全检查记录簿 v1.2.35（自然签名版）
+          tag_name: v1.2.36
+          name: 安全检查记录簿 v1.2.36（自然笔锋修正版）
           target_commitish: agent/v1233-final-progress-dashboard
           make_latest: true
           body: |
             ## 本版更新
-            - 手写签名改为速度感应线宽：慢写和顿笔略粗，快写和甩笔略细。
-            - 线宽限制为 3dp～6dp，保持自然、克制，不自动美化字形。
-            - 使用可变线宽贝塞尔曲线，改善转折与连笔平滑度。
-            - 保存时裁去大块空白并保留安全边距，PDF 中的签名更清晰。
-            - 数据库、云同步、备份和旧签名格式保持兼容。
+            - 重写签名笔触，不再只是“停笔变粗、移动变细”。
+            - 起笔保持正常线宽，避免顿笔形成明显粗点；转折仅轻微加重，收笔自然渐细。
+            - 粗细范围收窄至 3.8dp～5.2dp，变化约 1.37 倍，保持克制。
+            - 手写笔可轻微参考真实压力；手指书写不会模拟夸张压感。
+            - 签名保存、PDF、同步、备份及旧数据继续兼容。
 
             此 APK 仅在永久签名密钥校验通过后发布，可覆盖安装后续同签名版本。
           files: |
-            安全检查台账-v1.2.35.apk
-            安全检查台账-v1.2.35.apk.sha256
+            安全检查台账-v1.2.36.apk
+            安全检查台账-v1.2.36.apk.sha256

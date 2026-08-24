@@ -14,8 +14,6 @@ import android.widget.Button;
 import android.widget.LinearLayout;
 import android.widget.TextView;
 
-import com.github.gcacace.signaturepad.views.SignaturePad;
-
 import cn.safetyledger.app.data.Entities.Signature;
 import cn.safetyledger.app.data.LedgerRepository;
 import cn.safetyledger.app.media.MediaService;
@@ -26,12 +24,9 @@ import java.io.OutputStream;
 import java.util.UUID;
 
 public final class SignatureActivity extends Activity {
-    private static final float PEN_MIN_WIDTH_DP = 3f;
-    private static final float PEN_MAX_WIDTH_DP = 6f;
-    private static final float VELOCITY_FILTER_WEIGHT = 0.82f;
     private static final int SIGNATURE_PADDING_DP = 10;
 
-    private SignaturePad pad;
+    private NaturalSignatureView pad;
     private String inspectionId;
     private String role;
 
@@ -64,12 +59,7 @@ public final class SignatureActivity extends Activity {
         controls.addView(save, new LinearLayout.LayoutParams(Ui.dp(this, 60), Ui.dp(this, 30)));
         root.addView(controls, new LinearLayout.LayoutParams(-1, Ui.dp(this, 34)));
 
-        pad = new SignaturePad(this, null);
-        pad.setPenColor(Color.rgb(15, 23, 42));
-        pad.setMinWidth(PEN_MIN_WIDTH_DP);
-        pad.setMaxWidth(PEN_MAX_WIDTH_DP);
-        pad.setVelocityFilterWeight(VELOCITY_FILTER_WEIGHT);
-        pad.setBackgroundColor(Color.WHITE);
+        pad = new NaturalSignatureView(this);
         root.addView(pad, new LinearLayout.LayoutParams(-1, 0, 1));
         setContentView(root);
         hideSystemBars();
@@ -122,6 +112,7 @@ public final class SignatureActivity extends Activity {
             Bitmap cropped = pad.getTransparentSignatureBitmap(true);
             if (cropped == null) throw new IllegalStateException("未读取到有效签名");
             Bitmap bitmap = addTransparentPadding(cropped);
+            if (bitmap != cropped) cropped.recycle();
             try (OutputStream output = new FileOutputStream(file)) {
                 if (!bitmap.compress(Bitmap.CompressFormat.PNG, 100, output)) {
                     throw new IllegalStateException("签名图片压缩失败");
