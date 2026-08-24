@@ -5,11 +5,7 @@ import android.content.Intent;
 import android.graphics.Bitmap;
 import android.graphics.Canvas;
 import android.graphics.Color;
-import android.graphics.Paint;
-import android.graphics.Path;
 import android.os.Bundle;
-import android.view.Gravity;
-import android.view.MotionEvent;
 import android.view.View;
 import android.view.WindowInsets;
 import android.view.WindowInsetsController;
@@ -17,6 +13,8 @@ import android.view.WindowManager;
 import android.widget.Button;
 import android.widget.LinearLayout;
 import android.widget.TextView;
+
+import com.github.gcacace.signaturepad.views.SignaturePad;
 
 import cn.safetyledger.app.data.Entities.Signature;
 import cn.safetyledger.app.data.LedgerRepository;
@@ -28,6 +26,11 @@ import java.io.OutputStream;
 import java.util.UUID;
 
 public final class SignatureActivity extends Activity {
+    private static final float PEN_MIN_WIDTH_DP = 3f;
+    private static final float PEN_MAX_WIDTH_DP = 6f;
+    private static final float VELOCITY_FILTER_WEIGHT = 0.82f;
+    private static final int SIGNATURE_PADDING_DP = 10;
+
     private SignaturePad pad;
     private String inspectionId;
     private String role;
@@ -60,7 +63,13 @@ public final class SignatureActivity extends Activity {
         controls.addView(Ui.horizontalGap(this, 4));
         controls.addView(save, new LinearLayout.LayoutParams(Ui.dp(this, 60), Ui.dp(this, 30)));
         root.addView(controls, new LinearLayout.LayoutParams(-1, Ui.dp(this, 34)));
-        pad = new SignaturePad(this);
+
+        pad = new SignaturePad(this, null);
+        pad.setPenColor(Color.rgb(15, 23, 42));
+        pad.setMinWidth(PEN_MIN_WIDTH_DP);
+        pad.setMaxWidth(PEN_MAX_WIDTH_DP);
+        pad.setVelocityFilterWeight(VELOCITY_FILTER_WEIGHT);
+        pad.setBackgroundColor(Color.WHITE);
         root.addView(pad, new LinearLayout.LayoutParams(-1, 0, 1));
         setContentView(root);
         hideSystemBars();
@@ -97,21 +106,30 @@ public final class SignatureActivity extends Activity {
     }
 
     private void save() {
-        if (pad.empty) {
+        if (pad.isEmpty()) {
             Ui.toast(this, "请先签名");
             return;
         }
         try {
             File directory = new File(getFilesDir(), "business_media/" + inspectionId);
-            if (!directory.exists() && !directory.mkdirs()) throw new IllegalStateException("无法创建签名目录");
+            if (!directory.exists() && !directory.mkdirs()) {
+                throw new IllegalStateException("无法创建签名目录");
+            }
             // A new immutable file avoids an older peer snapshot overwriting a newer signature.
             File file = new File(directory, "signature-" + role + "-"
                     + System.currentTimeMillis() + ".png");
-            Bitmap bitmap = pad.bitmap();
+
+            Bitmap cropped = pad.getTransparentSignatureBitmap(true);
+            if (cropped == null) throw new IllegalStateException("未读取到有效签名");
+            Bitmap bitmap = addTransparentPadding(cropped);
             try (OutputStream output = new FileOutputStream(file)) {
-                bitmap.compress(Bitmap.CompressFormat.PNG, 100, output);
+                if (!bitmap.compress(Bitmap.CompressFormat.PNG, 100, output)) {
+                    throw new IllegalStateException("签名图片压缩失败");
+                }
+            } finally {
+                bitmap.recycle();
             }
-            bitmap.recycle();
+
             Signature signature = new Signature();
             signature.id = UUID.nameUUIDFromBytes((inspectionId + role).getBytes()).toString();
             signature.inspectionId = inspectionId;
@@ -126,67 +144,14 @@ public final class SignatureActivity extends Activity {
         }
     }
 
-    private static final class SignaturePad extends View {
-        private final Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG);
-        private final Path path = new Path();
-        private boolean empty = true;
-        private float lastX;
-        private float lastY;
-
-        SignaturePad(android.content.Context context) {
-            super(context);
-            paint.setColor(Color.rgb(15, 23, 42));
-            paint.setStyle(Paint.Style.STROKE);
-            paint.setStrokeWidth(Ui.dp(context, 5));
-            paint.setStrokeCap(Paint.Cap.ROUND);
-            paint.setStrokeJoin(Paint.Join.ROUND);
-            setBackgroundColor(Color.WHITE);
-        }
-
-        @Override
-        protected void onDraw(Canvas canvas) {
-            canvas.drawPath(path, paint);
-        }
-
-        @Override
-        public boolean onTouchEvent(MotionEvent event) {
-            float x = event.getX();
-            float y = event.getY();
-            if (event.getAction() == MotionEvent.ACTION_DOWN) {
-                path.moveTo(x, y);
-                lastX = x;
-                lastY = y;
-                empty = false;
-            } else if (event.getAction() == MotionEvent.ACTION_MOVE) {
-                path.quadTo(lastX, lastY, (x + lastX) / 2, (y + lastY) / 2);
-                lastX = x;
-                lastY = y;
-            } else if (event.getAction() == MotionEvent.ACTION_UP) {
-                performClick();
-            }
-            invalidate();
-            return true;
-        }
-
-        @Override
-        public boolean performClick() {
-            super.performClick();
-            return true;
-        }
-
-        void clear() {
-            path.reset();
-            empty = true;
-            invalidate();
-        }
-
-        Bitmap bitmap() {
-            Bitmap bitmap = Bitmap.createBitmap(Math.max(1, getWidth()), Math.max(1, getHeight()),
-                    Bitmap.Config.ARGB_8888);
-            Canvas canvas = new Canvas(bitmap);
-            canvas.drawColor(Color.WHITE);
-            canvas.drawPath(path, paint);
-            return bitmap;
-        }
+    private Bitmap addTransparentPadding(Bitmap source) {
+        int padding = Ui.dp(this, SIGNATURE_PADDING_DP);
+        Bitmap padded = Bitmap.createBitmap(
+                source.getWidth() + padding * 2,
+                source.getHeight() + padding * 2,
+                Bitmap.Config.ARGB_8888);
+        Canvas canvas = new Canvas(padded);
+        canvas.drawBitmap(source, padding, padding, null);
+        return padded;
     }
 }
