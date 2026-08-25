@@ -277,7 +277,8 @@ public final class RecordDetailActivity extends Activity {
         model.status = confirmed.isChecked() ? "RECTIFIED" : "RECTIFYING";
         repo.saveInspection(model);
         CloudSyncScheduler.scheduleImmediate(this);
-        Ui.toast(this, confirmed.isChecked() ? "整改已确认完成；正在后台同步" : "整改记录已保存；正在后台同步");
+        Ui.toast(this, CloudSyncScheduler.localSaveMessage(this,
+                confirmed.isChecked() ? "整改已确认并保存到本机" : "整改记录已保存到本机"));
         render();
     }
 

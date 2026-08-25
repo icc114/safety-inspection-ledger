@@ -120,13 +120,6 @@ public final class BackupService{
                 if("sync_providers".equals(table)||"app_settings".equals(table))continue;
                 String primary=mainCols.contains("id")?"id":mainCols.contains("device_id")?"device_id":null;
                 if(primary==null||!mainCols.contains("updated_at"))continue;
-                if(mainCols.contains("revision")){
-                    d.execSQL("INSERT OR IGNORE INTO conflict_copies(id,entity_type,entity_id,local_revision,remote_revision,payload_json,created_at) "
-                                    +"SELECT lower(hex(randomblob(16))),?,m."+primary+",COALESCE(m.revision,1),COALESCE(i.revision,1),'{}',? "
-                                    +"FROM main."+table+" m JOIN incoming."+table+" i ON m."+primary+"=i."+primary
-                                    +" WHERE COALESCE(m.updated_at,0)<>COALESCE(i.updated_at,0)",
-                            new Object[]{table,System.currentTimeMillis()});
-                }
                 List<String>assignments=new ArrayList<>();
                 for(String column:mainCols){
                     if(column.equals(primary))continue;
@@ -134,10 +127,13 @@ public final class BackupService{
                             +" i WHERE i."+primary+"=main."+table+"."+primary+")");
                 }
                 if(!assignments.isEmpty()){
+                    String local="main."+table;
+                    String newer=mainCols.contains("revision")
+                            ?"(COALESCE(i.revision,1)>COALESCE("+local+".revision,1) OR (COALESCE(i.revision,1)=COALESCE("+local+".revision,1) AND COALESCE(i.updated_at,0)>COALESCE("+local+".updated_at,0)))"
+                            :"COALESCE(i.updated_at,0)>COALESCE("+local+".updated_at,0)";
                     d.execSQL("UPDATE main."+table+" SET "+String.join(",",assignments)
                             +" WHERE EXISTS(SELECT 1 FROM incoming."+table+" i WHERE i."+primary
-                            +"=main."+table+"."+primary+" AND COALESCE(i.updated_at,0)>COALESCE(main."
-                            +table+".updated_at,0))");
+                            +"="+local+"."+primary+" AND "+newer+") AND "+mergeProtection(table,local));
                     try(Cursor c=d.rawQuery("SELECT changes()",null)){if(c.moveToFirst())changed+=c.getInt(0);}
                 }
             }
@@ -150,6 +146,81 @@ public final class BackupService{
         normalizeMediaPaths(d);
         p.close();
         return changed;
+    }
+
+    private String mergeProtection(String table,String local){
+        if("inspections".equals(table))return "NOT EXISTS(SELECT 1 FROM main.sync_queue q WHERE q.entity_type='inspection' AND q.entity_id="+local+".id)";
+        if("inspection_items".equals(table))return "NOT EXISTS(SELECT 1 FROM main.sync_queue q WHERE q.entity_type='inspection' AND q.entity_id="+local+".inspection_id)";
+        if("media".equals(table))return "NOT EXISTS(SELECT 1 FROM main.sync_queue q WHERE (q.entity_type='media' AND q.entity_id="+local+".id) OR (q.entity_type='inspection' AND q.entity_id="+local+".inspection_id))";
+        if("signatures".equals(table))return "NOT EXISTS(SELECT 1 FROM main.sync_queue q WHERE (q.entity_type='signature' AND q.entity_id="+local+".id) OR (q.entity_type='inspection' AND q.entity_id="+local+".inspection_id))";
+        if("templates".equals(table))return "NOT EXISTS(SELECT 1 FROM main.sync_queue q WHERE q.entity_type='template' AND q.entity_id="+local+".id)";
+        if("template_items".equals(table))return "NOT EXISTS(SELECT 1 FROM main.sync_queue q WHERE (q.entity_type='template_item' AND q.entity_id="+local+".id) OR (q.entity_type='template' AND q.entity_id="+local+".template_id))";
+        return "1=1";
+    }
+
+    /**
+     * Applies one inspection update package. The package may contain a complete database for
+     * compatibility, but only the requested inspection and its children are ever read.
+     *
+     * Local unsent work always wins. Otherwise revision is the primary ordering key and the
+     * wall-clock timestamp is only a compatibility tie-breaker for snapshots created by older
+     * app versions that kept every revision at 1.
+     */
+    public int mergeInspectionRestore(RestorePackage p,String inspectionId)throws Exception{
+        LedgerDatabase h=((SafetyLedgerApp)context).db();SQLiteDatabase d=h.getWritableDatabase();
+        String path=p.database.getAbsolutePath().replace("'","''");boolean accepted=false;int changed=0;
+        d.execSQL("ATTACH DATABASE '"+path+"' AS incoming");
+        try{
+            if(!tableExists(d,"incoming","inspections"))return 0;
+            long incomingRevision,incomingUpdated;
+            try(Cursor c=d.rawQuery("SELECT COALESCE(revision,1),COALESCE(updated_at,0) FROM incoming.inspections WHERE id=?",new String[]{inspectionId})){
+                if(!c.moveToFirst())return 0;incomingRevision=c.getLong(0);incomingUpdated=c.getLong(1);
+            }
+            if(hasPendingInspectionChange(d,inspectionId))return 0;
+            boolean localExists=false;long localRevision=0,localUpdated=0;
+            try(Cursor c=d.rawQuery("SELECT COALESCE(revision,1),COALESCE(updated_at,0) FROM main.inspections WHERE id=?",new String[]{inspectionId})){
+                if(c.moveToFirst()){localExists=true;localRevision=c.getLong(0);localUpdated=c.getLong(1);}
+            }
+            if(localExists&&(incomingRevision<localRevision
+                    ||(incomingRevision==localRevision&&incomingUpdated<=localUpdated)))return 0;
+
+            d.beginTransaction();
+            try{
+                Set<String>mainCols=columns(d,"main","inspections");Set<String>incomingCols=columns(d,"incoming","inspections");mainCols.retainAll(incomingCols);
+                String names=String.join(",",mainCols);
+                if(localExists){
+                    List<String>assignments=new ArrayList<>();for(String column:mainCols){if(!"id".equals(column))assignments.add(column+"=(SELECT i."+column+" FROM incoming.inspections i WHERE i.id=main.inspections.id)");}
+                    if(!assignments.isEmpty())d.execSQL("UPDATE main.inspections SET "+String.join(",",assignments)+" WHERE id=?",new Object[]{inspectionId});
+                }else d.execSQL("INSERT INTO main.inspections("+names+") SELECT "+names+" FROM incoming.inspections WHERE id=?",new Object[]{inspectionId});
+                try(Cursor c=d.rawQuery("SELECT changes()",null)){if(c.moveToFirst())changed+=c.getInt(0);}
+
+                for(String table:new String[]{"inspection_items","media","signatures"}){
+                    if(!tableExists(d,"incoming",table))continue;
+                    d.delete(table,"inspection_id=?",new String[]{inspectionId});
+                    Set<String>localColumns=columns(d,"main",table);Set<String>remoteColumns=columns(d,"incoming",table);localColumns.retainAll(remoteColumns);
+                    if(localColumns.isEmpty())continue;String childNames=String.join(",",localColumns);
+                    d.execSQL("INSERT INTO main."+table+"("+childNames+") SELECT "+childNames+" FROM incoming."+table+" WHERE inspection_id=?",new Object[]{inspectionId});
+                    try(Cursor c=d.rawQuery("SELECT changes()",null)){if(c.moveToFirst())changed+=c.getInt(0);}
+                }
+                d.setTransactionSuccessful();accepted=true;
+            }finally{d.endTransaction();}
+            if(accepted){
+                File source=new File(new File(p.root,"business_media"),inspectionId);
+                File target=new File(new File(context.getFilesDir(),"business_media"),inspectionId);
+                copyMedia(source,target);normalizeMediaPaths(d);
+            }
+            return changed;
+        }finally{
+            d.execSQL("DETACH DATABASE incoming");p.close();
+        }
+    }
+
+    private boolean hasPendingInspectionChange(SQLiteDatabase d,String inspectionId){
+        String sql="SELECT 1 FROM sync_queue q WHERE "
+                +"(q.entity_type='inspection' AND q.entity_id=?) "
+                +"OR (q.entity_type='media' AND EXISTS(SELECT 1 FROM media m WHERE m.id=q.entity_id AND m.inspection_id=?)) "
+                +"OR (q.entity_type='signature' AND EXISTS(SELECT 1 FROM signatures s WHERE s.id=q.entity_id AND s.inspection_id=?)) LIMIT 1";
+        try(Cursor c=d.rawQuery(sql,new String[]{inspectionId,inspectionId,inspectionId})){return c.moveToFirst();}
     }
     public void restoreInspection(RestorePackage p,String inspectionId)throws Exception{
         LedgerDatabase h=((SafetyLedgerApp)context).db();SQLiteDatabase d=h.getWritableDatabase();

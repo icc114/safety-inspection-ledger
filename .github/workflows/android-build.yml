@@ -44,18 +44,18 @@ jobs:
       - name: Test, lint and build APKs
         run: ./gradlew --no-daemon testDebugUnitTest lintDebug assembleDebug assembleRelease
       - name: Name debug APK
-        run: cp app/build/outputs/apk/debug/app-debug.apk '安全检查台账-1.2.37-debug-仅供测试.apk'
+        run: cp app/build/outputs/apk/debug/app-debug.apk '安全检查台账-1.2.38-debug-仅供测试.apk'
       - name: Upload test APK artifact
         uses: actions/upload-artifact@v4
         with:
-          name: 安全检查台账-1.2.37-debug
-          path: 安全检查台账-1.2.37-debug-仅供测试.apk
+          name: 安全检查台账-1.2.38-debug
+          path: 安全检查台账-1.2.38-debug-仅供测试.apk
           if-no-files-found: error
           retention-days: 30
       - name: Package unsigned Release APK and signing tools
         if: github.event_name == 'pull_request'
         run: |
-          cp app/build/outputs/apk/release/app-release-unsigned.apk '安全检查台账-1.2.37-release-unsigned.apk'
+          cp app/build/outputs/apk/release/app-release-unsigned.apk '安全检查台账-1.2.38-release-unsigned.apk'
           mkdir -p signing-tools/lib
           cp "$ANDROID_HOME/build-tools/35.0.0/apksigner" signing-tools/
           cp "$ANDROID_HOME/build-tools/35.0.0/zipalign" signing-tools/
@@ -65,8 +65,8 @@ jobs:
         if: github.event_name == 'pull_request'
         uses: actions/upload-artifact@v4
         with:
-          name: 安全检查台账-1.2.37-release-unsigned
-          path: 安全检查台账-1.2.37-release-unsigned.apk
+          name: 安全检查台账-1.2.38-release-unsigned
+          path: 安全检查台账-1.2.38-release-unsigned.apk
           if-no-files-found: error
           retention-days: 7
       - name: Upload signing tools
@@ -78,7 +78,7 @@ jobs:
           if-no-files-found: error
           retention-days: 7
       - name: Require permanent signing for official release
-        if: github.event_name == 'push' && github.ref == 'refs/heads/agent/v1233-final-progress-dashboard' && contains(github.event.head_commit.message, '[release v1.2.37]')
+        if: github.event_name == 'push' && github.ref == 'refs/heads/agent/v1233-final-progress-dashboard' && contains(github.event.head_commit.message, '[release v1.2.38]')
         run: |
           test -n "$SAFETY_KEYSTORE_BASE64" || { echo "::error::缺少 SAFETY_KEYSTORE_BASE64，禁止发布临时签名 APK"; exit 1; }
           test -n "$SAFETY_KEYSTORE_PASSWORD" || { echo "::error::缺少 SAFETY_KEYSTORE_PASSWORD"; exit 1; }
@@ -86,28 +86,29 @@ jobs:
           test -n "$SAFETY_KEY_PASSWORD" || { echo "::error::缺少 SAFETY_KEY_PASSWORD"; exit 1; }
           test -f app/build/outputs/apk/release/app-release.apk || { echo "::error::未生成永久签名 Release APK"; exit 1; }
       - name: Verify and name official APK
-        if: github.event_name == 'push' && github.ref == 'refs/heads/agent/v1233-final-progress-dashboard' && contains(github.event.head_commit.message, '[release v1.2.37]')
+        if: github.event_name == 'push' && github.ref == 'refs/heads/agent/v1233-final-progress-dashboard' && contains(github.event.head_commit.message, '[release v1.2.38]')
         run: |
           "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --verbose --print-certs app/build/outputs/apk/release/app-release.apk
-          cp app/build/outputs/apk/release/app-release.apk '安全检查台账-v1.2.37.apk'
-          sha256sum '安全检查台账-v1.2.37.apk' > '安全检查台账-v1.2.37.apk.sha256'
+          cp app/build/outputs/apk/release/app-release.apk '安全检查台账-v1.2.38.apk'
+          sha256sum '安全检查台账-v1.2.38.apk' > '安全检查台账-v1.2.38.apk.sha256'
       - name: Create GitHub Release
-        if: github.event_name == 'push' && github.ref == 'refs/heads/agent/v1233-final-progress-dashboard' && contains(github.event.head_commit.message, '[release v1.2.37]')
+        if: github.event_name == 'push' && github.ref == 'refs/heads/agent/v1233-final-progress-dashboard' && contains(github.event.head_commit.message, '[release v1.2.38]')
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v1.2.37
-          name: 安全检查记录簿 v1.2.37（细签字笔版）
+          tag_name: v1.2.38
+          name: 安全检查记录簿 v1.2.38（多手机同步稳定版）
           target_commitish: agent/v1233-final-progress-dashboard
           make_latest: true
           body: |
             ## 本版更新
-            - 改为细签字笔主体，正常线宽约 2.55dp，不再呈现整体加粗效果。
-            - 起笔由细到正常，转折和下行笔画仅轻微加重，收笔拉出短而自然的细尖。
-            - 正常笔画控制在 2.0dp～3.2dp，停顿只增加 0.12dp。
-            - 手写笔可轻微参考真实压力；手指书写不会模拟夸张压感。
-            - 签名保存、PDF、同步、备份及旧数据继续兼容。
+            - 保存先写入本机原子事务；断网不再把“保存”显示成失败，联网后自动补传。
+            - 日常填报改传单条加密记录包，避免每次都上传 27～34MB 整库快照。
+            - 记录及检查项版本号真实递增，本机未上传内容禁止被旧快照覆盖。
+            - 前台打开台账会自动拉取小型更新，并增加 15 分钟轻量后台检查。
+            - 华为等设备优先使用 IPv4、缩短重试间隔；普通网络波动不再反复弹失败通知。
+            - 大快照保留为低频兼容和恢复备份；签名、PDF、历史数据继续兼容。
 
             此 APK 仅在永久签名密钥校验通过后发布，可覆盖安装后续同签名版本。
           files: |
-            安全检查台账-v1.2.37.apk
-            安全检查台账-v1.2.37.apk.sha256
+            安全检查台账-v1.2.38.apk
+            安全检查台账-v1.2.38.apk.sha256

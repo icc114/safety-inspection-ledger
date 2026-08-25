@@ -37,7 +37,7 @@ public final class WebDavClient {
             .retryOnConnectionFailure(true)
             .connectTimeout(12, java.util.concurrent.TimeUnit.SECONDS)
             .readTimeout(45, java.util.concurrent.TimeUnit.SECONDS)
-            .writeTimeout(90, java.util.concurrent.TimeUnit.SECONDS)
+            .writeTimeout(180, java.util.concurrent.TimeUnit.SECONDS)
             .followRedirects(true)
             .build();
     private static List<java.net.InetAddress> lookupWithRetry(String hostname) throws java.net.UnknownHostException {
@@ -54,7 +54,13 @@ public final class WebDavClient {
             }
             try {
                 java.net.InetAddress[] addresses = java.net.InetAddress.getAllByName(hostname);
-                if (addresses.length > 0) return java.util.Arrays.asList(addresses);
+                if (addresses.length > 0) {
+                    List<java.net.InetAddress> ordered=new ArrayList<>(java.util.Arrays.asList(addresses));
+                    // Several Huawei/mobile networks advertise an unusable IPv6 route first.
+                    // IPv4-first still retains IPv6 as fallback and avoids a 12-second timeout.
+                    ordered.sort(java.util.Comparator.comparingInt(a -> a instanceof java.net.Inet6Address ? 1 : 0));
+                    return ordered;
+                }
             } catch (java.net.UnknownHostException error) {
                 last = error;
             }
@@ -114,6 +120,7 @@ public final class WebDavClient {
         mkcol(deviceControlUrl(space));
         mkcol(adminRecoveryUrl(space));
         mkcol(trashUrl(space));
+        mkcol(recordUpdatesUrl(space));
     }
 
     public List<String> listSnapshots(String space) throws Exception {
@@ -143,6 +150,13 @@ public final class WebDavClient {
             if (name.endsWith(".safetydata") && !names.contains(name)) names.add(name);
         }
         return names;
+    }
+
+    /** Small, per-inspection packages used by current clients for normal background sync. */
+    public List<String> listRecordUpdates(String space)throws Exception{
+        ResponseInfo response=execute("PROPFIND",recordUpdatesUrl(space),PROPFIND,"1");
+        if(!response.successDav())throw failure("无法读取增量记录列表",response);
+        return davNames(response.body,".safetydata");
     }
 
     /** Tiny device-management metadata channel; never contains inspection/photo data. */
@@ -276,16 +290,44 @@ public final class WebDavClient {
 
     /** Returns a lightweight server version stamp for a snapshot without downloading it. */
     public String snapshotStamp(String space, String name) throws Exception {
-        Request request = request(fileUrl(space, name)).head().build();
+        return resourceStamp(fileUrl(space,name),"读取云端快照版本失败");
+    }
+
+    public String recordUpdateStamp(String space,String name)throws Exception{
+        return resourceStamp(recordUpdateFileUrl(space,name),"读取增量记录版本失败");
+    }
+
+    private String resourceStamp(String url,String failureMessage)throws Exception{
+        Request request = request(url).head().build();
         try (Response response = http.newCall(request).execute()) {
             if (response.code() == 404) return "";
-            if (!response.isSuccessful()) throw failure("读取云端快照版本失败", response);
+            if (!response.isSuccessful()) throw failure(failureMessage, response);
             String etag = response.header("ETag", "");
             String length = response.header("Content-Length", "");
             String modified = response.header("Last-Modified", "");
             if (etag.isBlank() && length.isBlank() && modified.isBlank()) return "";
             return etag + "|" + length + "|" + modified;
         }
+    }
+
+    public void downloadRecordUpdate(String space,String name,File target)throws Exception{
+        Request request=request(recordUpdateFileUrl(space,name)).get().build();
+        try(Response response=http.newCall(request).execute()){
+            if(!response.isSuccessful())throw failure("下载增量记录失败",response);
+            ResponseBody body=response.body();if(body==null)throw new java.io.IOException("云端返回空增量记录");
+            try(InputStream input=body.byteStream();FileOutputStream output=new FileOutputStream(target)){copy(input,output);}
+        }
+    }
+
+    public void uploadRecordUpdate(String space,String name,File source)throws Exception{
+        RequestBody body=RequestBody.create(BINARY,source);
+        try(Response response=http.newCall(request(recordUpdateFileUrl(space,name)).put(body).build()).execute()){
+            if(!response.isSuccessful())throw failure("上传增量记录失败",response);
+        }
+    }
+
+    public void deleteRecordUpdate(String space,String name)throws Exception{
+        delete(recordUpdateFileUrl(space,name));
     }
 
     public void download(String space, String name, File target) throws Exception {
@@ -418,10 +460,12 @@ public final class WebDavClient {
     private String deviceControlUrl(String space) { return spaceUrl(space) + "device-control/"; }
     private String adminRecoveryUrl(String space) { return spaceUrl(space) + "admin-recovery/"; }
     private String trashUrl(String space) { return spaceUrl(space) + "trash/"; }
+    private String recordUpdatesUrl(String space) { return spaceUrl(space) + "record-updates/"; }
     private String fileUrl(String space, String name) { return devicesUrl(space) + segment(name); }
     private String controlFileUrl(String space, String name) { return deviceControlUrl(space) + segment(name); }
     private String recoveryFileUrl(String space, String name) { return adminRecoveryUrl(space) + segment(name); }
     private String trashFileUrl(String space, String name) { return trashUrl(space) + segment(name); }
+    private String recordUpdateFileUrl(String space,String name){return recordUpdatesUrl(space)+segment(name);}
     private String segment(String value) {
         try {
             return URLEncoder.encode(value, "UTF-8").replace("+", "%20");

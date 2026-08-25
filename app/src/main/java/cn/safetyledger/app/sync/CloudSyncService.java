@@ -14,7 +14,9 @@ import java.io.FileInputStream;
 import java.io.FileOutputStream;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicBoolean;
 
@@ -81,18 +83,20 @@ public final class CloudSyncService {
             registerCurrentDevice(deviceId, emptyCloud);
 
             BackupService backup = new BackupService(context);
+            progress(listener,"正在交换本次修改的小型记录包…");
+            IncrementalStats incremental=syncRecordUpdates(client,config,backup,deviceId,syncStartedAt,listener);
             boolean pendingAtStart = hasPendingLocalChanges(syncStartedAt);
             if (pendingAtStart) {
                 progress(listener, "本机有修改，正在与云端合并…");
                 SyncLog.info(context, "本机修改", "检测到待同步变更；改为合并后单次上传，减少重复大文件传输");
             }
 
-            int peers = 0;
-            int changed = 0;
-            int skipped = 0;
+            int peers = incremental.peers;
+            int changed = incremental.changed;
+            int skipped = incremental.skipped;
             int unchangedPeers = 0;
             boolean peerSnapshotChanged = false;
-            List<String> warnings = new ArrayList<>();
+            List<String> warnings = new ArrayList<>(incremental.warnings);
             int peerTotal = 0;
             for (String name : snapshots) if (!name.equals(deviceId + ".safetydata")) peerTotal++;
             int peerIndex = 0;
@@ -153,11 +157,13 @@ public final class CloudSyncService {
             applyTombstones();
 
             boolean ownSnapshotMissing = !snapshots.contains(deviceId + ".safetydata");
-            boolean needLargeUpload = pendingAtStart || peerSnapshotChanged || ownSnapshotMissing;
+            boolean needLargeUpload = pendingAtStart || changed>incremental.changed || ownSnapshotMissing
+                    || "1".equals(repo.setting("full_snapshot_dirty","0"));
             if (needLargeUpload) {
                 progress(listener, "正在上传本机最新数据…");
                 SyncLog.info(context, "最终上传", "开始生成并上传聚合快照");
                 uploadSnapshot(backup, client, config, deviceId);
+                repo.putSetting("full_snapshot_dirty","0");
                 SyncLog.info(context, "最终上传", "完成");
             } else {
                 progress(listener, "云端无新变化，无需重复上传大文件…");
@@ -186,6 +192,126 @@ public final class CloudSyncService {
             if (config != null) Arrays.fill(config.spacePassword, '\0');
             CONTENT_RUNNING.set(false);
         }
+    }
+
+    /**
+     * Fast path used after Save and when the ledger opens. It transfers only changed inspections;
+     * the large aggregate snapshot remains a periodic compatibility/recovery backup.
+     */
+    public Result syncIncremental()throws Exception{
+        if(!CONTENT_RUNNING.compareAndSet(false,true))throw new IllegalStateException("检查内容同步正在运行，请等待当前同步完成后再试");
+        Config config=null;long started=System.currentTimeMillis();SyncLog.info(context,"增量同步","开始");
+        try{
+            config=requireConfig();WebDavClient client=client(config);prepare(client,config);
+            syncTrashSignalsInternal(client,config,false);String deviceId=ensureDeviceId();
+            if(client.isDeviceLoggedOut(config.space,deviceId))return finishForcedLogout(client,config,deviceId,null);
+            List<String> snapshots=client.listSnapshots(config.space);registerCurrentDevice(deviceId,snapshots.isEmpty());
+            BackupService backup=new BackupService(context);
+            IncrementalStats stats=syncRecordUpdates(client,config,backup,deviceId,started,null);
+            applyTombstones();long now=System.currentTimeMillis();
+            repo.putSetting("last_sync_at",String.valueOf(now));repo.putSetting("last_sync_error","");
+            String warning=stats.warnings.isEmpty()?"":String.join("；",stats.warnings);repo.putSetting("last_sync_warning",warning);
+            if(hasPendingLocalChanges())CloudSyncScheduler.scheduleImmediate(context);
+            SyncLog.info(context,"增量同步","成功；peerDevices="+stats.peers+"；uploadedRecords="+stats.uploaded+"；changedRows="+stats.changed+"；skipped="+stats.skipped);
+            return new Result(stats.peers,stats.changed,stats.skipped,deviceRole(deviceId),now,warning);
+        }catch(Exception error){SyncLog.error(context,"增量同步失败",error);throw error;}
+        finally{if(config!=null)Arrays.fill(config.spacePassword,'\0');CONTENT_RUNNING.set(false);}
+    }
+
+    public boolean hasOnlyIncrementalPendingChanges(){
+        try(Cursor c=repo.raw().rawQuery("SELECT entity_type,entity_id FROM sync_queue",null)){
+            while(c.moveToNext()){
+                String type=c.getString(0),id=c.getString(1);
+                if("inspection".equals(type)){
+                    try(Cursor record=repo.raw().rawQuery("SELECT 1 FROM inspections WHERE id=?",new String[]{id})){if(!record.moveToFirst())return false;}
+                }else if("media".equals(type)){
+                    if(parentInspection("media",id)==null)return false;
+                }else if("signature".equals(type)){
+                    if(parentInspection("signatures",id)==null)return false;
+                }else return false;
+            }
+            return true;
+        }
+    }
+
+    private IncrementalStats syncRecordUpdates(WebDavClient client,Config config,BackupService backup,
+                                               String deviceId,long through,ProgressListener listener)throws Exception{
+        Set<String>pending=pendingInspectionIds(through);int uploaded=0;
+        for(String inspectionId:pending){
+            File outgoing=File.createTempFile("safety-record-out-",".safetydata",context.getCacheDir());
+            try{
+                progress(listener,"正在上传本次修改 "+(uploaded+1)+"/"+pending.size()+"…");
+                try(FileOutputStream output=new FileOutputStream(outgoing)){backup.exportInspectionRecovery(output,config.spacePassword.clone(),inspectionId);}
+                client.uploadRecordUpdate(config.space,recordUpdateName(deviceId,inspectionId),outgoing);
+                clearInspectionQueue(inspectionId,through);uploaded++;
+                repo.putSetting("full_snapshot_dirty","1");
+                SyncLog.info(context,"上传增量记录",shortDevice(deviceId)+"；inspection="+inspectionId+"；bytes="+outgoing.length());
+            }finally{outgoing.delete();}
+        }
+
+        int peers=0,changed=0,skipped=0;Set<String>peerIds=new LinkedHashSet<>();List<String>warnings=new ArrayList<>();
+        List<String>files=client.listRecordUpdates(config.space);
+        for(String name:files){
+            RecordUpdateName parsed=parseRecordUpdateName(name);if(parsed==null||deviceId.equals(parsed.deviceId))continue;
+            String stampKey=recordUpdateStampKey(config.space,name),stamp="";
+            try{
+                stamp=client.recordUpdateStamp(config.space,name);
+                if(!stamp.isBlank()&&stamp.equals(repo.setting(stampKey,"")))continue;
+                File incoming=File.createTempFile("safety-record-in-",".safetydata",context.getCacheDir());
+                try{
+                    client.downloadRecordUpdate(config.space,name,incoming);
+                    try(FileInputStream input=new FileInputStream(incoming)){
+                        BackupService.RestorePackage restore=backup.decryptAndValidate(input,config.spacePassword.clone());
+                        changed+=backup.mergeInspectionRestore(restore,parsed.inspectionId);
+                    }
+                }finally{incoming.delete();}
+                if(!stamp.isBlank())repo.putSetting(stampKey,stamp);peerIds.add(parsed.deviceId);
+            }catch(Exception error){
+                if(SyncErrorFormatter.isNetwork(error))throw error;
+                skipped++;String detail=readable(error);if(detail.length()>90)detail=detail.substring(0,90)+"…";
+                warnings.add(shortDevice(parsed.deviceId)+"："+detail);SyncLog.error(context,"接收增量记录失败 "+shortDevice(parsed.deviceId),error);
+            }
+        }
+        peers=peerIds.size();if(changed>0)repo.putSetting("full_snapshot_dirty","1");
+        return new IncrementalStats(peers,changed,uploaded,skipped,warnings);
+    }
+
+    private Set<String>pendingInspectionIds(long through){
+        Set<String>ids=new LinkedHashSet<>();String limit=String.valueOf(through);
+        try(Cursor c=repo.raw().rawQuery("SELECT entity_type,entity_id FROM sync_queue WHERE created_at<=? ORDER BY created_at",new String[]{limit})){
+            while(c.moveToNext()){
+                String type=c.getString(0),entityId=c.getString(1),inspectionId=null;
+                if("inspection".equals(type))inspectionId=entityId;
+                else if("media".equals(type))inspectionId=parentInspection("media",entityId);
+                else if("signature".equals(type))inspectionId=parentInspection("signatures",entityId);
+                if(inspectionId!=null&&!inspectionId.isBlank()&&inspectionExists(inspectionId))ids.add(inspectionId);
+            }
+        }
+        return ids;
+    }
+
+    private boolean inspectionExists(String id){try(Cursor c=repo.raw().rawQuery("SELECT 1 FROM inspections WHERE id=?",new String[]{id})){return c.moveToFirst();}}
+    private String parentInspection(String table,String id){try(Cursor c=repo.raw().rawQuery("SELECT inspection_id FROM "+table+" WHERE id=?",new String[]{id})){return c.moveToFirst()?c.getString(0):null;}}
+    private void clearInspectionQueue(String inspectionId,long through){
+        repo.raw().execSQL("DELETE FROM sync_queue WHERE created_at<=? AND ((entity_type='inspection' AND entity_id=?) OR (entity_type='media' AND entity_id IN(SELECT id FROM media WHERE inspection_id=?)) OR (entity_type='signature' AND entity_id IN(SELECT id FROM signatures WHERE inspection_id=?)))",
+                new Object[]{through,inspectionId,inspectionId,inspectionId});
+    }
+
+    private void deleteDeviceRecordUpdates(WebDavClient client,String space,String deviceId)throws Exception{
+        String prefix=deviceId+"__";for(String file:client.listRecordUpdates(space))if(file.startsWith(prefix))client.deleteRecordUpdate(space,file);
+    }
+
+    static String recordUpdateName(String deviceId,String inspectionId){
+        String encoded=java.util.Base64.getUrlEncoder().withoutPadding().encodeToString(inspectionId.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        return deviceId+"__"+encoded+".safetydata";
+    }
+    static RecordUpdateName parseRecordUpdateName(String name){
+        if(name==null||!name.endsWith(".safetydata"))return null;String base=name.substring(0,name.length()-11);int split=base.indexOf("__");if(split<=0)return null;
+        try{return new RecordUpdateName(base.substring(0,split),new String(java.util.Base64.getUrlDecoder().decode(base.substring(split+2)),java.nio.charset.StandardCharsets.UTF_8));}
+        catch(IllegalArgumentException invalid){return null;}
+    }
+    private String recordUpdateStampKey(String space,String name){
+        String raw=(space==null?"":space)+"|record|"+(name==null?"":name);String token=java.util.Base64.getUrlEncoder().withoutPadding().encodeToString(raw.getBytes(java.nio.charset.StandardCharsets.UTF_8));return "cloud_record_stamp_"+token;
     }
 
     private String peerSnapshotStampKey(String space, String name) {
@@ -323,6 +449,7 @@ public final class CloudSyncService {
             }
             client.setDeviceLoggedOut(config.space, targetDeviceId, true);
             client.deleteSnapshot(config.space, targetDeviceId + ".safetydata");
+            deleteDeviceRecordUpdates(client,config.space,targetDeviceId);
             long now = System.currentTimeMillis();
             repo.raw().execSQL("UPDATE sync_devices SET role='LOGGED_OUT',updated_at=? WHERE device_id=?",
                     new Object[]{now, targetDeviceId});
@@ -382,6 +509,7 @@ public final class CloudSyncService {
             // A voluntary logout must remain reversible, so remove any stale forced-logout marker.
             client.setDeviceLoggedOut(config.space, deviceId, false);
             client.deleteSnapshot(config.space, deviceId + ".safetydata");
+            deleteDeviceRecordUpdates(client,config.space,deviceId);
             client.deleteDeviceProfile(config.space, deviceId);
             disableLocalSync(false, deviceId);
             long now = System.currentTimeMillis();
@@ -397,6 +525,8 @@ public final class CloudSyncService {
         progress(listener, "本设备已被管理员登出");
         try { client.deleteSnapshot(config.space, deviceId + ".safetydata"); }
         catch (Exception ignored) { /* marker already blocks the normal app before upload */ }
+        try { deleteDeviceRecordUpdates(client,config.space,deviceId); }
+        catch(Exception ignored) { /* logout marker still prevents future writes */ }
         long now = System.currentTimeMillis();
         repo.raw().execSQL("UPDATE sync_devices SET role='LOGGED_OUT',updated_at=? WHERE device_id=?",
                 new Object[]{now, deviceId});
@@ -435,6 +565,7 @@ public final class CloudSyncService {
             prepare(client, config);
             progress(listener, "正在读取旧设备快照…");
             List<String> snapshots = client.listSnapshots(config.space);
+            List<String> recordUpdates=client.listRecordUpdates(config.space);
             List<String> profiles = client.listDeviceProfiles(config.space);
             int deleted = 0;
             for (int i = 0; i < snapshots.size(); i++) {
@@ -442,6 +573,7 @@ public final class CloudSyncService {
                 client.deleteSnapshot(config.space, snapshots.get(i));
                 deleted++;
             }
+            for(String file:recordUpdates){client.deleteRecordUpdate(config.space,file);deleted++;}
             for (String file : profiles) {
                 String id = file.substring(0, file.length() - ".device.json".length());
                 client.deleteDeviceProfile(config.space, id);
@@ -764,6 +896,8 @@ public final class CloudSyncService {
 
     public record Result(int peerDevices, int changedRows, int skippedSnapshots,
                          String role, long completedAt, String warning) {}
+    static record RecordUpdateName(String deviceId,String inspectionId){}
+    private record IncrementalStats(int peers,int changed,int uploaded,int skipped,List<String>warnings){}
     public record DiscoveryResult(int remoteDevices, long completedAt, String role) {}
     public record DeviceRoleResult(String deviceId, String role, long completedAt) {}
     public record DeviceLogoutResult(String deviceId, long completedAt) {}

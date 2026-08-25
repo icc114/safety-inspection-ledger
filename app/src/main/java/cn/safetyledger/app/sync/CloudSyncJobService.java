@@ -34,7 +34,9 @@ public final class CloudSyncJobService extends JobService {
                 CloudSyncService service = new CloudSyncService(this);
                 if (deviceJob) service.syncDeviceManagement();
                 else if (trashJob) service.syncTrashSignals();
-                else service.syncNow();
+                else if (params.getJobId() == CloudSyncScheduler.PERIODIC_JOB_ID
+                        || !service.hasOnlyIncrementalPendingChanges()) service.syncNow();
+                else service.syncIncremental();
             } catch (OutOfMemoryError error) {
                 retry = false;
                 String message = "检查内容较大且当前系统内存不足，本次后台同步已安全停止。请稍后重试。";
@@ -46,7 +48,9 @@ public final class CloudSyncJobService extends JobService {
                 if (!message.contains("同步正在运行")) {
                     retry = true;
                     repo.putSetting(deviceJob ? "last_device_sync_error" : trashJob ? "last_trash_sync_error" : "last_sync_error", message);
-                    if (!deviceJob && !trashJob) notifyFailure(error, message);
+                    // A transient network loss is an expected queued state, not a failed Save.
+                    // Keep retrying silently and reserve notifications for data/configuration faults.
+                    if (!deviceJob && !trashJob && !SyncErrorFormatter.isNetwork(error)) notifyFailure(error, message);
                 }
             }
             jobFinished(params, retry);

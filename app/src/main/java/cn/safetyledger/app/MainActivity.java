@@ -605,7 +605,8 @@ public class MainActivity extends Activity {
         repo.saveInspection(model);
         repo.putSetting("current_draft", "");
         CloudSyncScheduler.scheduleImmediate(this);
-        Ui.toast(this, hasProblem ? "已保存，待补录整改记录；正在后台同步" : "检查记录已保存；正在后台同步");
+        Ui.toast(this, CloudSyncScheduler.localSaveMessage(this,
+                hasProblem ? "已保存到本机，待补录整改记录" : "检查记录已保存到本机"));
         startActivity(new Intent(this, RecordDetailActivity.class)
                 .putExtra("inspection_id", model.id));
         finish();

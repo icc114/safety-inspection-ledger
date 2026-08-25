@@ -22,6 +22,9 @@ public final class SafetyLedgerApp extends Application {
         c.setDescription("云同步连接或传输失败通知");
         getSystemService(NotificationManager.class).createNotificationChannel(c);
         CloudSyncScheduler.schedule(this);
+        // Re-arm the durable outbox after process restart/reboot and check small peer updates.
+        CloudSyncScheduler.scheduleSoon(this);
+        CloudSyncScheduler.schedulePeerRefresh(this);
         HolidaySyncScheduler.schedule(this);
         int year = LocalDate.now().getYear();
         HolidaySyncService.syncYearAsync(this, year, null);

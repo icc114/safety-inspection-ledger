@@ -1005,6 +1005,7 @@ public final class LedgerActivity extends Activity {
     protected void onResume() {
         super.onResume();
         CloudSyncScheduler.scheduleTrashSoon(this);
+        CloudSyncScheduler.schedulePeerRefresh(this);
         if (records != null) {
             refreshTypeFilter();
             syncCalendar();
