@@ -7,7 +7,7 @@ import java.util.*;
 
 public final class LedgerDatabase extends SQLiteOpenHelper {
     public static final String NAME = "safety_ledger_native_v1.db";
-    public static final int VERSION = 2;
+    public static final int VERSION = 3;
 
     public LedgerDatabase(Context context) { super(context, NAME, null, VERSION); setWriteAheadLoggingEnabled(true); }
 
@@ -47,6 +47,13 @@ public final class LedgerDatabase extends SQLiteOpenHelper {
             createSyncDevices(db);
             db.execSQL("INSERT INTO schema_migrations VALUES(2,?,?)",
                     new Object[]{System.currentTimeMillis(), "Add paired-device roles for snapshot sync"});
+        }
+        if(oldVersion<3){
+            // Old releases wrote every revision as 1. Promote records still waiting in the
+            // durable outbox so an already-uploaded stale snapshot cannot win after upgrade.
+            db.execSQL("UPDATE inspections SET revision=COALESCE(revision,1)+1 WHERE id IN(SELECT entity_id FROM sync_queue WHERE entity_type='inspection') OR id IN(SELECT m.inspection_id FROM media m JOIN sync_queue q ON q.entity_type='media' AND q.entity_id=m.id) OR id IN(SELECT s.inspection_id FROM signatures s JOIN sync_queue q ON q.entity_type='signature' AND q.entity_id=s.id)");
+            db.execSQL("UPDATE inspection_items SET revision=COALESCE(revision,1)+1 WHERE inspection_id IN(SELECT id FROM inspections WHERE revision>1)");
+            db.execSQL("INSERT INTO schema_migrations VALUES(3,?,?)",new Object[]{System.currentTimeMillis(),"Promote queued record revisions for rollback-safe sync"});
         }
     }
 

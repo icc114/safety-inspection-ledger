@@ -150,9 +150,9 @@ public final class BackupService{
 
     private String mergeProtection(String table,String local){
         if("inspections".equals(table))return "NOT EXISTS(SELECT 1 FROM main.sync_queue q WHERE q.entity_type='inspection' AND q.entity_id="+local+".id)";
-        if("inspection_items".equals(table))return "NOT EXISTS(SELECT 1 FROM main.sync_queue q WHERE q.entity_type='inspection' AND q.entity_id="+local+".inspection_id)";
-        if("media".equals(table))return "NOT EXISTS(SELECT 1 FROM main.sync_queue q WHERE (q.entity_type='media' AND q.entity_id="+local+".id) OR (q.entity_type='inspection' AND q.entity_id="+local+".inspection_id))";
-        if("signatures".equals(table))return "NOT EXISTS(SELECT 1 FROM main.sync_queue q WHERE (q.entity_type='signature' AND q.entity_id="+local+".id) OR (q.entity_type='inspection' AND q.entity_id="+local+".inspection_id))";
+        if("inspection_items".equals(table))return "NOT EXISTS(SELECT 1 FROM main.sync_queue q WHERE q.entity_type='inspection' AND q.entity_id="+local+".inspection_id) AND COALESCE((SELECT revision FROM incoming.inspections WHERE id="+local+".inspection_id),1)>=COALESCE((SELECT revision FROM main.inspections WHERE id="+local+".inspection_id),1)";
+        if("media".equals(table))return "NOT EXISTS(SELECT 1 FROM main.sync_queue q WHERE (q.entity_type='media' AND q.entity_id="+local+".id) OR (q.entity_type='inspection' AND q.entity_id="+local+".inspection_id)) AND COALESCE((SELECT revision FROM incoming.inspections WHERE id="+local+".inspection_id),1)>=COALESCE((SELECT revision FROM main.inspections WHERE id="+local+".inspection_id),1)";
+        if("signatures".equals(table))return "NOT EXISTS(SELECT 1 FROM main.sync_queue q WHERE (q.entity_type='signature' AND q.entity_id="+local+".id) OR (q.entity_type='inspection' AND q.entity_id="+local+".inspection_id)) AND COALESCE((SELECT revision FROM incoming.inspections WHERE id="+local+".inspection_id),1)>=COALESCE((SELECT revision FROM main.inspections WHERE id="+local+".inspection_id),1)";
         if("templates".equals(table))return "NOT EXISTS(SELECT 1 FROM main.sync_queue q WHERE q.entity_type='template' AND q.entity_id="+local+".id)";
         if("template_items".equals(table))return "NOT EXISTS(SELECT 1 FROM main.sync_queue q WHERE (q.entity_type='template_item' AND q.entity_id="+local+".id) OR (q.entity_type='template' AND q.entity_id="+local+".template_id))";
         return "1=1";
