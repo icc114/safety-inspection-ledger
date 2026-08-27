@@ -52,29 +52,23 @@ jobs:
           path: Safety-Ledger-1.2.40-debug.apk
           if-no-files-found: error
           retention-days: 30
-      - name: Package unsigned Release APK and signing tools
+      - name: Package PR Release APK
         if: github.event_name == 'pull_request'
         run: |
-          cp app/build/outputs/apk/release/app-release-unsigned.apk 'Safety-Ledger-1.2.40-release-unsigned.apk'
-          mkdir -p signing-tools/lib
-          cp "$ANDROID_HOME/build-tools/35.0.0/apksigner" signing-tools/
-          cp "$ANDROID_HOME/build-tools/35.0.0/zipalign" signing-tools/
-          cp "$ANDROID_HOME/build-tools/35.0.0/lib/apksigner.jar" signing-tools/lib/
-          chmod +x signing-tools/apksigner signing-tools/zipalign
-      - name: Upload unsigned Release APK
+          if [ -f app/build/outputs/apk/release/app-release.apk ]; then
+            cp app/build/outputs/apk/release/app-release.apk 'Safety-Ledger-1.2.40-release-test.apk'
+          elif [ -f app/build/outputs/apk/release/app-release-unsigned.apk ]; then
+            cp app/build/outputs/apk/release/app-release-unsigned.apk 'Safety-Ledger-1.2.40-release-test.apk'
+          else
+            echo "::error::未找到 Release APK"
+            exit 1
+          fi
+      - name: Upload PR Release APK
         if: github.event_name == 'pull_request'
         uses: actions/upload-artifact@v4
         with:
-          name: Safety-Ledger-1.2.40-release-unsigned
-          path: Safety-Ledger-1.2.40-release-unsigned.apk
-          if-no-files-found: error
-          retention-days: 7
-      - name: Upload signing tools
-        if: github.event_name == 'pull_request'
-        uses: actions/upload-artifact@v4
-        with:
-          name: android-build-tools-35-linux-signing
-          path: signing-tools/
+          name: Safety-Ledger-1.2.40-release-test
+          path: Safety-Ledger-1.2.40-release-test.apk
           if-no-files-found: error
           retention-days: 7
       - name: Require permanent signing for official release
@@ -82,8 +76,8 @@ jobs:
         run: |
           test -n "$SAFETY_KEYSTORE_BASE64" || { echo "::error::缺少 SAFETY_KEYSTORE_BASE64，禁止发布临时签名 APK"; exit 1; }
           test -n "$SAFETY_KEYSTORE_PASSWORD" || { echo "::error::缺少 SAFETY_KEYSTORE_PASSWORD"; exit 1; }
-          test -n "$SAFETY_KEY_ALIAS" || { echo "::error::缺少 SAFETY_KEY_ALIAS"; exit 1; }
-          test -n "$SAFETY_KEY_PASSWORD" || { echo "::error::缺少 SAFETY_KEY_PASSWORD"; exit 1; }
+          test -n "$SAFETY_KEY_ALIAS" || { echo "::error::缺少 SAFETY_KEY_ALIAS，禁止发布临时签名 APK"; exit 1; }
+          test -n "$SAFETY_KEY_PASSWORD" || { echo "::error::缺少 SAFETY_KEY_PASSWORD，禁止发布临时签名 APK"; exit 1; }
           test -f app/build/outputs/apk/release/app-release.apk || { echo "::error::未生成永久签名 Release APK"; exit 1; }
       - name: Verify and name official APK
         if: github.event_name == 'push' && github.ref == 'refs/heads/agent/v1233-final-progress-dashboard' && contains(github.event.head_commit.message, '[release v1.2.40]')
