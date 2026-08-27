@@ -9,11 +9,21 @@ import android.view.MotionEvent;
 import android.view.View;
 
 /**
- * Signature surface with restrained speed, direction and optional stylus-pressure variation.
- * The backing bitmap remains transparent; the view itself is shown on white.
+ * Finger-first signature surface.
+ *
+ * The input path is adaptively filtered so slow handwriting is steadier while fast strokes
+ * remain responsive. Stroke weight is derived from a short moving speed history, deceleration,
+ * direction and corners; real stylus pressure is only a small optional input.
+ * The backing bitmap stays transparent and ink bounds are tracked while drawing so saving does
+ * not need to scan every pixel of a full-screen signature canvas.
  */
 final class NaturalSignatureView extends View {
-    private static final float POINT_SPACING_DP = 0.45f;
+    private static final float POINT_SPACING_DP = 0.32f;
+    private static final float FILTER_ALPHA_SLOW = 0.34f;
+    private static final float FILTER_ALPHA_FAST = 0.82f;
+    private static final float SPEED_FILTER_ALPHA = 0.34f;
+    private static final float FILTER_FULL_SPEED_DP_PER_MS = 2.0f;
+    private static final float BOUNDS_SAFETY_DP = 1.5f;
 
     private final Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG | Paint.DITHER_FLAG);
     private final float density;
@@ -26,11 +36,22 @@ final class NaturalSignatureView extends View {
     private float segmentStartY;
     private float controlX;
     private float controlY;
+    private float filteredX;
+    private float filteredY;
+    private float lastRawX;
+    private float lastRawY;
     private float previousVectorX;
     private float previousVectorY;
     private float currentWidthDp = SignatureStrokeStyle.START_TIP_WIDTH_DP;
+    private float smoothedSpeedDpPerMs;
+    private float previousSpeedDpPerMs;
     private long lastEventTime;
     private boolean moved;
+
+    private float inkLeft = Float.POSITIVE_INFINITY;
+    private float inkTop = Float.POSITIVE_INFINITY;
+    private float inkRight = Float.NEGATIVE_INFINITY;
+    private float inkBottom = Float.NEGATIVE_INFINITY;
 
     NaturalSignatureView(Context context) {
         super(context);
@@ -109,57 +130,97 @@ final class NaturalSignatureView extends View {
 
     private void beginStroke(float x, float y, long eventTime) {
         ensureBitmap();
-        segmentStartX = controlX = x;
-        segmentStartY = controlY = y;
+        segmentStartX = controlX = filteredX = lastRawX = x;
+        segmentStartY = controlY = filteredY = lastRawY = y;
         previousVectorX = previousVectorY = 0f;
         currentWidthDp = SignatureStrokeStyle.START_TIP_WIDTH_DP;
+        smoothedSpeedDpPerMs = 0f;
+        previousSpeedDpPerMs = 0f;
         lastEventTime = eventTime;
         moved = false;
         empty = false;
 
+        // A very small start point prevents a square/abrupt first pixel without creating a blob.
         paint.setStyle(Paint.Style.FILL);
         inkCanvas.drawCircle(x, y, dp(currentWidthDp) / 2f, paint);
         paint.setStyle(Paint.Style.STROKE);
+        includeInk(x, y, currentWidthDp);
         invalidate();
     }
 
-    private void addPoint(float x, float y, long eventTime, float pressure, int toolType) {
-        float vectorX = x - controlX;
-        float vectorY = y - controlY;
-        float distance = (float) Math.hypot(vectorX, vectorY);
-        if (distance < dp(POINT_SPACING_DP)) return;
+    private void addPoint(float rawX, float rawY, long eventTime, float pressure, int toolType) {
+        float rawVectorX = rawX - lastRawX;
+        float rawVectorY = rawY - lastRawY;
+        float rawDistance = (float) Math.hypot(rawVectorX, rawVectorY);
+        if (rawDistance < dp(POINT_SPACING_DP)) return;
 
         long elapsed = Math.max(1L, eventTime - lastEventTime);
-        float speedDpPerMs = distance / density / elapsed;
+        float instantSpeed = rawDistance / density / elapsed;
+        if (!moved) {
+            smoothedSpeedDpPerMs = instantSpeed;
+            previousSpeedDpPerMs = instantSpeed;
+        } else {
+            smoothedSpeedDpPerMs = previousSpeedDpPerMs * (1f - SPEED_FILTER_ALPHA)
+                    + instantSpeed * SPEED_FILTER_ALPHA;
+        }
+
+        // Adaptive coordinate filtering: more smoothing while writing slowly, less lag on flicks.
+        float speedFactor = clamp(smoothedSpeedDpPerMs / FILTER_FULL_SPEED_DP_PER_MS, 0f, 1f);
+        float alpha = FILTER_ALPHA_SLOW
+                + (FILTER_ALPHA_FAST - FILTER_ALPHA_SLOW) * speedFactor;
+        float nextFilteredX = filteredX + (rawX - filteredX) * alpha;
+        float nextFilteredY = filteredY + (rawY - filteredY) * alpha;
+
+        float vectorX = nextFilteredX - controlX;
+        float vectorY = nextFilteredY - controlY;
+        float distance = (float) Math.hypot(vectorX, vectorY);
+        lastRawX = rawX;
+        lastRawY = rawY;
+        lastEventTime = eventTime;
+        if (distance < dp(0.08f)) {
+            filteredX = nextFilteredX;
+            filteredY = nextFilteredY;
+            previousSpeedDpPerMs = smoothedSpeedDpPerMs;
+            return;
+        }
+
         float turn = turnFactor(previousVectorX, previousVectorY, vectorX, vectorY);
+        float deceleration = moved
+                ? clamp((previousSpeedDpPerMs - smoothedSpeedDpPerMs) / 0.85f, 0f, 1f)
+                : 0f;
         boolean stylus = toolType == MotionEvent.TOOL_TYPE_STYLUS
                 || toolType == MotionEvent.TOOL_TYPE_ERASER;
         float downStrokeFactor = Math.max(0f, vectorY) / Math.max(0.001f, distance);
         float targetWidth = SignatureStrokeStyle.widthDp(
-                speedDpPerMs, turn, downStrokeFactor, stylus, pressure);
+                smoothedSpeedDpPerMs, turn, downStrokeFactor, deceleration, stylus, pressure);
         float newWidth = SignatureStrokeStyle.smoothWidthDp(currentWidthDp, targetWidth);
 
-        float endX = (controlX + x) / 2f;
-        float endY = (controlY + y) / 2f;
+        float endX = (controlX + nextFilteredX) / 2f;
+        float endY = (controlY + nextFilteredY) / 2f;
         drawQuadratic(segmentStartX, segmentStartY, controlX, controlY, endX, endY,
                 currentWidthDp, newWidth);
 
         segmentStartX = endX;
         segmentStartY = endY;
-        controlX = x;
-        controlY = y;
+        controlX = nextFilteredX;
+        controlY = nextFilteredY;
+        filteredX = nextFilteredX;
+        filteredY = nextFilteredY;
         previousVectorX = vectorX;
         previousVectorY = vectorY;
         currentWidthDp = newWidth;
-        lastEventTime = eventTime;
+        previousSpeedDpPerMs = smoothedSpeedDpPerMs;
         moved = true;
         invalidate();
     }
 
-    private void finishStroke(float x, float y) {
+    private void finishStroke(float rawX, float rawY) {
         if (!moved || inkCanvas == null) return;
+        // Keep the final point close to the filtered path so ACTION_UP cannot create a last-pixel hook.
+        float finalX = filteredX + (rawX - filteredX) * 0.35f;
+        float finalY = filteredY + (rawY - filteredY) * 0.35f;
         float tailWidth = SignatureStrokeStyle.tailWidthDp(currentWidthDp);
-        drawQuadratic(segmentStartX, segmentStartY, controlX, controlY, x, y,
+        drawQuadratic(segmentStartX, segmentStartY, controlX, controlY, finalX, finalY,
                 currentWidthDp, tailWidth);
         invalidate();
     }
@@ -169,7 +230,7 @@ final class NaturalSignatureView extends View {
                                float startWidthDp, float endWidthDp) {
         float length = (float) (Math.hypot(controlPointX - startX, controlPointY - startY)
                 + Math.hypot(endX - controlPointX, endY - controlPointY));
-        int steps = Math.max(1, (int) Math.ceil(length / dp(1.25f)));
+        int steps = Math.max(1, (int) Math.ceil(length / dp(0.95f)));
         float previousX = startX;
         float previousY = startY;
         for (int i = 1; i <= steps; i++) {
@@ -179,8 +240,11 @@ final class NaturalSignatureView extends View {
                     + 2f * inverse * t * controlPointX + t * t * endX;
             float pointY = inverse * inverse * startY
                     + 2f * inverse * t * controlPointY + t * t * endY;
-            paint.setStrokeWidth(dp(startWidthDp + (endWidthDp - startWidthDp) * t));
+            float widthDp = startWidthDp + (endWidthDp - startWidthDp) * t;
+            paint.setStrokeWidth(dp(widthDp));
             inkCanvas.drawLine(previousX, previousY, pointX, pointY, paint);
+            includeInk(previousX, previousY, widthDp);
+            includeInk(pointX, pointY, widthDp);
             previousX = pointX;
             previousY = pointY;
         }
@@ -202,35 +266,39 @@ final class NaturalSignatureView extends View {
     void clear() {
         if (inkBitmap != null) inkBitmap.eraseColor(Color.TRANSPARENT);
         empty = true;
+        resetInkBounds();
         invalidate();
     }
 
     Bitmap getTransparentSignatureBitmap(boolean trimBlankSpace) {
         if (empty || inkBitmap == null) return null;
         if (!trimBlankSpace) return inkBitmap.copy(Bitmap.Config.ARGB_8888, false);
+        if (!hasInkBounds()) return null;
 
-        int width = inkBitmap.getWidth();
-        int height = inkBitmap.getHeight();
-        int[] pixels = new int[width * height];
-        inkBitmap.getPixels(pixels, 0, width, 0, 0, width, height);
-        int left = width;
-        int top = height;
-        int right = -1;
-        int bottom = -1;
-        for (int y = 0; y < height; y++) {
-            int row = y * width;
-            for (int x = 0; x < width; x++) {
-                if ((pixels[row + x] >>> 24) != 0) {
-                    left = Math.min(left, x);
-                    top = Math.min(top, y);
-                    right = Math.max(right, x);
-                    bottom = Math.max(bottom, y);
-                }
-            }
-        }
-        if (right < left || bottom < top) return null;
-        return Bitmap.createBitmap(inkBitmap, left, top,
-                right - left + 1, bottom - top + 1);
+        int left = clampInt((int) Math.floor(inkLeft), 0, inkBitmap.getWidth() - 1);
+        int top = clampInt((int) Math.floor(inkTop), 0, inkBitmap.getHeight() - 1);
+        int right = clampInt((int) Math.ceil(inkRight), left + 1, inkBitmap.getWidth());
+        int bottom = clampInt((int) Math.ceil(inkBottom), top + 1, inkBitmap.getHeight());
+        return Bitmap.createBitmap(inkBitmap, left, top, right - left, bottom - top);
+    }
+
+    private void includeInk(float x, float y, float widthDp) {
+        float radius = dp(widthDp) / 2f + dp(BOUNDS_SAFETY_DP);
+        inkLeft = Math.min(inkLeft, x - radius);
+        inkTop = Math.min(inkTop, y - radius);
+        inkRight = Math.max(inkRight, x + radius);
+        inkBottom = Math.max(inkBottom, y + radius);
+    }
+
+    private boolean hasInkBounds() {
+        return inkLeft <= inkRight && inkTop <= inkBottom;
+    }
+
+    private void resetInkBounds() {
+        inkLeft = Float.POSITIVE_INFINITY;
+        inkTop = Float.POSITIVE_INFINITY;
+        inkRight = Float.NEGATIVE_INFINITY;
+        inkBottom = Float.NEGATIVE_INFINITY;
     }
 
     private void ensureBitmap() {
@@ -242,5 +310,13 @@ final class NaturalSignatureView extends View {
 
     private float dp(float value) {
         return value * density;
+    }
+
+    private static float clamp(float value, float min, float max) {
+        return Math.max(min, Math.min(max, value));
+    }
+
+    private static int clampInt(int value, int min, int max) {
+        return Math.max(min, Math.min(max, value));
     }
 }
