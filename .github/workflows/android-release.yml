@@ -55,10 +55,10 @@ jobs:
           distribution: temurin
           java-version: '17'
           cache: gradle
-      - name: Set up Android SDK
-        uses: android-actions/setup-android@v3
       - name: Install Android SDK 35
-        run: sdkmanager 'platform-tools' 'platforms;android-35' 'build-tools;35.0.0'
+        run: |
+          echo "ANDROID_HOME=$ANDROID_HOME"
+          sdkmanager --install 'platform-tools' 'platforms;android-35' 'build-tools;35.0.0'
       - name: Grant Gradle permission
         run: chmod +x gradlew
       - name: Test, lint and build stable release APK
