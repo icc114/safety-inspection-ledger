@@ -46,6 +46,23 @@ public final class LedgerRepository {
         }finally{d.endTransaction();}
         CloudSyncScheduler.scheduleSoon(context);
     }
+    /** Reopens a published record without replacing its UUID, item snapshot or media. */
+    public boolean withdrawInspection(String id){
+        if(id==null||id.isBlank())return false;
+        long now=System.currentTimeMillis();SQLiteDatabase d=raw();d.beginTransaction();
+        boolean changed=false;
+        try{
+            changed=d.update("inspections",LedgerDatabase.values("status","DRAFT","updated_at",now),
+                    "id=? AND deleted_at IS NULL AND status<>?",new String[]{id,"DRAFT"})==1;
+            if(changed){
+                d.execSQL("UPDATE inspections SET revision=COALESCE(revision,1)+1 WHERE id=?",new Object[]{id});
+                queueRow(d,"inspection",id,"UPSERT",now);
+            }
+            d.setTransactionSuccessful();
+        }finally{d.endTransaction();}
+        if(changed)CloudSyncScheduler.scheduleSoon(context);
+        return changed;
+    }
     private ContentValues inspectionValues(Inspection x,boolean create){ContentValues v=LedgerDatabase.values("template_id",x.templateId,"template_name",x.templateName,"inspection_date",x.date,"inspection_time",x.time,"inspection_type",x.type,"unit_name",x.unit,"location",x.location,"on_duty",x.onDuty,"inspector1",x.inspector1,"inspector2",x.inspector2,"inspectee",x.inspectee,"conclusion",x.conclusion,"rectification_advice",x.advice,"responsible_person",x.responsible,"deadline",x.deadline,"rectification_detail",x.rectification,"recheck_result",x.recheck,"status",x.status,"updated_at",x.updatedAt);if(x.deviceId!=null&&!x.deviceId.isBlank())v.put("device_id",x.deviceId);if(create){v.put("id",x.id);v.put("created_at",x.createdAt);v.put("revision",1);}return v;}
     private ContentValues itemValues(InspectionItem x,boolean create){long n=System.currentTimeMillis();ContentValues v=LedgerDatabase.values("inspection_id",x.inspectionId,"template_item_id",x.templateItemId,"category",x.category,"content",x.content,"standard",x.standard,"result",x.result,"problem",x.problem,"sort_order",x.order,"updated_at",n);if(create){v.put("id",x.id);v.put("created_at",n);v.put("revision",1);}return v;}
     public Inspection inspection(String id){Inspection x=null;try(Cursor c=raw().query("inspections",null,"id=?",new String[]{id},null,null,null)){if(c.moveToFirst())x=readInspection(c);}if(x==null)return null;try(Cursor c=raw().query("inspection_items",null,"inspection_id=? AND deleted_at IS NULL",new String[]{id},null,null,"sort_order")){while(c.moveToNext())x.items.add(readItem(c));}x.media.addAll(media(id));return x;}

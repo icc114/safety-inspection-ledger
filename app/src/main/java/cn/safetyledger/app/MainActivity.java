@@ -42,6 +42,8 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 
 public class MainActivity extends Activity {
     private static final int CAMERA = 501;
@@ -66,6 +68,8 @@ public class MainActivity extends Activity {
     private Uri cameraUri;
     private String pendingCategory = "SCENE";
     private String pendingItemId;
+    private final ExecutorService photoWorker = Executors.newSingleThreadExecutor();
+    private int pendingPhotos;
 
     @Override
     protected void onCreate(Bundle state) {
@@ -186,9 +190,21 @@ public class MainActivity extends Activity {
     }
 
     private void switchTemplate(Template template) {
+        if (pendingPhotos > 0) {
+            Ui.toast(this, "请等待照片保存完成后再切换模板");
+            restoreTemplateSelection();
+            return;
+        }
         Runnable replace = () -> {
-            new MediaService(this).deleteInspectionMedia(model.id);
-            repo.discardDraft(model.id);
+            // A withdrawn published record is also a DRAFT. Never destroy it when
+            // the operator selects another template; keep filled drafts in the ledger.
+            if (hasDraftInput()) {
+                syncFields();
+                repo.saveInspection(model);
+            } else {
+                new MediaService(this).deleteInspectionMedia(model.id);
+                repo.discardDraft(model.id);
+            }
             model = repo.newInspection(template.id);
             repo.putSetting("current_draft", model.id);
             render();
@@ -196,7 +212,7 @@ public class MainActivity extends Activity {
         if (hasDraftInput()) {
             new AlertDialog.Builder(this)
                     .setTitle("切换检查模板")
-                    .setMessage("切换会放弃当前尚未保存的勾选、问题、照片和签名。是否继续？")
+                    .setMessage("当前记录会作为草稿保留在台账列表中，照片和签名不会删除。继续新建所选模板的记录？")
                     .setPositiveButton("继续切换", (dialog, which) -> replace.run())
                     .setNegativeButton("取消", (dialog, which) -> restoreTemplateSelection())
                     .setOnCancelListener(dialog -> restoreTemplateSelection())
@@ -460,7 +476,6 @@ public class MainActivity extends Activity {
         if (result != RESULT_OK) return;
         if (request == CAMERA && cameraUri != null) {
             importPhoto(cameraUri, true);
-            getContentResolver().delete(cameraUri, null, null);
         } else if (request == GALLERY && data != null) {
             if (data.getClipData() != null) {
                 for (int i = 0; i < data.getClipData().getItemCount(); i++) {
@@ -499,15 +514,42 @@ public class MainActivity extends Activity {
 
     private void importPhoto(Uri uri, boolean capturedNow) {
         syncFields();
-        try {
-            Media media = new MediaService(this).importAndWatermark(uri, model.id, pendingItemId,
-                    pendingCategory, model.location, capturedNow ? lastLocation() : null, capturedNow);
-            repo.addMedia(media);
-            renderMedia();
-            CloudSyncScheduler.scheduleImmediate(this);
-        } catch (Exception error) {
-            Ui.toast(this, "照片处理失败：" + error.getMessage());
-        }
+        String inspectionId = model.id;
+        String itemId = pendingItemId;
+        String category = pendingCategory;
+        String place = model.location;
+        Location location = capturedNow ? lastLocation() : null;
+        pendingPhotos++;
+        Ui.toast(this, "正在保存照片…");
+        photoWorker.execute(() -> {
+            try {
+                Media media = new MediaService(this).importAndWatermark(uri, inspectionId,
+                        itemId, category, place, location, capturedNow);
+                repo.addMedia(media);
+                CloudSyncScheduler.scheduleImmediate(this);
+                runOnUiThread(() -> {
+                    if (!isDestroyed()) {
+                        pendingPhotos--;
+                        renderMedia();
+                        Ui.toast(this, "照片已保存，可点击放大查看");
+                    }
+                });
+            } catch (Exception error) {
+                runOnUiThread(() -> {
+                    if (!isDestroyed()) {
+                        pendingPhotos--;
+                        Ui.toast(this, "照片处理失败：" + error.getMessage());
+                    }
+                });
+            } finally {
+                if (capturedNow) getContentResolver().delete(uri, null, null);
+            }
+        });
+    }
+
+    @Override protected void onDestroy() {
+        photoWorker.shutdown();
+        super.onDestroy();
     }
 
     private void renderMedia() {

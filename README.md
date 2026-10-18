@@ -1,6 +1,8 @@
 # 安全检查台账 Android
 
-真正独立的 Android 原生离线优先应用。包名 `cn.safetyledger.app`，当前版本 `1.2.5`（versionCode 8），最低 Android 8.0（API 26）。工程由新的 Java 17 / Android SDK 源码编译，不包含 WebView、旧 APK、DEX、旧 Manifest、旧数据库或旧软件代码。
+真正独立的 Android 原生离线优先应用。包名 `cn.safetyledger.app`，当前开发版本 `1.2.41`（versionCode 44），最低 Android 8.0（API 26）。工程由 Java 17 / Android SDK 源码编译，不包含 WebView 或旧 APK/DEX 模板。
+
+1.2.41 新增记录详情页“撤回并修改检查记录”：已发布记录经确认转为草稿，沿用原 UUID 和模板项目快照，照片、签名、整改内容保留；再次保存后重新发布，有问题的项目需重新确认整改状态。切换模板时有内容的草稿会保留，不会误删撤回记录。照片导入先把选中的 URI 一次性复制到 APP 私有目录，再从本地原图读取 EXIF 并采样解码；地理位置解析设置等待上限，处理在后台串行执行，避免带 GPS 的大照片卡住填报页。由于目前没有覆盖所有厂商相册/HEIC 格式的真机矩阵测试，仍可能存在机型特定的照片格式问题。
 
 ## 当前已完成
 
@@ -37,7 +39,7 @@
 - 云端缺失媒体/归档 PDF 的自动回下载。目前导出会检测本地缺失并明确停止，不会静默输出不完整 PDF。
 - “完成且已云端验证超过 180 天”自动生成归档 PDF、释放手机空间和手动“释放本机空间”界面。schema 已含 `archive_index`，在实际 provider 可验证远端文件前保持关闭。
 - 从国务院网站自动抓取并校验新的节假日公告。当前 v1 仅内置 2026 年正式公告缓存，其他年份不会预测。
-- Windows 原生客户端及类似微信的电脑端后台接收目录。本仓库当前只交付 Android；UUID、版本、设备角色、`.safetydata` 和同步 envelope 已按 Windows 兼容方向设计，`.safetydata` 可先手动复制到电脑保存。
+- Windows 客户端已在 `desktop/` 开始开发，但与 Android 全功能对等、长期后台接收和设备矩阵验证尚未完成；跨端数据仍需持续兼容性测试。
 - 真机 Camera/定位/系统文件选择器的设备矩阵测试及 UI 自动化测试；当前已通过 Java 单元测试、Android Lint 和本机 Gradle 构建。
 - Android 系统照片选择器可能因系统隐私策略移除相册照片的 GPS EXIF；这种情况下保留原始照片和水印接口，但不显示虚假位置。APP 直接调用相机拍摄时可用本机定位作为 EXIF 缺失时的拍摄位置后备。
 
@@ -53,7 +55,7 @@
 ./gradlew testDebugUnitTest lintDebug assembleDebug
 ```
 
-输出：`app/build/outputs/apk/debug/app-debug.apk`。CI artifact 名称为 `安全检查台账-1.2.5.apk`。
+输出：`app/build/outputs/apk/debug/app-debug.apk`。CI 测试 artifact 名称为 `安全检查台账-1.2.41-debug.apk`。Debug 签名 APK 不能覆盖安装使用其他签名的旧版；用于保留数据的正式升级需同一永久签名密钥生成的 Release APK。
 
 ## 官方节假日来源
 

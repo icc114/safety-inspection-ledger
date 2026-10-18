@@ -2,6 +2,7 @@ package cn.safetyledger.app;
 
 import android.Manifest;
 import android.app.Activity;
+import android.app.AlertDialog;
 import android.content.ContentValues;
 import android.content.Intent;
 import android.content.pm.PackageManager;
@@ -32,6 +33,8 @@ import cn.safetyledger.app.media.MediaService;
 import cn.safetyledger.app.sync.CloudSyncScheduler;
 
 import java.util.List;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 
 public final class RecordDetailActivity extends Activity {
     private static final int PICK = 610;
@@ -48,6 +51,7 @@ public final class RecordDetailActivity extends Activity {
     private CheckBox confirmed;
     private Uri cameraUri;
     private String pendingCategory = "RECTIFICATION";
+    private final ExecutorService photoWorker = Executors.newSingleThreadExecutor();
 
     @Override
     protected void onCreate(Bundle state) {
@@ -82,6 +86,12 @@ public final class RecordDetailActivity extends Activity {
             content.addView(rectificationCard());
         }
         content.addView(Ui.gap(this, 14));
+        if (!"DRAFT".equals(model.status)) {
+            Button withdraw = Ui.secondaryButton(this, "撤回并修改检查记录");
+            withdraw.setOnClickListener(view -> confirmWithdraw());
+            content.addView(withdraw);
+            content.addView(Ui.gap(this, 8));
+        }
         Button delete = Ui.secondaryButton(this, "移入回收站");
         delete.setTextColor(Ui.DANGER);
         delete.setOnClickListener(view -> {
@@ -94,6 +104,25 @@ public final class RecordDetailActivity extends Activity {
         root.addView(content);
         scroll.addView(root);
         setContentView(scroll);
+    }
+
+    private void confirmWithdraw() {
+        new AlertDialog.Builder(this)
+                .setTitle("撤回已发布记录")
+                .setMessage("撤回后，这条记录会变为草稿，可重新修改检查日期、地点、结果和问题。原照片、签名及整改资料会保留；再次保存后重新发布。如果修改了问题，整改状态需要重新确认。")
+                .setNegativeButton("取消", null)
+                .setPositiveButton("撤回并编辑", (dialog, which) -> {
+                    if (!repo.withdrawInspection(model.id)) {
+                        Ui.toast(this, "撤回失败，记录可能已被其他设备更新");
+                        render();
+                        return;
+                    }
+                    repo.putSetting("current_draft", model.id);
+                    CloudSyncScheduler.scheduleImmediate(this);
+                    startActivity(new Intent(this, MainActivity.class)
+                            .putExtra("inspection_id", model.id));
+                    finish();
+                }).show();
     }
 
     private LinearLayout topBar() {
@@ -339,7 +368,6 @@ public final class RecordDetailActivity extends Activity {
                 }
             } else if (request == CAMERA && cameraUri != null) {
                 importPhoto(cameraUri, true);
-                getContentResolver().delete(cameraUri, null, null);
             } else if (request == SIGN) {
                 showSignatures();
                 CloudSyncScheduler.scheduleImmediate(this);
@@ -362,12 +390,37 @@ public final class RecordDetailActivity extends Activity {
         return best;
     }
 
-    private void importPhoto(Uri uri, boolean capturedNow) throws Exception {
-        Media media = new MediaService(this).importAndWatermark(uri, model.id, null,
-                pendingCategory, model.location, capturedNow ? lastLocation() : null, capturedNow);
-        repo.addMedia(media);
-        showMedia();
-        CloudSyncScheduler.scheduleImmediate(this);
+    private void importPhoto(Uri uri, boolean capturedNow) {
+        String inspectionId = model.id;
+        String category = pendingCategory;
+        String place = model.location;
+        Location location = capturedNow ? lastLocation() : null;
+        Ui.toast(this, "正在保存照片…");
+        photoWorker.execute(() -> {
+            try {
+                Media media = new MediaService(this).importAndWatermark(uri, inspectionId,
+                        null, category, place, location, capturedNow);
+                repo.addMedia(media);
+                CloudSyncScheduler.scheduleImmediate(this);
+                runOnUiThread(() -> {
+                    if (!isDestroyed()) {
+                        showMedia();
+                        Ui.toast(this, "照片已保存，可点击放大查看");
+                    }
+                });
+            } catch (Exception error) {
+                runOnUiThread(() -> {
+                    if (!isDestroyed()) Ui.toast(this, "照片处理失败：" + error.getMessage());
+                });
+            } finally {
+                if (capturedNow) getContentResolver().delete(uri, null, null);
+            }
+        });
+    }
+
+    @Override protected void onDestroy() {
+        photoWorker.shutdown();
+        super.onDestroy();
     }
 
     private void showMedia() {

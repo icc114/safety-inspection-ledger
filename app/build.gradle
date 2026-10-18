@@ -14,8 +14,8 @@ android {
         applicationId 'cn.safetyledger.app'
         minSdk 26
         targetSdk 35
-        versionCode 43
-        versionName '1.2.40'
+        versionCode 44
+        versionName '1.2.41'
         testInstrumentationRunner 'android.app.InstrumentationTestRunner'
     }
 

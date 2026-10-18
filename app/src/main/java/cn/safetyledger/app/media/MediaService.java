@@ -32,9 +32,14 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
 import java.util.UUID;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
 
 /** Keeps the untouched source and creates a business JPEG from available EXIF metadata. */
 public final class MediaService {
+    private static final ExecutorService GEOCODER = Executors.newSingleThreadExecutor();
     private static final DateTimeFormatter EXIF_TIME =
             DateTimeFormatter.ofPattern("yyyy:MM:dd HH:mm:ss", Locale.US);
     private static final DateTimeFormatter WATERMARK_TIME =
@@ -57,7 +62,28 @@ public final class MediaService {
                                     String category, String inspectionPlace,
                                     Location capturedLocation, boolean capturedNow)
             throws IOException {
-        PhotoMetadata metadata = readMetadata(source);
+        String id = UUID.randomUUID().toString();
+        File directory = mediaDir(inspectionId);
+        File originalFile = new File(directory, id + "-original.bin");
+        File output = new File(directory, id + ".jpg");
+        // A picker URI is not guaranteed to be repeatable. Persist it once, then
+        // read EXIF and pixels from the same stable local copy.
+        try {
+            copySource(source, originalFile);
+            return createBusinessPhoto(originalFile, output, id, inspectionId, itemId,
+                    category, capturedLocation, capturedNow);
+        } catch (IOException | RuntimeException | OutOfMemoryError error) {
+            originalFile.delete();
+            output.delete();
+            if (error instanceof IOException) throw (IOException) error;
+            throw new IOException("照片处理失败，请尝试原图或其他格式", error);
+        }
+    }
+
+    private Media createBusinessPhoto(File originalFile, File output, String id,
+                                      String inspectionId, String itemId, String category,
+                                      Location capturedLocation, boolean capturedNow) throws IOException {
+        PhotoMetadata metadata = readMetadata(originalFile);
         Long capturedAt = metadata.capturedAt;
         if (capturedAt == null && capturedNow) capturedAt = System.currentTimeMillis();
         Double latitude = metadata.latitude;
@@ -67,16 +93,17 @@ public final class MediaService {
             longitude = capturedLocation.getLongitude();
         }
 
-        String id = UUID.randomUUID().toString();
-        File directory = mediaDir(inspectionId);
-        File originalFile = new File(directory, id + "-original.bin");
-        copySource(source, originalFile);
-
-        Bitmap decoded = decodeSampled(source, 2400);
+        Bitmap decoded = decodeSampled(originalFile, 1800);
         if (decoded == null) throw new IOException("无法读取照片");
-        Bitmap oriented = orient(decoded, metadata.orientation);
+        Bitmap oriented;
+        try {
+            oriented = orient(decoded, metadata.orientation);
+        } catch (RuntimeException error) {
+            decoded.recycle();
+            throw error;
+        }
         if (oriented != decoded) decoded.recycle();
-        int maximum = 2400;
+        int maximum = 1800;
         float scale = Math.min(1f, maximum
                 / (float) Math.max(oriented.getWidth(), oriented.getHeight()));
         Bitmap resized = scale < 1f
@@ -86,23 +113,20 @@ public final class MediaService {
         if (resized != oriented) oriented.recycle();
         Bitmap business = resized.copy(Bitmap.Config.ARGB_8888, true);
         resized.recycle();
+        if (business == null) throw new IOException("照片内存不足");
 
-        List<String> lines = new ArrayList<>();
-        if (capturedAt != null) {
-            lines.add("拍摄时间：" + Instant.ofEpochMilli(capturedAt)
-                    .atZone(ZoneId.systemDefault()).toLocalDateTime().format(WATERMARK_TIME));
-        }
         String locationText = "";
-        if (latitude != null && longitude != null) {
-            locationText = reverseGeocode(latitude, longitude);
-            if (!locationText.isBlank()) lines.add("拍摄地点：" + locationText);
-        }
-        // Do not invent a watermark from the inspection form. If EXIF/fresh-camera
-        // metadata is unavailable, the business JPEG remains visually unchanged.
-        if (!lines.isEmpty()) drawWatermark(business, lines);
-
-        File output = new File(directory, id + ".jpg");
         try (OutputStream stream = new FileOutputStream(output)) {
+            List<String> lines = new ArrayList<>();
+            if (capturedAt != null) {
+                lines.add("拍摄时间：" + Instant.ofEpochMilli(capturedAt)
+                        .atZone(ZoneId.systemDefault()).toLocalDateTime().format(WATERMARK_TIME));
+            }
+            if (latitude != null && longitude != null) {
+                locationText = reverseGeocodeWithin(latitude, longitude);
+                if (!locationText.isBlank()) lines.add("拍摄地点：" + locationText);
+            }
+            if (!lines.isEmpty()) drawWatermark(business, lines);
             if (!business.compress(Bitmap.CompressFormat.JPEG, 92, stream)) {
                 throw new IOException("照片压缩失败");
             }
@@ -142,20 +166,16 @@ public final class MediaService {
      * Modern phone photos can exceed 40 MP; decoding them at full resolution can
      * exhaust the app heap before the later resize has a chance to run.
      */
-    private Bitmap decodeSampled(Uri source, int maximum) throws IOException {
+    private Bitmap decodeSampled(File source, int maximum) throws IOException {
         BitmapFactory.Options bounds = new BitmapFactory.Options();
         bounds.inJustDecodeBounds = true;
-        try (InputStream input = context.getContentResolver().openInputStream(source)) {
-            if (input == null) throw new IOException("原始照片读取失败");
-            BitmapFactory.decodeStream(input, null, bounds);
-        }
+        BitmapFactory.decodeFile(source.getAbsolutePath(), bounds);
+        if (bounds.outWidth <= 0 || bounds.outHeight <= 0)
+            throw new IOException("照片格式不受本机支持");
         BitmapFactory.Options options = new BitmapFactory.Options();
         options.inSampleSize = sampleSize(bounds.outWidth, bounds.outHeight, maximum);
         options.inPreferredConfig = Bitmap.Config.ARGB_8888;
-        try (InputStream input = context.getContentResolver().openInputStream(source)) {
-            if (input == null) throw new IOException("原始照片读取失败");
-            return BitmapFactory.decodeStream(input, null, options);
-        }
+        return BitmapFactory.decodeFile(source.getAbsolutePath(), options);
     }
 
     /** Decodes a small file thumbnail without loading the full business image. */
@@ -177,11 +197,10 @@ public final class MediaService {
         return sample;
     }
 
-    private PhotoMetadata readMetadata(Uri source) {
+    private PhotoMetadata readMetadata(File source) {
         PhotoMetadata metadata = new PhotoMetadata();
-        try (InputStream input = context.getContentResolver().openInputStream(source)) {
-            if (input == null) return metadata;
-            ExifInterface exif = new ExifInterface(input);
+        try {
+            ExifInterface exif = new ExifInterface(source.getAbsolutePath());
             metadata.orientation = exif.getAttributeInt(ExifInterface.TAG_ORIENTATION,
                     ExifInterface.ORIENTATION_NORMAL);
             String time = exif.getAttribute(ExifInterface.TAG_DATETIME_ORIGINAL);
@@ -241,6 +260,17 @@ public final class MediaService {
             return value.toString();
         } catch (Exception ignored) {
             // If GPS cannot be converted to a readable place name, omit location watermark.
+            return "";
+        }
+    }
+
+    private String reverseGeocodeWithin(double latitude, double longitude) {
+        Future<String> pending = GEOCODER.submit(() -> reverseGeocode(latitude, longitude));
+        try {
+            return pending.get(2500, TimeUnit.MILLISECONDS);
+        } catch (Exception error) {
+            pending.cancel(true);
+            // A missing/offline geocoder must never prevent a GPS photo from importing.
             return "";
         }
     }
