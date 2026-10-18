@@ -35,8 +35,9 @@ jobs:
           cache: gradle
       - name: Install Android SDK 35
         run: |
-          echo "ANDROID_HOME=$ANDROID_HOME"
-          sdkmanager --install 'platform-tools' 'platforms;android-35' 'build-tools;35.0.0'
+          SDKMANAGER=$(find "$ANDROID_HOME/cmdline-tools" -type f -name sdkmanager | head -n 1)
+          test -n "$SDKMANAGER" || { echo "::error::Android sdkmanager not found"; exit 1; }
+          "$SDKMANAGER" --install 'platform-tools' 'platforms;android-35' 'build-tools;35.0.0'
       - name: Restore permanent release keystore
         if: env.SAFETY_KEYSTORE_BASE64 != ''
         run: |
