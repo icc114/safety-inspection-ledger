@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - 'agent/v1233-final-progress-dashboard'
+      - 'codex/withdraw-photo-fix'
     paths:
       - 'app/**'
       - 'gradle/**'
@@ -68,11 +69,11 @@ jobs:
           NORMALIZED=$(echo "$EXPECTED_CERT_SHA256" | tr -d ':' | tr '[:upper:]' '[:lower:]')
           grep -F "Signer #1 certificate SHA-256 digest: $NORMALIZED" "$RUNNER_TEMP/apk-cert.txt" >/dev/null || (echo 'Built APK certificate mismatch' && exit 1)
       - name: Name stable APK
-        run: cp app/build/outputs/apk/release/app-release.apk 'Safety-Ledger-v1.2.39-permanent-signed.apk'
+        run: cp app/build/outputs/apk/release/app-release.apk '安全检查台账-1.2.41.apk'
       - name: Upload stable signed APK
         uses: actions/upload-artifact@v4
         with:
-          name: Safety-Ledger-v1.2.39-permanent-signed
-          path: Safety-Ledger-v1.2.39-permanent-signed.apk
+          name: 安全检查台账-1.2.41-正式签名版
+          path: 安全检查台账-1.2.41.apk
           if-no-files-found: error
           retention-days: 30

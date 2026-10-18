@@ -413,7 +413,10 @@ public final class RecordDetailActivity extends Activity {
                     if (!isDestroyed()) Ui.toast(this, "照片处理失败：" + error.getMessage());
                 });
             } finally {
-                if (capturedNow) getContentResolver().delete(uri, null, null);
+                if (capturedNow) {
+                    try { getContentResolver().delete(uri, null, null); }
+                    catch (RuntimeException ignored) { /* The private copy is already safe. */ }
+                }
             }
         });
     }
