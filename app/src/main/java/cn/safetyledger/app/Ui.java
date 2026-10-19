@@ -2,9 +2,11 @@ package cn.safetyledger.app;
 
 import android.animation.ObjectAnimator;
 import android.animation.StateListAnimator;
+import android.Manifest;
 import android.app.Activity;
 import android.content.Context;
 import android.content.Intent;
+import android.content.pm.PackageManager;
 import android.graphics.Color;
 import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
@@ -295,12 +297,20 @@ public static void applyFunctionalDepth(Context context, View view) {
         if (Build.VERSION.SDK_INT >= 33) {
             return new Intent(MediaStore.ACTION_PICK_IMAGES)
                     .setType("image/*")
+                    // Newer photo pickers hide GPS EXIF unless the operator explicitly
+                    // agrees to share it. Older pickers safely ignore this extra.
+                    .putExtra("android.provider.extra.REQUEST_LOCATION_METADATA_ACCESS", true)
                     .putExtra(MediaStore.EXTRA_PICK_IMAGES_MAX,
                             Math.min(50, MediaStore.getPickImagesMaxLimit()));
         }
         return new Intent(Intent.ACTION_PICK, MediaStore.Images.Media.EXTERNAL_CONTENT_URI)
                 .setType("image/*")
                 .putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true);
+    }
+
+    public static boolean hasPhotoLocationPermission(Activity activity) {
+        return Build.VERSION.SDK_INT < 29 || activity.checkSelfPermission(
+                Manifest.permission.ACCESS_MEDIA_LOCATION) == PackageManager.PERMISSION_GRANTED;
     }
 
     public static void previewPhoto(Activity activity, String path) {

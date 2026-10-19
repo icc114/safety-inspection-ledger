@@ -41,6 +41,7 @@ public final class RecordDetailActivity extends Activity {
     private static final int CAMERA = 612;
     private static final int PERMISSION = 613;
     private static final int SIGN = 614;
+    private static final int PHOTO_LOCATION_PERMISSION = 615;
 
     private LedgerRepository repo;
     private Inspection model;
@@ -320,6 +321,11 @@ public final class RecordDetailActivity extends Activity {
 
     private void pick(String category) {
         pendingCategory = category;
+        if (!Ui.hasPhotoLocationPermission(this)) {
+            requestPermissions(new String[]{Manifest.permission.ACCESS_MEDIA_LOCATION},
+                    PHOTO_LOCATION_PERMISSION);
+            return;
+        }
         startActivityForResult(Ui.photoPickerIntent(), PICK);
     }
 
@@ -345,6 +351,11 @@ public final class RecordDetailActivity extends Activity {
         super.onRequestPermissionsResult(request, permissions, grants);
         if (request == PERMISSION && grants.length > 0
                 && grants[0] == PackageManager.PERMISSION_GRANTED) capture(pendingCategory);
+        else if (request == PHOTO_LOCATION_PERMISSION) {
+            if (grants.length == 0 || grants[0] != PackageManager.PERMISSION_GRANTED)
+                Ui.toast(this, "未授权读取照片定位；仍可上传，但原始位置可能不可用");
+            startActivityForResult(Ui.photoPickerIntent(), PICK);
+        }
     }
 
     private void sign(String role) {
@@ -440,7 +451,10 @@ public final class RecordDetailActivity extends Activity {
             View.OnClickListener preview = view -> Ui.previewPhoto(this, media.localPath);
             image.setOnClickListener(preview);
             row.addView(image, new LinearLayout.LayoutParams(Ui.dp(this, 82), Ui.dp(this, 66)));
-            TextView label = Ui.text(this, category(media.category) + " · 点击任意位置查看大图", 14, true);
+            TextView label = Ui.text(this, category(media.category) + " · 点击查看大图\n"
+                    + (MediaService.displayLocation(media).isBlank()
+                    ? "未读取到原照片定位（可检查相册共享权限）"
+                    : "拍摄位置：" + MediaService.displayLocation(media)), 14, true);
             if ("RECTIFICATION".equals(media.category)) label.setTextColor(Ui.BLUE_DARK);
             label.setOnClickListener(preview);
             row.addView(label, Ui.weight(1));

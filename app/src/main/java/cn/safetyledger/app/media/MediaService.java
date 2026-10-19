@@ -1,6 +1,8 @@
 package cn.safetyledger.app.media;
 
+import android.Manifest;
 import android.content.Context;
+import android.content.pm.PackageManager;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
 import android.graphics.Canvas;
@@ -13,6 +15,8 @@ import android.location.Geocoder;
 import android.location.Location;
 import android.media.ExifInterface;
 import android.net.Uri;
+import android.os.Build;
+import android.provider.MediaStore;
 
 import cn.safetyledger.app.data.Entities.Media;
 
@@ -69,7 +73,7 @@ public final class MediaService {
         // A picker URI is not guaranteed to be repeatable. Persist it once, then
         // read EXIF and pixels from the same stable local copy.
         try {
-            copySource(source, originalFile);
+            copySourcePreferOriginal(source, originalFile);
             return createBusinessPhoto(originalFile, output, id, inspectionId, itemId,
                     category, capturedLocation, capturedNow);
         } catch (IOException | RuntimeException | OutOfMemoryError error) {
@@ -124,7 +128,12 @@ public final class MediaService {
             }
             if (latitude != null && longitude != null) {
                 locationText = reverseGeocodeWithin(latitude, longitude);
-                if (!locationText.isBlank()) lines.add("拍摄地点：" + locationText);
+                if (locationText.isBlank()) {
+                    locationText = chineseCoordinates(latitude, longitude);
+                    lines.add("拍摄坐标：" + locationText);
+                } else {
+                    lines.add("拍摄地点：" + locationText);
+                }
             }
             if (!lines.isEmpty()) drawWatermark(business, lines);
             if (!business.compress(Bitmap.CompressFormat.JPEG, 92, stream)) {
@@ -159,6 +168,36 @@ public final class MediaService {
                 if (count > 0) output.write(buffer, 0, count);
             }
         }
+    }
+
+    private void copySourcePreferOriginal(Uri source, File target) throws IOException {
+        if (Build.VERSION.SDK_INT >= 29 && "content".equals(source.getScheme())
+                && context.checkSelfPermission(Manifest.permission.ACCESS_MEDIA_LOCATION)
+                == PackageManager.PERMISSION_GRANTED) {
+            try {
+                // MediaStore normally redacts location from a shared URI. The picker
+                // may provide a different kind of URI, so this is best-effort only.
+                copySource(MediaStore.setRequireOriginal(source), target);
+                return;
+            } catch (IOException | RuntimeException ignored) {
+                // Some photo/cloud providers do not support requireOriginal. The
+                // normal picker stream must remain usable even without EXIF GPS.
+            }
+        }
+        copySource(source, target);
+    }
+
+    static String chineseCoordinates(double latitude, double longitude) {
+        return String.format(Locale.CHINA, "%s %.5f° · %s %.5f°",
+                latitude >= 0 ? "北纬" : "南纬", Math.abs(latitude),
+                longitude >= 0 ? "东经" : "西经", Math.abs(longitude));
+    }
+
+    public static String displayLocation(Media media) {
+        if (media.location != null && !media.location.isBlank()) return media.location;
+        if (media.latitude != null && media.longitude != null)
+            return chineseCoordinates(media.latitude, media.longitude);
+        return "";
     }
 
     /**
