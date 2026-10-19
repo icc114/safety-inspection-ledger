@@ -42,8 +42,6 @@ public final class RecordDetailActivity extends Activity {
     private static final int PERMISSION = 613;
     private static final int SIGN = 614;
     private static final int PHOTO_LOCATION_PERMISSION = 615;
-    private static final int ORIGINAL_PICK = 616;
-    private boolean pendingOriginalPick;
 
     private LedgerRepository repo;
     private Inspection model;
@@ -67,6 +65,31 @@ public final class RecordDetailActivity extends Activity {
             return;
         }
         render();
+        repairLegacyZeroPhotos();
+    }
+
+    private void repairLegacyZeroPhotos() {
+        String inspectionId=model.id;
+        photoWorker.execute(() -> {
+            int corrected=0;
+            MediaService service=new MediaService(this);
+            for(Media stored:repo.media(inspectionId)) {
+                if(!MediaService.hasLegacyZeroCoordinates(stored))continue;
+                try {
+                    Media repaired=service.repairLegacyZeroPhoto(stored);
+                    if(repaired!=null&&repo.applyZeroCoordinatePhotoRepair(repaired))corrected++;
+                } catch(Exception ignored) {
+                    // Keep the existing photo if its saved source cannot be reprocessed.
+                }
+            }
+            final int count=corrected;
+            if(count>0)runOnUiThread(() -> {
+                if(!isDestroyed()) {
+                    showMedia();
+                    Ui.toast(this,"已修正"+count+"张旧照片的无效零坐标水印");
+                }
+            });
+        });
     }
 
     private void render() {
@@ -206,10 +229,6 @@ public final class RecordDetailActivity extends Activity {
         actions.addView(Ui.horizontalGap(this, 7));
         actions.addView(gallery, Ui.weight(1));
         card.addView(actions);
-        Button original = Ui.secondaryButton(this, "定位未读取？选择原图文件");
-        original.setOnClickListener(view -> pickOriginal("SCENE"));
-        card.addView(Ui.gap(this, 6));
-        card.addView(original);
         card.addView(Ui.gap(this, 7));
         mediaBox = Ui.column(this);
         card.addView(mediaBox);
@@ -275,10 +294,6 @@ public final class RecordDetailActivity extends Activity {
         actions.addView(Ui.horizontalGap(this, 7));
         actions.addView(gallery, Ui.weight(1));
         card.addView(actions);
-        Button original = Ui.secondaryButton(this, "定位未读取？选择原图文件");
-        original.setOnClickListener(view -> pickOriginal("RECTIFICATION"));
-        card.addView(Ui.gap(this, 6));
-        card.addView(original);
 
         recheck = Ui.input(this, "复查说明（可选）");
         recheck.setText(model.recheck);
@@ -331,24 +346,12 @@ public final class RecordDetailActivity extends Activity {
 
     private void pick(String category) {
         pendingCategory = category;
-        pendingOriginalPick = false;
         if (!Ui.hasPhotoLocationPermission(this)) {
             requestPermissions(new String[]{Manifest.permission.ACCESS_MEDIA_LOCATION},
                     PHOTO_LOCATION_PERMISSION);
             return;
         }
         startActivityForResult(Ui.photoPickerIntent(), PICK);
-    }
-
-    private void pickOriginal(String category) {
-        pendingCategory = category;
-        pendingOriginalPick = true;
-        if (!Ui.hasPhotoLocationPermission(this)) {
-            requestPermissions(new String[]{Manifest.permission.ACCESS_MEDIA_LOCATION},
-                    PHOTO_LOCATION_PERMISSION);
-            return;
-        }
-        startActivityForResult(Ui.originalPhotoIntent(), ORIGINAL_PICK);
     }
 
     private void capture(String category) {
@@ -376,8 +379,7 @@ public final class RecordDetailActivity extends Activity {
         else if (request == PHOTO_LOCATION_PERMISSION) {
             if (grants.length == 0 || grants[0] != PackageManager.PERMISSION_GRANTED)
                 Ui.toast(this, "未授权读取照片定位；仍可上传，但原始位置可能不可用");
-            startActivityForResult(pendingOriginalPick ? Ui.originalPhotoIntent() :
-                    Ui.photoPickerIntent(), pendingOriginalPick ? ORIGINAL_PICK : PICK);
+            startActivityForResult(Ui.photoPickerIntent(), PICK);
         }
     }
 
@@ -392,7 +394,7 @@ public final class RecordDetailActivity extends Activity {
         super.onActivityResult(request, result, data);
         if (result != RESULT_OK) return;
         try {
-            if ((request == PICK || request == ORIGINAL_PICK) && data != null) {
+            if (request == PICK && data != null) {
                 if (data.getClipData() != null) {
                     for (int i = 0; i < data.getClipData().getItemCount(); i++) {
                         importPhoto(data.getClipData().getItemAt(i).getUri(), false);
@@ -475,9 +477,11 @@ public final class RecordDetailActivity extends Activity {
             image.setOnClickListener(preview);
             row.addView(image, new LinearLayout.LayoutParams(Ui.dp(this, 82), Ui.dp(this, 66)));
             TextView label = Ui.text(this, category(media.category) + " · 点击查看大图\n"
-                    + (MediaService.displayLocation(media).isBlank()
-                    ? "未读取到原照片定位（可检查相册共享权限）"
-                    : "拍摄位置：" + MediaService.displayLocation(media)), 14, true);
+                    + (MediaService.hasLegacyZeroCoordinates(media)
+                    ? "旧照片含无效零坐标；如无法自动修正请重新上传"
+                    : MediaService.displayLocation(media).isBlank()
+                    ? "未读取到有效拍摄定位"
+                    : "拍摄坐标：" + MediaService.displayLocation(media)), 14, true);
             if ("RECTIFICATION".equals(media.category)) label.setTextColor(Ui.BLUE_DARK);
             label.setOnClickListener(preview);
             row.addView(label, Ui.weight(1));

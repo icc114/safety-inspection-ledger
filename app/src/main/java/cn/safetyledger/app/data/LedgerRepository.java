@@ -112,6 +112,26 @@ public final class LedgerRepository {
     }
     public void queueDeviceRole(String deviceId){queue("sync_device",deviceId,"UPSERT");}
     public void addMedia(Media m){long n=System.currentTimeMillis();SQLiteDatabase d=raw();d.beginTransaction();try{d.insertOrThrow("media",null,LedgerDatabase.values("id",m.id,"inspection_id",m.inspectionId,"inspection_item_id",m.itemId,"category",m.category,"local_path",m.localPath,"remote_key",m.remoteKey,"captured_at",m.capturedAt,"location",m.location,"latitude",m.latitude,"longitude",m.longitude,"sha256",m.sha256,"mime_type",m.mime,"size_bytes",m.size,"created_at",n,"updated_at",n,"revision",1));d.execSQL("UPDATE inspections SET updated_at=?,revision=COALESCE(revision,1)+1 WHERE id=?",new Object[]{n,m.inspectionId});queueRow(d,"media",m.id,"UPSERT",n);d.setTransactionSuccessful();}finally{d.endTransaction();}CloudSyncScheduler.scheduleSoon(context);}
+    public boolean applyZeroCoordinatePhotoRepair(Media m){
+        long n=System.currentTimeMillis();SQLiteDatabase d=raw();boolean changed=false;
+        d.beginTransaction();try{
+            ContentValues values=LedgerDatabase.values("local_path",m.localPath,
+                    "captured_at",m.capturedAt,"location",m.location,"latitude",m.latitude,
+                    "longitude",m.longitude,"sha256",m.sha256,"size_bytes",m.size,"updated_at",n);
+            changed=d.update("media",values,
+                    "id=? AND latitude=0 AND longitude=0 AND deleted_at IS NULL",
+                    new String[]{m.id})>0;
+            if(changed){
+                d.execSQL("UPDATE media SET revision=COALESCE(revision,1)+1 WHERE id=?",new Object[]{m.id});
+                d.execSQL("UPDATE inspections SET updated_at=?,revision=COALESCE(revision,1)+1 WHERE id=?",
+                        new Object[]{n,m.inspectionId});
+                queueRow(d,"media",m.id,"UPSERT",n);
+            }
+            d.setTransactionSuccessful();
+        }finally{d.endTransaction();}
+        if(changed)CloudSyncScheduler.scheduleSoon(context);
+        return changed;
+    }
     public List<Media> media(String iid){List<Media>o=new ArrayList<>();try(Cursor c=raw().query("media",null,"inspection_id=? AND deleted_at IS NULL",new String[]{iid},null,null,"captured_at")){while(c.moveToNext()){Media m=new Media();m.id=s(c,"id");m.inspectionId=iid;m.itemId=s(c,"inspection_item_id");m.category=s(c,"category");m.localPath=s(c,"local_path");m.remoteKey=s(c,"remote_key");m.location=s(c,"location");m.sha256=s(c,"sha256");m.mime=s(c,"mime_type");m.capturedAt=LedgerDatabase.lng(c,"captured_at");m.size=LedgerDatabase.lng(c,"size_bytes");int la=c.getColumnIndex("latitude"),lo=c.getColumnIndex("longitude");m.latitude=c.isNull(la)?null:c.getDouble(la);m.longitude=c.isNull(lo)?null:c.getDouble(lo);o.add(m);}}return o;}
     public void saveSignature(Signature s){
         long n=System.currentTimeMillis(),created=n,revision=1;SQLiteDatabase d=raw();

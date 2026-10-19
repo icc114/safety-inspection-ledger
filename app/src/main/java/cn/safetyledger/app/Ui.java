@@ -294,29 +294,12 @@ public static void applyFunctionalDepth(Context context, View view) {
     }
 
     public static Intent photoPickerIntent() {
-        if (Build.VERSION.SDK_INT >= 33) {
-            return new Intent(MediaStore.ACTION_PICK_IMAGES)
-                    .setType("image/*")
-                    // Newer photo pickers hide GPS EXIF unless the operator explicitly
-                    // agrees to share it. Older pickers safely ignore this extra.
-                    .putExtra("android.provider.extra.REQUEST_LOCATION_METADATA_ACCESS", true)
-                    .putExtra(MediaStore.EXTRA_PICK_IMAGES_MAX,
-                            Math.min(50, MediaStore.getPickImagesMaxLimit()));
-        }
+        // ACTION_PICK opens the device gallery and normally returns a MediaStore
+        // item URI. On older Android photo pickers ACTION_PICK_IMAGES always
+        // redacts EXIF GPS; ACCESS_MEDIA_LOCATION cannot undo that picker decision.
         return new Intent(Intent.ACTION_PICK, MediaStore.Images.Media.EXTERNAL_CONTENT_URI)
                 .setType("image/*")
                 .putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true);
-    }
-
-    // Some older/system-customized gallery pickers only return a privacy-filtered
-    // copy. Keep the gallery as the normal path, with an explicit original-file
-    // fallback for photos whose EXIF GPS is missing after import.
-    public static Intent originalPhotoIntent() {
-        return new Intent(Intent.ACTION_OPEN_DOCUMENT)
-                .addCategory(Intent.CATEGORY_OPENABLE)
-                .setType("image/*")
-                .putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true)
-                .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
     }
 
     public static boolean hasPhotoLocationPermission(Activity activity) {
