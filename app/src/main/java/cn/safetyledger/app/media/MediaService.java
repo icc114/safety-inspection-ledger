@@ -1,6 +1,8 @@
 package cn.safetyledger.app.media;
 
+import android.Manifest;
 import android.content.Context;
+import android.content.pm.PackageManager;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
 import android.graphics.Canvas;
@@ -11,17 +13,23 @@ import android.graphics.Typeface;
 import android.location.Address;
 import android.location.Geocoder;
 import android.location.Location;
-import android.media.ExifInterface;
 import android.net.Uri;
+import android.os.Build;
+import android.os.ParcelFileDescriptor;
+import android.provider.MediaStore;
+
+import androidx.exifinterface.media.ExifInterface;
 
 import cn.safetyledger.app.data.Entities.Media;
 
 import java.io.File;
+import java.io.FileInputStream;
 import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
 import java.nio.file.Files;
+import java.nio.file.StandardCopyOption;
 import java.security.MessageDigest;
 import java.time.Instant;
 import java.time.LocalDateTime;
@@ -32,9 +40,14 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
 import java.util.UUID;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
 
 /** Keeps the untouched source and creates a business JPEG from available EXIF metadata. */
 public final class MediaService {
+    private static final ExecutorService GEOCODER = Executors.newSingleThreadExecutor();
     private static final DateTimeFormatter EXIF_TIME =
             DateTimeFormatter.ofPattern("yyyy:MM:dd HH:mm:ss", Locale.US);
     private static final DateTimeFormatter WATERMARK_TIME =
@@ -57,26 +70,52 @@ public final class MediaService {
                                     String category, String inspectionPlace,
                                     Location capturedLocation, boolean capturedNow)
             throws IOException {
-        PhotoMetadata metadata = readMetadata(source);
+        String id = UUID.randomUUID().toString();
+        File directory = mediaDir(inspectionId);
+        File originalFile = new File(directory, id + "-original.bin");
+        File output = new File(directory, id + ".jpg");
+        // A picker URI is not guaranteed to be repeatable. Persist it once, then
+        // read EXIF and pixels from the same stable local copy.
+        try {
+            copySourcePreferOriginal(source, originalFile);
+            return createBusinessPhoto(originalFile, output, id, inspectionId, itemId,
+                    category, capturedLocation, capturedNow, null);
+        } catch (IOException | RuntimeException | OutOfMemoryError error) {
+            originalFile.delete();
+            output.delete();
+            if (error instanceof IOException) throw (IOException) error;
+            throw new IOException("照片处理失败，请尝试原图或其他格式", error);
+        }
+    }
+
+    private Media createBusinessPhoto(File originalFile, File output, String id,
+                                      String inspectionId, String itemId, String category,
+                                      Location capturedLocation, boolean capturedNow,
+                                      Long fallbackCapturedAt) throws IOException {
+        PhotoMetadata metadata = readMetadata(originalFile);
         Long capturedAt = metadata.capturedAt;
+        if (capturedAt == null) capturedAt = fallbackCapturedAt;
         if (capturedAt == null && capturedNow) capturedAt = System.currentTimeMillis();
         Double latitude = metadata.latitude;
         Double longitude = metadata.longitude;
-        if (latitude == null && capturedNow && capturedLocation != null) {
+        if (latitude == null && capturedNow && capturedLocation != null
+                && isCredibleCoordinates(capturedLocation.getLatitude(),
+                        capturedLocation.getLongitude())) {
             latitude = capturedLocation.getLatitude();
             longitude = capturedLocation.getLongitude();
         }
 
-        String id = UUID.randomUUID().toString();
-        File directory = mediaDir(inspectionId);
-        File originalFile = new File(directory, id + "-original.bin");
-        copySource(source, originalFile);
-
-        Bitmap decoded = decodeSampled(source, 2400);
+        Bitmap decoded = decodeSampled(originalFile, 1800);
         if (decoded == null) throw new IOException("无法读取照片");
-        Bitmap oriented = orient(decoded, metadata.orientation);
+        Bitmap oriented;
+        try {
+            oriented = orient(decoded, metadata.orientation);
+        } catch (RuntimeException error) {
+            decoded.recycle();
+            throw error;
+        }
         if (oriented != decoded) decoded.recycle();
-        int maximum = 2400;
+        int maximum = 1800;
         float scale = Math.min(1f, maximum
                 / (float) Math.max(oriented.getWidth(), oriented.getHeight()));
         Bitmap resized = scale < 1f
@@ -86,23 +125,22 @@ public final class MediaService {
         if (resized != oriented) oriented.recycle();
         Bitmap business = resized.copy(Bitmap.Config.ARGB_8888, true);
         resized.recycle();
+        if (business == null) throw new IOException("照片内存不足");
 
-        List<String> lines = new ArrayList<>();
-        if (capturedAt != null) {
-            lines.add("拍摄时间：" + Instant.ofEpochMilli(capturedAt)
-                    .atZone(ZoneId.systemDefault()).toLocalDateTime().format(WATERMARK_TIME));
-        }
         String locationText = "";
-        if (latitude != null && longitude != null) {
-            locationText = reverseGeocode(latitude, longitude);
-            if (!locationText.isBlank()) lines.add("拍摄地点：" + locationText);
-        }
-        // Do not invent a watermark from the inspection form. If EXIF/fresh-camera
-        // metadata is unavailable, the business JPEG remains visually unchanged.
-        if (!lines.isEmpty()) drawWatermark(business, lines);
-
-        File output = new File(directory, id + ".jpg");
         try (OutputStream stream = new FileOutputStream(output)) {
+            List<String> lines = new ArrayList<>();
+            if (capturedAt != null) {
+                lines.add("拍摄时间：" + Instant.ofEpochMilli(capturedAt)
+                        .atZone(ZoneId.systemDefault()).toLocalDateTime().format(WATERMARK_TIME));
+            }
+            if (isCredibleCoordinates(latitude, longitude)) {
+                locationText = chineseCoordinates(latitude, longitude);
+                lines.add("拍摄坐标：" + locationText);
+                String address = reverseGeocodeWithin(latitude, longitude);
+                if (!address.isBlank()) lines.add("拍摄地点：" + address);
+            }
+            if (!lines.isEmpty()) drawWatermark(business, lines);
             if (!business.compress(Bitmap.CompressFormat.JPEG, 92, stream)) {
                 throw new IOException("照片压缩失败");
             }
@@ -137,25 +175,103 @@ public final class MediaService {
         }
     }
 
+    private void copySourcePreferOriginal(Uri source, File target) throws IOException {
+        if (Build.VERSION.SDK_INT >= 29 && "content".equals(source.getScheme())
+                && MediaStore.AUTHORITY.equals(source.getAuthority())
+                && context.checkSelfPermission(Manifest.permission.ACCESS_MEDIA_LOCATION)
+                == PackageManager.PERMISSION_GRANTED) {
+            try {
+                // Android documents setRequireOriginal for openFileDescriptor.
+                // openInputStream can still be handled as a redacted stream by
+                // some media providers, so use the descriptor explicitly.
+                copyOriginalMediaSource(MediaStore.setRequireOriginal(source), target);
+                return;
+            } catch (IOException | RuntimeException ignored) {
+                // A provider may decline original bytes. Photo import remains
+                // usable, but an invalid/missing GPS fix will not be watermarked.
+            }
+        }
+        copySource(source, target);
+    }
+
+    private void copyOriginalMediaSource(Uri source, File target) throws IOException {
+        try (ParcelFileDescriptor descriptor = context.getContentResolver()
+                .openFileDescriptor(source, "r")) {
+            if (descriptor == null) throw new IOException("原始照片读取失败");
+            try (InputStream input = new FileInputStream(descriptor.getFileDescriptor());
+                 OutputStream output = new FileOutputStream(target)) {
+                byte[] buffer = new byte[65536];
+                for (int count; (count = input.read(buffer)) >= 0;) {
+                    if (count > 0) output.write(buffer, 0, count);
+                }
+            }
+        }
+    }
+
+    static boolean isCredibleCoordinates(Double latitude, Double longitude) {
+        return latitude != null && longitude != null
+                && Double.isFinite(latitude) && Double.isFinite(longitude)
+                && Math.abs(latitude) <= 90 && Math.abs(longitude) <= 180
+                // (0,0) is a common privacy-redaction/unknown-position value.
+                && (latitude != 0d || longitude != 0d);
+    }
+
+    public static boolean hasLegacyZeroCoordinates(Media media) {
+        return media != null && media.latitude != null && media.longitude != null
+                && media.latitude == 0d && media.longitude == 0d;
+    }
+
+    /** Rebuild only an invalid 0/0 watermark from the source already saved in app data. */
+    public Media repairLegacyZeroPhoto(Media stored) throws IOException {
+        if (!hasLegacyZeroCoordinates(stored)) return null;
+        File directory = mediaDir(stored.inspectionId);
+        File original = new File(directory, stored.id + "-original.bin");
+        if (!original.isFile()) return null;
+        File replacement = new File(directory, stored.id + "-gps-repair.jpg");
+        File business = new File(directory, stored.id + ".jpg");
+        try {
+            Media corrected = createBusinessPhoto(original, replacement, stored.id,
+                    stored.inspectionId, stored.itemId, stored.category, null, false,
+                    stored.capturedAt);
+            Files.move(replacement.toPath(), business.toPath(),
+                    StandardCopyOption.REPLACE_EXISTING);
+            corrected.localPath = business.getAbsolutePath();
+            return corrected;
+        } finally {
+            if (replacement.exists()) replacement.delete();
+        }
+    }
+
+    static String chineseCoordinates(double latitude, double longitude) {
+        return String.format(Locale.CHINA, "%s %.5f° · %s %.5f°",
+                latitude >= 0 ? "北纬" : "南纬", Math.abs(latitude),
+                longitude >= 0 ? "东经" : "西经", Math.abs(longitude));
+    }
+
+    public static String displayLocation(Media media) {
+        if (media == null || (media.latitude != null && media.longitude != null
+                && !isCredibleCoordinates(media.latitude, media.longitude))) return "";
+        if (media.location != null && !media.location.isBlank()) return media.location;
+        if (isCredibleCoordinates(media.latitude, media.longitude))
+            return chineseCoordinates(media.latitude, media.longitude);
+        return "";
+    }
+
     /**
      * Decodes a picker/camera URI close to the size needed by the business copy.
      * Modern phone photos can exceed 40 MP; decoding them at full resolution can
      * exhaust the app heap before the later resize has a chance to run.
      */
-    private Bitmap decodeSampled(Uri source, int maximum) throws IOException {
+    private Bitmap decodeSampled(File source, int maximum) throws IOException {
         BitmapFactory.Options bounds = new BitmapFactory.Options();
         bounds.inJustDecodeBounds = true;
-        try (InputStream input = context.getContentResolver().openInputStream(source)) {
-            if (input == null) throw new IOException("原始照片读取失败");
-            BitmapFactory.decodeStream(input, null, bounds);
-        }
+        BitmapFactory.decodeFile(source.getAbsolutePath(), bounds);
+        if (bounds.outWidth <= 0 || bounds.outHeight <= 0)
+            throw new IOException("照片格式不受本机支持");
         BitmapFactory.Options options = new BitmapFactory.Options();
         options.inSampleSize = sampleSize(bounds.outWidth, bounds.outHeight, maximum);
         options.inPreferredConfig = Bitmap.Config.ARGB_8888;
-        try (InputStream input = context.getContentResolver().openInputStream(source)) {
-            if (input == null) throw new IOException("原始照片读取失败");
-            return BitmapFactory.decodeStream(input, null, options);
-        }
+        return BitmapFactory.decodeFile(source.getAbsolutePath(), options);
     }
 
     /** Decodes a small file thumbnail without loading the full business image. */
@@ -177,21 +293,21 @@ public final class MediaService {
         return sample;
     }
 
-    private PhotoMetadata readMetadata(Uri source) {
+    private PhotoMetadata readMetadata(File source) {
         PhotoMetadata metadata = new PhotoMetadata();
-        try (InputStream input = context.getContentResolver().openInputStream(source)) {
-            if (input == null) return metadata;
-            ExifInterface exif = new ExifInterface(input);
+        try {
+            ExifInterface exif = new ExifInterface(source.getAbsolutePath());
             metadata.orientation = exif.getAttributeInt(ExifInterface.TAG_ORIENTATION,
                     ExifInterface.ORIENTATION_NORMAL);
             String time = exif.getAttribute(ExifInterface.TAG_DATETIME_ORIGINAL);
             if (time == null) time = exif.getAttribute(ExifInterface.TAG_DATETIME_DIGITIZED);
             if (time == null) time = exif.getAttribute(ExifInterface.TAG_DATETIME);
             metadata.capturedAt = parseTime(time);
-            float[] coordinates = new float[2];
-            if (exif.getLatLong(coordinates)) {
-                metadata.latitude = (double) coordinates[0];
-                metadata.longitude = (double) coordinates[1];
+            double[] coordinates = exif.getLatLong();
+            if (coordinates != null && coordinates.length == 2
+                    && isCredibleCoordinates(coordinates[0], coordinates[1])) {
+                metadata.latitude = coordinates[0];
+                metadata.longitude = coordinates[1];
             }
         } catch (Exception ignored) {
             // Original photo remains importable even when its EXIF block is absent or malformed.
@@ -241,6 +357,17 @@ public final class MediaService {
             return value.toString();
         } catch (Exception ignored) {
             // If GPS cannot be converted to a readable place name, omit location watermark.
+            return "";
+        }
+    }
+
+    private String reverseGeocodeWithin(double latitude, double longitude) {
+        Future<String> pending = GEOCODER.submit(() -> reverseGeocode(latitude, longitude));
+        try {
+            return pending.get(2500, TimeUnit.MILLISECONDS);
+        } catch (Exception error) {
+            pending.cancel(true);
+            // A missing/offline geocoder must never prevent a GPS photo from importing.
             return "";
         }
     }

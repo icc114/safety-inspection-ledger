@@ -2,6 +2,7 @@ package cn.safetyledger.app;
 
 import android.Manifest;
 import android.app.Activity;
+import android.app.AlertDialog;
 import android.content.ContentValues;
 import android.content.Intent;
 import android.content.pm.PackageManager;
@@ -32,12 +33,15 @@ import cn.safetyledger.app.media.MediaService;
 import cn.safetyledger.app.sync.CloudSyncScheduler;
 
 import java.util.List;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 
 public final class RecordDetailActivity extends Activity {
     private static final int PICK = 610;
     private static final int CAMERA = 612;
     private static final int PERMISSION = 613;
     private static final int SIGN = 614;
+    private static final int PHOTO_LOCATION_PERMISSION = 615;
 
     private LedgerRepository repo;
     private Inspection model;
@@ -48,6 +52,7 @@ public final class RecordDetailActivity extends Activity {
     private CheckBox confirmed;
     private Uri cameraUri;
     private String pendingCategory = "RECTIFICATION";
+    private final ExecutorService photoWorker = Executors.newSingleThreadExecutor();
 
     @Override
     protected void onCreate(Bundle state) {
@@ -60,6 +65,31 @@ public final class RecordDetailActivity extends Activity {
             return;
         }
         render();
+        repairLegacyZeroPhotos();
+    }
+
+    private void repairLegacyZeroPhotos() {
+        String inspectionId=model.id;
+        photoWorker.execute(() -> {
+            int corrected=0;
+            MediaService service=new MediaService(this);
+            for(Media stored:repo.media(inspectionId)) {
+                if(!MediaService.hasLegacyZeroCoordinates(stored))continue;
+                try {
+                    Media repaired=service.repairLegacyZeroPhoto(stored);
+                    if(repaired!=null&&repo.applyZeroCoordinatePhotoRepair(repaired))corrected++;
+                } catch(Exception ignored) {
+                    // Keep the existing photo if its saved source cannot be reprocessed.
+                }
+            }
+            final int count=corrected;
+            if(count>0)runOnUiThread(() -> {
+                if(!isDestroyed()) {
+                    showMedia();
+                    Ui.toast(this,"已修正"+count+"张旧照片的无效零坐标水印");
+                }
+            });
+        });
     }
 
     private void render() {
@@ -82,6 +112,12 @@ public final class RecordDetailActivity extends Activity {
             content.addView(rectificationCard());
         }
         content.addView(Ui.gap(this, 14));
+        if (!"DRAFT".equals(model.status)) {
+            Button withdraw = Ui.secondaryButton(this, "撤回并修改检查记录");
+            withdraw.setOnClickListener(view -> confirmWithdraw());
+            content.addView(withdraw);
+            content.addView(Ui.gap(this, 8));
+        }
         Button delete = Ui.secondaryButton(this, "移入回收站");
         delete.setTextColor(Ui.DANGER);
         delete.setOnClickListener(view -> {
@@ -94,6 +130,25 @@ public final class RecordDetailActivity extends Activity {
         root.addView(content);
         scroll.addView(root);
         setContentView(scroll);
+    }
+
+    private void confirmWithdraw() {
+        new AlertDialog.Builder(this)
+                .setTitle("撤回已发布记录")
+                .setMessage("撤回后，这条记录会变为草稿，可重新修改检查日期、地点、结果和问题。原照片、签名及整改资料会保留；再次保存后重新发布。如果修改了问题，整改状态需要重新确认。")
+                .setNegativeButton("取消", null)
+                .setPositiveButton("撤回并编辑", (dialog, which) -> {
+                    if (!repo.withdrawInspection(model.id)) {
+                        Ui.toast(this, "撤回失败，记录可能已被其他设备更新");
+                        render();
+                        return;
+                    }
+                    repo.putSetting("current_draft", model.id);
+                    CloudSyncScheduler.scheduleImmediate(this);
+                    startActivity(new Intent(this, MainActivity.class)
+                            .putExtra("inspection_id", model.id));
+                    finish();
+                }).show();
     }
 
     private LinearLayout topBar() {
@@ -291,6 +346,11 @@ public final class RecordDetailActivity extends Activity {
 
     private void pick(String category) {
         pendingCategory = category;
+        if (!Ui.hasPhotoLocationPermission(this)) {
+            requestPermissions(new String[]{Manifest.permission.ACCESS_MEDIA_LOCATION},
+                    PHOTO_LOCATION_PERMISSION);
+            return;
+        }
         startActivityForResult(Ui.photoPickerIntent(), PICK);
     }
 
@@ -316,6 +376,11 @@ public final class RecordDetailActivity extends Activity {
         super.onRequestPermissionsResult(request, permissions, grants);
         if (request == PERMISSION && grants.length > 0
                 && grants[0] == PackageManager.PERMISSION_GRANTED) capture(pendingCategory);
+        else if (request == PHOTO_LOCATION_PERMISSION) {
+            if (grants.length == 0 || grants[0] != PackageManager.PERMISSION_GRANTED)
+                Ui.toast(this, "未授权读取照片定位；仍可上传，但原始位置可能不可用");
+            startActivityForResult(Ui.photoPickerIntent(), PICK);
+        }
     }
 
     private void sign(String role) {
@@ -339,7 +404,6 @@ public final class RecordDetailActivity extends Activity {
                 }
             } else if (request == CAMERA && cameraUri != null) {
                 importPhoto(cameraUri, true);
-                getContentResolver().delete(cameraUri, null, null);
             } else if (request == SIGN) {
                 showSignatures();
                 CloudSyncScheduler.scheduleImmediate(this);
@@ -362,12 +426,40 @@ public final class RecordDetailActivity extends Activity {
         return best;
     }
 
-    private void importPhoto(Uri uri, boolean capturedNow) throws Exception {
-        Media media = new MediaService(this).importAndWatermark(uri, model.id, null,
-                pendingCategory, model.location, capturedNow ? lastLocation() : null, capturedNow);
-        repo.addMedia(media);
-        showMedia();
-        CloudSyncScheduler.scheduleImmediate(this);
+    private void importPhoto(Uri uri, boolean capturedNow) {
+        String inspectionId = model.id;
+        String category = pendingCategory;
+        String place = model.location;
+        Location location = capturedNow ? lastLocation() : null;
+        Ui.toast(this, "正在保存照片…");
+        photoWorker.execute(() -> {
+            try {
+                Media media = new MediaService(this).importAndWatermark(uri, inspectionId,
+                        null, category, place, location, capturedNow);
+                repo.addMedia(media);
+                CloudSyncScheduler.scheduleImmediate(this);
+                runOnUiThread(() -> {
+                    if (!isDestroyed()) {
+                        showMedia();
+                        Ui.toast(this, "照片已保存，可点击放大查看");
+                    }
+                });
+            } catch (Exception error) {
+                runOnUiThread(() -> {
+                    if (!isDestroyed()) Ui.toast(this, "照片处理失败：" + error.getMessage());
+                });
+            } finally {
+                if (capturedNow) {
+                    try { getContentResolver().delete(uri, null, null); }
+                    catch (RuntimeException ignored) { /* The private copy is already safe. */ }
+                }
+            }
+        });
+    }
+
+    @Override protected void onDestroy() {
+        photoWorker.shutdown();
+        super.onDestroy();
     }
 
     private void showMedia() {
@@ -384,7 +476,12 @@ public final class RecordDetailActivity extends Activity {
             View.OnClickListener preview = view -> Ui.previewPhoto(this, media.localPath);
             image.setOnClickListener(preview);
             row.addView(image, new LinearLayout.LayoutParams(Ui.dp(this, 82), Ui.dp(this, 66)));
-            TextView label = Ui.text(this, category(media.category) + " · 点击任意位置查看大图", 14, true);
+            TextView label = Ui.text(this, category(media.category) + " · 点击查看大图\n"
+                    + (MediaService.hasLegacyZeroCoordinates(media)
+                    ? "旧照片含无效零坐标；如无法自动修正请重新上传"
+                    : MediaService.displayLocation(media).isBlank()
+                    ? "未读取到有效拍摄定位"
+                    : "拍摄坐标：" + MediaService.displayLocation(media)), 14, true);
             if ("RECTIFICATION".equals(media.category)) label.setTextColor(Ui.BLUE_DARK);
             label.setOnClickListener(preview);
             row.addView(label, Ui.weight(1));

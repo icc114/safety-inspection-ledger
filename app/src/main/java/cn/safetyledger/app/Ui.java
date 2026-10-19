@@ -2,9 +2,11 @@ package cn.safetyledger.app;
 
 import android.animation.ObjectAnimator;
 import android.animation.StateListAnimator;
+import android.Manifest;
 import android.app.Activity;
 import android.content.Context;
 import android.content.Intent;
+import android.content.pm.PackageManager;
 import android.graphics.Color;
 import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
@@ -292,15 +294,17 @@ public static void applyFunctionalDepth(Context context, View view) {
     }
 
     public static Intent photoPickerIntent() {
-        if (Build.VERSION.SDK_INT >= 33) {
-            return new Intent(MediaStore.ACTION_PICK_IMAGES)
-                    .setType("image/*")
-                    .putExtra(MediaStore.EXTRA_PICK_IMAGES_MAX,
-                            Math.min(50, MediaStore.getPickImagesMaxLimit()));
-        }
+        // ACTION_PICK opens the device gallery and normally returns a MediaStore
+        // item URI. On older Android photo pickers ACTION_PICK_IMAGES always
+        // redacts EXIF GPS; ACCESS_MEDIA_LOCATION cannot undo that picker decision.
         return new Intent(Intent.ACTION_PICK, MediaStore.Images.Media.EXTERNAL_CONTENT_URI)
                 .setType("image/*")
                 .putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true);
+    }
+
+    public static boolean hasPhotoLocationPermission(Activity activity) {
+        return Build.VERSION.SDK_INT < 29 || activity.checkSelfPermission(
+                Manifest.permission.ACCESS_MEDIA_LOCATION) == PackageManager.PERMISSION_GRANTED;
     }
 
     public static void previewPhoto(Activity activity, String path) {

@@ -42,12 +42,15 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 
 public class MainActivity extends Activity {
     private static final int CAMERA = 501;
     private static final int GALLERY = 502;
     private static final int SIGN = 503;
     private static final int PERMISSIONS = 504;
+    private static final int PHOTO_LOCATION_PERMISSION = 505;
 
     private LedgerRepository repo;
     private Inspection model;
@@ -66,6 +69,8 @@ public class MainActivity extends Activity {
     private Uri cameraUri;
     private String pendingCategory = "SCENE";
     private String pendingItemId;
+    private final ExecutorService photoWorker = Executors.newSingleThreadExecutor();
+    private int pendingPhotos;
 
     @Override
     protected void onCreate(Bundle state) {
@@ -87,6 +92,31 @@ public class MainActivity extends Activity {
         }
         repo.putSetting("current_draft", model.id);
         render();
+        repairLegacyZeroPhotos();
+    }
+
+    private void repairLegacyZeroPhotos() {
+        String inspectionId=model.id;
+        photoWorker.execute(() -> {
+            int corrected=0;
+            MediaService service=new MediaService(this);
+            for(Media stored:repo.media(inspectionId)) {
+                if(!MediaService.hasLegacyZeroCoordinates(stored))continue;
+                try {
+                    Media repaired=service.repairLegacyZeroPhoto(stored);
+                    if(repaired!=null&&repo.applyZeroCoordinatePhotoRepair(repaired))corrected++;
+                } catch(Exception ignored) {
+                    // Keep the existing photo if its saved source cannot be reprocessed.
+                }
+            }
+            final int count=corrected;
+            if(count>0)runOnUiThread(() -> {
+                if(!isDestroyed()) {
+                    renderMedia();
+                    Ui.toast(this,"已修正"+count+"张旧照片的无效零坐标水印");
+                }
+            });
+        });
     }
 
     private void render() {
@@ -186,9 +216,21 @@ public class MainActivity extends Activity {
     }
 
     private void switchTemplate(Template template) {
+        if (pendingPhotos > 0) {
+            Ui.toast(this, "请等待照片保存完成后再切换模板");
+            restoreTemplateSelection();
+            return;
+        }
         Runnable replace = () -> {
-            new MediaService(this).deleteInspectionMedia(model.id);
-            repo.discardDraft(model.id);
+            // A withdrawn published record is also a DRAFT. Never destroy it when
+            // the operator selects another template; keep filled drafts in the ledger.
+            if (hasDraftInput()) {
+                syncFields();
+                repo.saveInspection(model);
+            } else {
+                new MediaService(this).deleteInspectionMedia(model.id);
+                repo.discardDraft(model.id);
+            }
             model = repo.newInspection(template.id);
             repo.putSetting("current_draft", model.id);
             render();
@@ -196,7 +238,7 @@ public class MainActivity extends Activity {
         if (hasDraftInput()) {
             new AlertDialog.Builder(this)
                     .setTitle("切换检查模板")
-                    .setMessage("切换会放弃当前尚未保存的勾选、问题、照片和签名。是否继续？")
+                    .setMessage("当前记录会作为草稿保留在台账列表中，照片和签名不会删除。继续新建所选模板的记录？")
                     .setPositiveButton("继续切换", (dialog, which) -> replace.run())
                     .setNegativeButton("取消", (dialog, which) -> restoreTemplateSelection())
                     .setOnCancelListener(dialog -> restoreTemplateSelection())
@@ -445,6 +487,11 @@ public class MainActivity extends Activity {
     private void pick(String category, String itemId) {
         pendingCategory = category;
         pendingItemId = itemId;
+        if (!Ui.hasPhotoLocationPermission(this)) {
+            requestPermissions(new String[]{Manifest.permission.ACCESS_MEDIA_LOCATION},
+                    PHOTO_LOCATION_PERMISSION);
+            return;
+        }
         startActivityForResult(Ui.photoPickerIntent(), GALLERY);
     }
 
@@ -460,7 +507,6 @@ public class MainActivity extends Activity {
         if (result != RESULT_OK) return;
         if (request == CAMERA && cameraUri != null) {
             importPhoto(cameraUri, true);
-            getContentResolver().delete(cameraUri, null, null);
         } else if (request == GALLERY && data != null) {
             if (data.getClipData() != null) {
                 for (int i = 0; i < data.getClipData().getItemCount(); i++) {
@@ -482,6 +528,10 @@ public class MainActivity extends Activity {
         if (request == PERMISSIONS && grants.length > 0
                 && grants[0] == PackageManager.PERMISSION_GRANTED) {
             capture(pendingCategory, pendingItemId);
+        } else if (request == PHOTO_LOCATION_PERMISSION) {
+            if (grants.length == 0 || grants[0] != PackageManager.PERMISSION_GRANTED)
+                Ui.toast(this, "未授权读取照片定位；仍可上传，但原始位置可能不可用");
+            startActivityForResult(Ui.photoPickerIntent(), GALLERY);
         }
     }
 
@@ -499,15 +549,45 @@ public class MainActivity extends Activity {
 
     private void importPhoto(Uri uri, boolean capturedNow) {
         syncFields();
-        try {
-            Media media = new MediaService(this).importAndWatermark(uri, model.id, pendingItemId,
-                    pendingCategory, model.location, capturedNow ? lastLocation() : null, capturedNow);
-            repo.addMedia(media);
-            renderMedia();
-            CloudSyncScheduler.scheduleImmediate(this);
-        } catch (Exception error) {
-            Ui.toast(this, "照片处理失败：" + error.getMessage());
-        }
+        String inspectionId = model.id;
+        String itemId = pendingItemId;
+        String category = pendingCategory;
+        String place = model.location;
+        Location location = capturedNow ? lastLocation() : null;
+        pendingPhotos++;
+        Ui.toast(this, "正在保存照片…");
+        photoWorker.execute(() -> {
+            try {
+                Media media = new MediaService(this).importAndWatermark(uri, inspectionId,
+                        itemId, category, place, location, capturedNow);
+                repo.addMedia(media);
+                CloudSyncScheduler.scheduleImmediate(this);
+                runOnUiThread(() -> {
+                    if (!isDestroyed()) {
+                        pendingPhotos--;
+                        renderMedia();
+                        Ui.toast(this, "照片已保存，可点击放大查看");
+                    }
+                });
+            } catch (Exception error) {
+                runOnUiThread(() -> {
+                    if (!isDestroyed()) {
+                        pendingPhotos--;
+                        Ui.toast(this, "照片处理失败：" + error.getMessage());
+                    }
+                });
+            } finally {
+                if (capturedNow) {
+                    try { getContentResolver().delete(uri, null, null); }
+                    catch (RuntimeException ignored) { /* The private copy is already safe. */ }
+                }
+            }
+        });
+    }
+
+    @Override protected void onDestroy() {
+        photoWorker.shutdown();
+        super.onDestroy();
     }
 
     private void renderMedia() {
@@ -526,7 +606,11 @@ public class MainActivity extends Activity {
             image.setOnClickListener(preview);
             row.addView(image, new LinearLayout.LayoutParams(Ui.dp(this, 76), Ui.dp(this, 64)));
             TextView label = Ui.text(this, "检查照片 · 点击任意位置查看大图\n"
-                    + new File(item.localPath).getName(), 13, false);
+                    + (MediaService.hasLegacyZeroCoordinates(item)
+                    ? "旧照片含无效零坐标；如无法自动修正请重新上传"
+                    : MediaService.displayLocation(item).isBlank()
+                    ? "未读取到有效拍摄定位"
+                    : "拍摄坐标：" + MediaService.displayLocation(item)), 13, false);
             label.setOnClickListener(preview);
             row.addView(label, Ui.weight(1));
             row.setClickable(true);
