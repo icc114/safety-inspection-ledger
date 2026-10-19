@@ -1,6 +1,8 @@
 # 安全检查台账 Android
 
-真正独立的 Android 原生离线优先应用。包名 `cn.safetyledger.app`，当前开发版本 `1.2.42`（versionCode 45），最低 Android 8.0（API 26）。工程由 Java 17 / Android SDK 源码编译，不包含 WebView 或旧 APK/DEX 模板。
+真正独立的 Android 原生离线优先应用。包名 `cn.safetyledger.app`，当前开发版本 `1.2.43`（versionCode 46），最低 Android 8.0（API 26）。工程由 Java 17 / Android SDK 源码编译，不包含 WebView 或旧 APK/DEX 模板。
+
+1.2.43 在检查照片和整改照片旁增加可选的“定位未读取？选择原图文件”。旧版/定制系统相册如只给 APP 隐去 GPS 的照片副本，可使用此入口选择本机原始文件重新导入；普通“从相册选择”仍是默认操作。原图必须含 EXIF GPS，且文件提供方确实返回原始字节；不能从已剥离定位的副本恢复坐标。
 
 1.2.42 修正照片定位：相册选择前请求 Android 的照片定位元数据权限，并在系统照片选择器支持时请求用户共享定位；可用时优先读取原始媒体流的 EXIF GPS。GPS 已取得但中文地址解析失败时，照片水印与列表显示“北纬/南纬、东经/西经”中文坐标，不再静默留空。若系统相册拒绝共享、原图本身无 GPS 或云相册提供的是去定位副本，则明确显示“未读取到原照片定位”，不会伪造拍摄地点。Android 照片选择器的隐私授权仍由用户和系统决定，无法保证所有厂商相册都会返回 GPS。
 
@@ -57,7 +59,7 @@
 ./gradlew testDebugUnitTest lintDebug assembleDebug
 ```
 
-输出：`app/build/outputs/apk/debug/app-debug.apk`。CI 测试 artifact 名称为 `安全检查台账-1.2.42-debug.apk`。Debug 签名 APK 不能覆盖安装使用其他签名的旧版；用于保留数据的正式升级需同一永久签名密钥生成的 Release APK。
+输出：`app/build/outputs/apk/debug/app-debug.apk`。CI 测试 artifact 名称为 `安全检查台账-1.2.43-debug.apk`。Debug 签名 APK 不能覆盖安装使用其他签名的旧版；用于保留数据的正式升级需同一永久签名密钥生成的 Release APK。
 
 ## 官方节假日来源
 

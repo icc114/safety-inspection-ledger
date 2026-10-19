@@ -308,6 +308,17 @@ public static void applyFunctionalDepth(Context context, View view) {
                 .putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true);
     }
 
+    // Some older/system-customized gallery pickers only return a privacy-filtered
+    // copy. Keep the gallery as the normal path, with an explicit original-file
+    // fallback for photos whose EXIF GPS is missing after import.
+    public static Intent originalPhotoIntent() {
+        return new Intent(Intent.ACTION_OPEN_DOCUMENT)
+                .addCategory(Intent.CATEGORY_OPENABLE)
+                .setType("image/*")
+                .putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true)
+                .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+    }
+
     public static boolean hasPhotoLocationPermission(Activity activity) {
         return Build.VERSION.SDK_INT < 29 || activity.checkSelfPermission(
                 Manifest.permission.ACCESS_MEDIA_LOCATION) == PackageManager.PERMISSION_GRANTED;

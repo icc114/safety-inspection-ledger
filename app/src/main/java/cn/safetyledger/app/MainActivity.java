@@ -51,6 +51,8 @@ public class MainActivity extends Activity {
     private static final int SIGN = 503;
     private static final int PERMISSIONS = 504;
     private static final int PHOTO_LOCATION_PERMISSION = 505;
+    private static final int ORIGINAL_GALLERY = 506;
+    private boolean pendingOriginalPick;
 
     private LedgerRepository repo;
     private Inspection model;
@@ -399,6 +401,10 @@ public class MainActivity extends Activity {
         actions.addView(Ui.horizontalGap(this, 8));
         actions.addView(gallery, Ui.weight(1));
         card.addView(actions);
+        Button original = Ui.secondaryButton(this, "定位未读取？选择原图文件");
+        original.setOnClickListener(view -> pickOriginal("SCENE", null));
+        card.addView(Ui.gap(this, 6));
+        card.addView(original);
         mediaBox = Ui.column(this);
         card.addView(mediaBox);
         renderMedia();
@@ -462,12 +468,25 @@ public class MainActivity extends Activity {
     private void pick(String category, String itemId) {
         pendingCategory = category;
         pendingItemId = itemId;
+        pendingOriginalPick = false;
         if (!Ui.hasPhotoLocationPermission(this)) {
             requestPermissions(new String[]{Manifest.permission.ACCESS_MEDIA_LOCATION},
                     PHOTO_LOCATION_PERMISSION);
             return;
         }
         startActivityForResult(Ui.photoPickerIntent(), GALLERY);
+    }
+
+    private void pickOriginal(String category, String itemId) {
+        pendingCategory = category;
+        pendingItemId = itemId;
+        pendingOriginalPick = true;
+        if (!Ui.hasPhotoLocationPermission(this)) {
+            requestPermissions(new String[]{Manifest.permission.ACCESS_MEDIA_LOCATION},
+                    PHOTO_LOCATION_PERMISSION);
+            return;
+        }
+        startActivityForResult(Ui.originalPhotoIntent(), ORIGINAL_GALLERY);
     }
 
     private void sign(String role) {
@@ -482,7 +501,7 @@ public class MainActivity extends Activity {
         if (result != RESULT_OK) return;
         if (request == CAMERA && cameraUri != null) {
             importPhoto(cameraUri, true);
-        } else if (request == GALLERY && data != null) {
+        } else if ((request == GALLERY || request == ORIGINAL_GALLERY) && data != null) {
             if (data.getClipData() != null) {
                 for (int i = 0; i < data.getClipData().getItemCount(); i++) {
                     importPhoto(data.getClipData().getItemAt(i).getUri(), false);
@@ -506,7 +525,8 @@ public class MainActivity extends Activity {
         } else if (request == PHOTO_LOCATION_PERMISSION) {
             if (grants.length == 0 || grants[0] != PackageManager.PERMISSION_GRANTED)
                 Ui.toast(this, "未授权读取照片定位；仍可上传，但原始位置可能不可用");
-            startActivityForResult(Ui.photoPickerIntent(), GALLERY);
+            startActivityForResult(pendingOriginalPick ? Ui.originalPhotoIntent() :
+                    Ui.photoPickerIntent(), pendingOriginalPick ? ORIGINAL_GALLERY : GALLERY);
         }
     }
 

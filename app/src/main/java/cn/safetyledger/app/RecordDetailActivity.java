@@ -42,6 +42,8 @@ public final class RecordDetailActivity extends Activity {
     private static final int PERMISSION = 613;
     private static final int SIGN = 614;
     private static final int PHOTO_LOCATION_PERMISSION = 615;
+    private static final int ORIGINAL_PICK = 616;
+    private boolean pendingOriginalPick;
 
     private LedgerRepository repo;
     private Inspection model;
@@ -204,6 +206,10 @@ public final class RecordDetailActivity extends Activity {
         actions.addView(Ui.horizontalGap(this, 7));
         actions.addView(gallery, Ui.weight(1));
         card.addView(actions);
+        Button original = Ui.secondaryButton(this, "定位未读取？选择原图文件");
+        original.setOnClickListener(view -> pickOriginal("SCENE"));
+        card.addView(Ui.gap(this, 6));
+        card.addView(original);
         card.addView(Ui.gap(this, 7));
         mediaBox = Ui.column(this);
         card.addView(mediaBox);
@@ -269,6 +275,10 @@ public final class RecordDetailActivity extends Activity {
         actions.addView(Ui.horizontalGap(this, 7));
         actions.addView(gallery, Ui.weight(1));
         card.addView(actions);
+        Button original = Ui.secondaryButton(this, "定位未读取？选择原图文件");
+        original.setOnClickListener(view -> pickOriginal("RECTIFICATION"));
+        card.addView(Ui.gap(this, 6));
+        card.addView(original);
 
         recheck = Ui.input(this, "复查说明（可选）");
         recheck.setText(model.recheck);
@@ -321,12 +331,24 @@ public final class RecordDetailActivity extends Activity {
 
     private void pick(String category) {
         pendingCategory = category;
+        pendingOriginalPick = false;
         if (!Ui.hasPhotoLocationPermission(this)) {
             requestPermissions(new String[]{Manifest.permission.ACCESS_MEDIA_LOCATION},
                     PHOTO_LOCATION_PERMISSION);
             return;
         }
         startActivityForResult(Ui.photoPickerIntent(), PICK);
+    }
+
+    private void pickOriginal(String category) {
+        pendingCategory = category;
+        pendingOriginalPick = true;
+        if (!Ui.hasPhotoLocationPermission(this)) {
+            requestPermissions(new String[]{Manifest.permission.ACCESS_MEDIA_LOCATION},
+                    PHOTO_LOCATION_PERMISSION);
+            return;
+        }
+        startActivityForResult(Ui.originalPhotoIntent(), ORIGINAL_PICK);
     }
 
     private void capture(String category) {
@@ -354,7 +376,8 @@ public final class RecordDetailActivity extends Activity {
         else if (request == PHOTO_LOCATION_PERMISSION) {
             if (grants.length == 0 || grants[0] != PackageManager.PERMISSION_GRANTED)
                 Ui.toast(this, "未授权读取照片定位；仍可上传，但原始位置可能不可用");
-            startActivityForResult(Ui.photoPickerIntent(), PICK);
+            startActivityForResult(pendingOriginalPick ? Ui.originalPhotoIntent() :
+                    Ui.photoPickerIntent(), pendingOriginalPick ? ORIGINAL_PICK : PICK);
         }
     }
 
@@ -369,7 +392,7 @@ public final class RecordDetailActivity extends Activity {
         super.onActivityResult(request, result, data);
         if (result != RESULT_OK) return;
         try {
-            if (request == PICK && data != null) {
+            if ((request == PICK || request == ORIGINAL_PICK) && data != null) {
                 if (data.getClipData() != null) {
                     for (int i = 0; i < data.getClipData().getItemCount(); i++) {
                         importPhoto(data.getClipData().getItemAt(i).getUri(), false);
